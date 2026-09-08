@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "sumneko.lua",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "xaver.clang-format",
+        "bufbuild.vscode-buf"
+    ]
+}

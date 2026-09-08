@@ -6,52 +6,50 @@ project(MCPE)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 开启编译警告（便于发现潜在问题）
+if(MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
 # ----------------------------------------------
-# 模块1：引入 FetchContent（CMake 内置的“在线下载”功能）
+# 引入 FetchContent
 # ----------------------------------------------
 include(FetchContent)
 
 # ----------------------------------------------
-# 导入 spdlog（它官方提供了完善的 CMake 支持）
+# 导入 spdlog
 # ----------------------------------------------
 FetchContent_Declare(
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG        v1.13.0          # 稳定版本号
-    GIT_SHALLOW    TRUE             # 浅克隆，避免下载全部历史 commit 导致卡住
+    GIT_TAG        v1.13.0
+    GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(spdlog)
-# 上面这行执行完后，会生成一个叫 spdlog::spdlog 的 CMake 目标（Target）
 
 # ----------------------------------------------
-# 导入 asio（纯头文件库，需手动封装 INTERFACE 库）
+# 导入 asio（纯头文件库）
 # ----------------------------------------------
 FetchContent_Declare(
     asio
     GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
-    GIT_TAG        asio-1-30-2      # 稳定版本号
-    GIT_SHALLOW    TRUE             # 浅克隆，大幅缩短拉取时间
+    GIT_TAG        asio-1-30-2
+    GIT_SHALLOW    TRUE
 )
 
-# 因为 asio 没有 CMakeLists.txt，不能直接用 MakeAvailable，要手动 Pull
 FetchContent_GetProperties(asio)
 if(NOT asio_POPULATED)
     FetchContent_Populate(asio)
-    
-    # 手动创建一个“接口库”（Interface Library，专门给纯头文件库用的）
+
     add_library(asio INTERFACE)
-    
-    # 告诉编译器去 asio 的 include 文件夹找头文件（注意：asio 源码在其仓库的 asio/ 子目录下）
     target_include_directories(asio SYSTEM INTERFACE ${asio_SOURCE_DIR}/asio/include)
-    
-    # 【关键】定义 ASIO_STANDALONE，告诉 asio “我们不使用 Boost，只用标准库”
     target_compile_definitions(asio INTERFACE ASIO_STANDALONE)
 
-    # 引入系统线程库（Linux/Unix 下 Asio 底层必须依赖 pthread）
     find_package(Threads REQUIRED)
     target_link_libraries(asio INTERFACE Threads::Threads)
-    
-    # Windows 平台网络库兼容
+
     if(WIN32)
         target_link_libraries(asio INTERFACE ws2_32 wsock32)
         target_compile_definitions(asio INTERFACE _WIN32_WINNT=0x0A00)
@@ -59,11 +57,51 @@ if(NOT asio_POPULATED)
 endif()
 
 # ----------------------------------------------
-# 创建我们的可执行文件
+# 模块1：mcpe_common 静态库
 # ----------------------------------------------
-add_executable(main_app src/main.cc)
+# 【显式列出源文件，不使用 GLOB】
+add_library(mcpe_common STATIC
+    src/common/hello.cc
+)
 
-# 【核心操作】把两个库链接进来
-# 因为 asio 是 INTERFACE 库，它自带的 include 路径和宏定义会自动传给 main_app
-# spdlog 同理
-target_link_libraries(main_app PRIVATE spdlog::spdlog asio)
+# 导出头文件目录（PUBLIC 使链接者也能获得该路径）
+target_include_directories(mcpe_common PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+# 链接公共库所需的依赖（这里需要 spdlog 和 asio，因为 hello.cc 用了 spdlog）
+target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio)
+
+# 可选：为库目标设置 C++ 标准（继承自项目全局）
+set_target_properties(mcpe_common PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+)
+
+# ----------------------------------------------
+# 可执行文件 main_app
+# ----------------------------------------------
+add_executable(main src/main.cc)
+
+# 链接 mcpe_common（私有链接即可，因为 main 不需要暴露内部依赖）
+target_link_libraries(main PRIVATE mcpe_common)
+
+# ----------------------------------------------
+# 单元测试（仅在开启测试时构建）
+# ----------------------------------------------
+enable_testing()
+
+add_executable(hello_test tests/hello_test.cc)
+
+# 链接 mcpe_common（测试需要调用库函数）
+target_link_libraries(hello_test PRIVATE mcpe_common)
+
+# 将测试注册到 CTest
+add_test(NAME hello_test COMMAND hello_test)
+
+# 也可以给测试目标设置同样的编译标准
+set_target_properties(hello_test PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+)

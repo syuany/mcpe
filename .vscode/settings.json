@@ -1,0 +1,49 @@
+{
+    "clangd.path": "clangd",
+    "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}/build",
+        "--background-index",
+        "--clang-tidy",
+        "--fallback-style=Google"
+    ],
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.formatting": "disabled",
+    "files.associations": {
+        "*.cc": "cpp"
+    },
+    "editor.formatOnSave": true,
+
+    // --- Lua 语言服务与自动格式化配置 (sumneko.lua) ---
+    // "[lua]": {
+    //     "editor.defaultFormatter": "yinfei.luahelper",
+    //     "editor.formatOnSave": true,
+    //     "editor.tabSize": 4,
+    //     "editor.insertSpaces": true
+    // },
+    // "Lua.runtime.version": "Lua 5.4",
+    // "Lua.diagnostics.globals": [
+    //     "skynet"
+    // ],
+    // "Lua.workspace.library": [
+    //     "${workspaceFolder}/skynet/lualib",
+    //     "${workspaceFolder}/lualib"
+    // ],
+    // "Lua.workspace.checkThirdParty": false,
+    // "Lua.format.enable": true,
+    // "Lua.format.defaultConfig": {
+    //     "indent_style": "space",
+    //     "indent_size": "4",
+    //     "max_line_length": "120"
+    // },
+
+    // --- Protobuf 语法与自动格式化配置 ---
+    "[proto]": {
+        "editor.defaultFormatter": "xaver.clang-format",
+        "editor.formatOnSave": true
+    },
+    "[proto3]": {
+        "editor.defaultFormatter": "xaver.clang-format",
+        "editor.formatOnSave": true
+    }
+}
