@@ -58,6 +58,8 @@
   * 提供 `readable_bytes()`、`skip()`、`retrieve()` 游标滑动接口。
 * **DoD（完成定义）**：
   * 类接口符合 RAII 与强异常安全，读取越界时能通过抛出自定义异常或返回 `bool` 保证程序不发生未定义行为。
+  * 解析 API 分四层，职责不混：① 谓词层 `bool hasBytes(n)`（`bool` 只该出现在这里）→ ② 解析层 `std::expected<T, DecodeError> tryReadXxx() noexcept`（定宽类型只可能 `kIncomplete`）→ ③ 严格层 `T readXxx()`（前置条件已满足，违反即 fail-fast）→ ④ 事务层 `ByteBuffer::Mark`。
+  * `makeSpace` 的扩容判定必须用 `writableBytes() + prependableBytes()`（曾误用 `readableBytes()`，导致写满后 append 直接 abort / 堆越界写）。
 * **易错点**：
   * 浮点数转字节序：严禁指针强转 `*(uint32_t*)&f`（违反 Strict Aliasing）；必须使用 `std::memcpy` 拷贝到位域或整型后再进行大端转换。
 * **推荐提交**：`feat(common): implement ByteBuffer with big-endian primitives`
@@ -83,17 +85,23 @@
 * **任务类型**：核心算法 (Unit)
 * **预估耗时**：2 小时
 * **任务目标**：
-  * 依据 Minecraft 协议规范（7-bit MSB 变长编码），实现：
-    * `void write_varint(ByteBuffer& buf, int32_t value);`
-    * `int32_t read_varint(ByteBuffer& buf);`
-    * `void write_varlong(ByteBuffer& buf, int64_t value);`
-    * `int64_t read_varlong(ByteBuffer& buf);`
+  * 依据 Minecraft 协议规范（7-bit MSB 变长编码），在 `mcpe::ByteBuffer` 上实现：
+    * `appendVarInt(int32_t)` / `appendVarLong(int64_t)`
+    * `tryReadVarInt() -> std::expected<int32_t, DecodeError>` / `tryReadVarLong() -> std::expected<int64_t, DecodeError>`
+    * `peekVarInt() const -> std::expected<int32_t, DecodeError>` / `peekVarLong() const -> std::expected<int64_t, DecodeError>`
+    * `readVarInt()` / `readVarLong()`（严格版，仅用于前置条件已满足处）
+  * 定义错误分类 `enum class DecodeError : std::uint8_t { kIncomplete, kMalformed };` 与统一错误契约。
 * **DoD（完成定义）**：
-  * 编码逻辑完全符合 [wiki.vg Data Types](https://wiki.vg/Data_types) 规范。
-  * 解码时当遇到超过 5 个字节（VarInt）或 10 个字节（VarLong）且最高位仍为 1 时，立即抛出协议异常。
+  * 编码逻辑完全符合本地存档 [`reference/wiki.vg/Data_types.txt`](reference/wiki.vg/Data_types.txt) 第 116~174 行的参考实现。
+  * 解码时用满 5 字节（VarInt）/ 10 字节（VarLong）仍带继续位 → 返回 `kMalformed`；数据不足 → 返回 `kIncomplete`。**两者必须是不同的错误码**。
+  * **失败零副作用**：失败时不消费字节、且结果中不携带任何可用值（`std::expected` 的结构性保证），半包可以原样重试。
+  * 对外不引入异常；取值用 `has_value()` / `operator*` / `value_or`，**不用 `.value()`**（错误时会抛）。
+  * 错误路径不打 warn 日志（半包是正常现象）。
 * **易错点**：
-  * 移位变量务必声明为无符号整型（`uint32_t`），避免有符号数算术右移产生高位补 1 死循环。
-  * 负数（如 `-1`）必须能被正确编码为 5 字节（`0xFF 0xFF 0xFF 0xFF 0x0F`）。
+  * 移位变量务必声明为无符号整型（`uint32_t`/`uint64_t`），避免有符号数算术右移产生高位补 1 死循环。
+  * 负数（如 `-1`）必须能被正确编码为 5 字节（`0xFF 0xFF 0xFF 0xFF 0x0F`）；VarLong 的 `-1` 是 10 字节。
+  * `0` 必须编成单字节 `0x00`（用 `do/while`，别用 `while`）。
+  * 移位下标必须取自增前的值：`res |= value << (7 * i)`，写错会让 `128` 解成 `16384`。
 * **推荐提交**：`feat(common): implement VarInt and VarLong codec with overflow check`
 
 ---
@@ -102,7 +110,7 @@
 * **任务类型**：测试验证 (Test)
 * **预估耗时**：1 小时
 * **任务目标**：
-  * 编写 `tests/test_varint.cc`，覆盖官方标准测试用例：
+  * 编写 `tests/test_varint.cc`，覆盖官方标准测试用例（VarInt 与 VarLong 双向编解码）：
     * `0` -> `0x00`
     * `1` -> `0x01`
     * `127` -> `0x7f`
@@ -111,8 +119,10 @@
     * `2147483647` (Int Max) -> `0xff, 0xff, 0xff, 0xff, 0x07`
     * `-1` -> `0xff, 0xff, 0xff, 0xff, 0x0f`
     * `-2147483648` (Int Min) -> `0x80, 0x80, 0x80, 0x80, 0x08`
+  * 以及错误路径：半包 `kIncomplete`、超上限 `kMalformed`、`peek` 不消费、`Mark` 整体回滚、非最短编码的宽容接受。
 * **DoD（完成定义）**：
   * 所有官方测试向量编码解码双向可逆，测试程序退出码为 0。
+  * 全套用例在 `-fsanitize=address,undefined` 下零报告，且**不存在会死循环或 abort 的用例**。
 * **推荐提交**：`test(common): add edge case verification for VarInt`
 
 ---

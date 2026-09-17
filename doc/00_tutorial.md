@@ -77,7 +77,6 @@ mcpe/
 ├── doc/                        # 技术文档与协议备忘
 │   ├── 00_tutorial.md          # 本文：架构推演与阶段路线
 │   ├── 01_tasks_breakdown.md   # 敏捷任务拆解看板（WBS）
-│   ├── 02_cast_cheatsheet.md   # C++ 类型转换与取位速查
 │   ├── 03_protocol_340_cheatsheet.md  # ⭐ 协议 340（1.12.2）包 ID / 字段 / 区块格式唯一权威参考
 │   └── reference/              # ⭐ 离线协议存档（wiki.vg 全站镜像 + 机器可读数据，详见其 README）
 ├── include/                    # 公共头文件（外部暴露或全局定义）
@@ -214,6 +213,68 @@ mcpe/
   很多初学者不知道怎么转 `float` 的字节序。标准做法是：使用 `std::memcpy` 将 `float` 拷贝到 `uint32_t`，使用 `htonl` 翻转字节序，写入 Buffer；读取时反向操作。**严禁使用 C 风格强制类型转换 `*(uint32_t*)&f`**，这会违反类型双发（Strict Aliasing Rule），在 `-O2` 优化下会产生灾难性代码。
 * ⚠️ **符号位扩展与移位陷阱**：
   在处理 VarInt 移位时，操作变量务必使用**无符号类型**（`uint32_t` / `uint8_t`）。有符号数（`int32_t`）做右移操作在 C++ 中是算术右移（符号位补 1），会导致死循环或高位被污染。
+
+#### 5. 错误契约：三种结果，三种处置（本阶段的真正产出）
+
+解析函数的返回值设计，比算法本身更容易埋雷。**必须把下面三种情况区分开**，绝不能压成一个 `bool`：
+
+| 结果 | 触发场景 | 发生频率 | 正确处置 |
+| :--- | :--- | :--- | :--- |
+| `kIncomplete` | TCP 半包：缓冲区里还凑不齐一个完整 VarInt | **极高，完全正常** | 保留读游标，等下一次 `read`；**不打 warn 日志、不断连、不抛异常** |
+| `kMalformed` | 畸形/超上限：用满 5（或 10）字节仍带继续位 | 低，但**外部可控** | 记录并断开连接 |
+| 程序 bug | 调用方没检查就硬读 | 应当为零 | 严格版读函数直接 fail-fast，别静默返回垃圾值 |
+
+三条落地铁律：
+
+1. **失败零副作用**：解析失败时既不消费任何字节，也不改写输出参数。这样"半包 → 原样返回 → 数据补齐后原地重试"永远安全——这正是拆包器（阶段 1）能成立的前提。建议用 RAII 读游标快照（`ByteBuffer::Mark`）把"多字段包体要么全成功、要么全回滚"变成默认行为。
+2. **半包不是错误**：它不该产生异常、更不该产生日志。把它当异常处理，等于让所有网络抖动都走一遍抛/捕路径，既慢又误导代码结构。
+3. **上限判断放在读第 6 / 第 11 个字节之前**，这样 `kMalformed` 和 `kIncomplete` 才是两个可判定的不同状态。
+
+> **关于"不想用异常"**：表驱动异常（Linux/GCC、Clang）在**不抛**的路径上是零开销的，成本只在 `throw` 路径与二进制体积上。但这里用错误码不是性能原因，而是语义原因——**半包是最常见的正常情况**，不该用异常表达。异常留给"这条连接没救了"的终止性事件（协议版本不支持等），并在收包回调边界用**唯一一个** `catch` 统一踢人。参考实现见 `doc/reference/`（Cuberite 在其 `cProtocol_1_8_0::AddReceivedData` 里就是 `if (!ReadVarInt(len)) { ResetRead(); break; }`，失败即回滚、等下一包，全程零异常）。
+
+#### 6. 分层落地：`bool` 只配待在谓词层
+
+很多教程会说"底层返回 `bool` 表示成功失败"（Cuberite 的 `bool ReadVarInt32(UInt32&)` 就是这一派）。这个建议**对谓词成立，对解析结果不成立**：
+
+| 层 | 签名 | 为什么是这个载体 |
+| :--- | :--- | :--- |
+| ① **谓词层** | `bool hasBytes(size_t n)` | 只回答"够不够"，**不存在错误分类**——`bool` 恰好够用，且最快、最直白。拆包器判断"整包到齐没有"就用它 |
+| ② **解析层** | `std::expected<T, DecodeError> tryReadXxx() noexcept` | 有两种语义完全不同的失败，**一个 bit 装不下**。`Result<int32_t, uint8_t>` 只有 8 字节、走寄存器、`noexcept`，性能与 `bool + 出参` 无实测差别 |
+| ③ **严格层** | `T readXxx()` | 前置条件已由调用方保证；违反即程序 bug，Debug 断言 / Release fail-fast |
+| ④ **事务层** | `ByteBuffer::Mark` | 多字段包体"要么全成功、要么全回滚" |
+
+> ⚠️ **只返回 `bool` 的代价（Cuberite 的实证）**：它的 `ReadVarInt32` 只有 `bool` 一条错误通道，于是**畸形包与半包无法区分**——超长输入最终只会让 `NEEDBYTES` 触底返回 `false`，被拆包层当成"数据还不够"而 `ResetRead()` 回滚，那段脏数据永远排不出去，连接既不报错也不断开，一直卡到缓冲区写满才被兜底踢掉。**这就是"用 bool 表达解析结果"的真实故障模式。**
+
+> 🔧 **工具链前提：`std::expected` + clang 需要 clang ≥ 19（踩过一次，记下来）**
+> libstdc++ 把它 gate 在 `bits/version.h` 的 `(__cplusplus >= 202100L) && (__cpp_concepts >= 202002L)`。
+> clang **≤ 18** 只宣称 `__cpp_concepts = 201907L`，于是 libstdc++ 的 `<expected>` 整个不展开，
+> clangd / clang-tidy / clang++ 统一报 `no template named 'expected' in namespace 'std'`
+> （GCC 自己报 `202002L`，所以只有 clang 侧受影响）。
+> LLVM 提交 [2875e24](https://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20240408/565418.html) 明确写着
+> "The forcing function is that libstdc++'s `<expected>` header is guarded by this macro"，
+> 该改动**随 clang 19 发布**。
+>
+> 本项目的处置：保持用标准的 `std::expected`，把 clangd 升到 ≥ 19（Ubuntu 24.04 官方源已有 `clangd-19`）：
+>
+> ```bash
+> sudo apt install -y clangd-19
+> sudo ln -sf /usr/bin/clangd-19 /usr/local/bin/clangd   # /usr/local/bin 在 PATH 中先于 /usr/bin
+> clangd --version                                       # 期望 19.x
+> ```
+>
+> 让 `clangd` 这个名字指向 19 之后，`.vscode/settings.json` 里的 `"clangd.path": "clangd"` 无需改动。
+> ⚠️ 换机器 / 上 CI 时若 clang ≤ 18，会直接编译失败（不只是编辑器报错）—— 要么装 clang ≥ 19，要么只用 GCC。
+
+对照总表：
+
+| 场景 | 载体 |
+| :--- | :--- |
+| "够不够"谓词（`hasBytes`） | `bool` |
+| 网络输入解析（每包每字段） | `std::expected<T, DecodeError>`，`noexcept`；取值只用 `has_value()` / `operator*` / `value_or`，**不用 `.value()`**（错误时会抛） |
+| 半包等待 | 返回值，零日志 |
+| 畸形输入 | 返回值 → 调用方断连 |
+| 自身不变量（不该发生） | `assert`（Debug）/ fail-fast（Release），**绝不用来校验不可信输入** |
+| 终止性事件（版本不符、连接不可恢复） | 语义化命名的异常 + 边界处统一 `catch` |
 
 ---
 

@@ -1,17 +1,45 @@
 #include "include/mcpe/common/ByteBuffer.h"
 
-#include <endian.h>
-#include <netinet/in.h>
-
 #include <algorithm>
 #include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
+
+namespace {
+constexpr uint8_t kValueMask = 0x7F;
+constexpr uint8_t kContinuationBit = 0x80;
+
+/** VarInt / VarLong 解析核心：不消费、不越界、三态返回。
+ *
+ *  UInt      : uint32_t（VarInt）或 uint64_t（VarLong）
+ *  kMaxBytes : 5 或 10 —— 协议规定的字节数上限
+ */
+template <typename UInt, size_t kMaxBytes>
+std::expected<UInt, mcpe::DecodeError> decodeVar(const char* data, size_t available,
+                                                 size_t& consumed) noexcept {
+  UInt value = 0;
+  for (size_t i = 0; i < kMaxBytes; ++i) {
+    if (i >= available) {
+      return std::unexpected(mcpe::DecodeError::kIncomplete);  // 半包：还差字节，等下次 read
+    }
+    const uint8_t byte = static_cast<uint8_t>(data[i]);
+    value |= static_cast<UInt>(byte & kValueMask) << (7 * i);
+    if ((byte & kContinuationBit) == 0) {
+      consumed = i + 1;
+      return value;
+    }
+  }
+  // 用满上限仍带继续位：只有畸形包才会走到这里
+  return std::unexpected(mcpe::DecodeError::kMalformed);
+}
+}  // namespace
 
 void mcpe::ByteBuffer::append(const char* data, size_t len) {
   ensureWritableBytes(len);
@@ -25,113 +53,91 @@ void mcpe::ByteBuffer::append(const void* data, size_t len) {
 
 void mcpe::ByteBuffer::append(std::string_view str) { append(str.data(), str.size()); }
 
-void mcpe::ByteBuffer::appendInt64(int64_t x) {
-  uint64_t be64 = __builtin_bswap64(static_cast<uint64_t>(x));
-  append(&be64, sizeof(be64));
+void mcpe::ByteBuffer::appendVarInt(int32_t value) {
+  uint32_t val = static_cast<uint32_t>(value);
+  do {
+    uint8_t temp = static_cast<uint8_t>(val & kValueMask);
+    val >>= 7;
+    if (val != 0) {
+      temp |= kContinuationBit;
+    }
+    writeBe(temp);
+  } while (val != 0);
 }
 
-void mcpe::ByteBuffer::appendInt32(int32_t x) {
-  uint32_t be32 = htobe32(static_cast<uint32_t>(x));
-  append(&be32, sizeof(be32));
+void mcpe::ByteBuffer::appendVarLong(int64_t value) {
+  uint64_t val = static_cast<uint64_t>(value);
+  do {
+    uint8_t temp = static_cast<uint8_t>(val & kValueMask);
+    val >>= 7;
+    if (val != 0) {
+      temp |= kContinuationBit;
+    }
+    writeBe(temp);
+  } while (val != 0);
 }
 
-void mcpe::ByteBuffer::appendInt16(int16_t x) {
-  uint16_t be16 = htobe16(static_cast<uint16_t>(x));
-  append(&be16, sizeof(be16));
+void mcpe::ByteBuffer::appendString(std::string_view str) {
+  appendVarInt(static_cast<int32_t>(str.size()));
+  append(str.data(), str.size());
 }
 
-void mcpe::ByteBuffer::appendInt8(int8_t x) { append(&x, sizeof(x)); }
-
-// IEEE-754 单精度位模式按网络字节序（大端）追加
-void mcpe::ByteBuffer::appendFloat(float x) {
-  uint32_t be = htobe32(std::bit_cast<uint32_t>(x));
-  append(&be, sizeof(be));
+std::expected<int32_t, mcpe::DecodeError> mcpe::ByteBuffer::peekVarInt() const noexcept {
+  size_t consumed = 0;
+  const auto parsed = decodeVar<uint32_t, kMaxVarIntBytes>(peek(), readableBytes(), consumed);
+  if (!parsed) {
+    return std::unexpected(parsed.error());
+  }
+  return static_cast<int32_t>(*parsed);
 }
 
-void mcpe::ByteBuffer::appendDouble(double x) {
-  uint64_t be = htobe64(std::bit_cast<uint64_t>(x));
-  append(&be, sizeof(be));
+std::expected<int64_t, mcpe::DecodeError> mcpe::ByteBuffer::peekVarLong() const noexcept {
+  size_t consumed = 0;
+  const auto parsed = decodeVar<uint64_t, kMaxVarLongBytes>(peek(), readableBytes(), consumed);
+  if (!parsed) {
+    return std::unexpected(parsed.error());
+  }
+  return static_cast<int64_t>(*parsed);
 }
 
-int64_t mcpe::ByteBuffer::readInt64() {
-  int64_t res = peekInt64();
-  retrieveInt64();
-  return res;
+std::expected<int32_t, mcpe::DecodeError> mcpe::ByteBuffer::readVarInt() noexcept {
+  size_t consumed = 0;
+  const auto parsed = decodeVar<uint32_t, kMaxVarIntBytes>(peek(), readableBytes(), consumed);
+  if (!parsed) {
+    return std::unexpected(parsed.error());  // 失败零副作用：一个字节都不消费
+  }
+  retrieve(consumed);  // 只有成功才推进读游标
+  return static_cast<int32_t>(*parsed);
 }
 
-int32_t mcpe::ByteBuffer::readInt32() {
-  int32_t res = peekInt32();
-  retrieveInt32();
-  return res;
+std::expected<int64_t, mcpe::DecodeError> mcpe::ByteBuffer::readVarLong() noexcept {
+  size_t consumed = 0;
+  const auto parsed = decodeVar<uint64_t, kMaxVarLongBytes>(peek(), readableBytes(), consumed);
+  if (!parsed) {
+    return std::unexpected(parsed.error());
+  }
+  retrieve(consumed);
+  return static_cast<int64_t>(*parsed);
 }
 
-int16_t mcpe::ByteBuffer::readInt16() {
-  int16_t res = peekInt16();
-  retrieveInt16();
-  return res;
+std::expected<std::string, mcpe::DecodeError> mcpe::ByteBuffer::readString(
+    size_t maxBytes) noexcept {
+  Mark mark(*this);
+  const auto len = readVarInt();
+  if (!len) {
+    return std::unexpected(len.error());
+  }
+  if (*len < 0 || static_cast<size_t>(*len) > maxBytes) {
+    return std::unexpected(DecodeError::kMalformed);
+  }
+  const size_t byteLen = static_cast<size_t>(*len);
+  if (!hasBytes(byteLen)) {
+    return std::unexpected(DecodeError::kIncomplete);
+  }
+  std::string result = retrieveAsString(byteLen);
+  mark.commit();
+  return result;
 }
-
-int8_t mcpe::ByteBuffer::readInt8() {
-  int8_t res = peekInt8();
-  retrieveInt8();
-  return res;
-}
-
-float mcpe::ByteBuffer::readFloat() {
-  float res = peekFloat();
-  retrieveFloat();
-  return res;
-}
-
-double mcpe::ByteBuffer::readDouble() {
-  double res = peekDouble();
-  retrieveDouble();
-  return res;
-}
-
-int64_t mcpe::ByteBuffer::peekInt64() const noexcept {
-  assert(readableBytes() >= sizeof(int64_t));
-  uint64_t be64 = 0;
-  ::memcpy(&be64, peek(), sizeof(int64_t));
-  return static_cast<int64_t>(__builtin_bswap64(be64));
-}
-
-int32_t mcpe::ByteBuffer::peekInt32() const noexcept {
-  assert(readableBytes() >= sizeof(int32_t));
-  uint32_t be32 = 0;
-  ::memcpy(&be32, peek(), sizeof(int32_t));
-  return static_cast<int32_t>(be32toh(be32));
-}
-
-int16_t mcpe::ByteBuffer::peekInt16() const noexcept {
-  assert(readableBytes() >= sizeof(int16_t));
-  uint16_t be16 = 0;
-  ::memcpy(&be16, peek(), sizeof(int16_t));
-  return static_cast<int16_t>(be16toh(be16));
-}
-
-int8_t mcpe::ByteBuffer::peekInt8() const noexcept {
-  assert(readableBytes() >= sizeof(int8_t));
-  return static_cast<int8_t>(*peek());
-}
-
-float mcpe::ByteBuffer::peekFloat() const noexcept {
-  assert(readableBytes() >= sizeof(float));
-  uint32_t be32 = 0;
-  ::memcpy(&be32, peek(), sizeof(uint32_t));
-  return std::bit_cast<float>(be32toh(be32));
-}
-
-double mcpe::ByteBuffer::peekDouble() const noexcept {
-  assert(readableBytes() >= sizeof(double));
-  uint64_t be64 = 0;
-  ::memcpy(&be64, peek(), sizeof(double));
-  return std::bit_cast<double>(__builtin_bswap64(be64));
-}
-
-void mcpe::ByteBuffer::writeVarInt(int32_t x) {}
-
-int32_t mcpe::ByteBuffer::readVarInt() {}
 
 void mcpe::ByteBuffer::retrieve(size_t len) noexcept {
   assert(len <= readableBytes());
@@ -156,18 +162,6 @@ std::string mcpe::ByteBuffer::retrieveAsString(size_t len) {
 }
 
 std::string mcpe::ByteBuffer::retrieveAllAsString() { return retrieveAsString(readableBytes()); }
-
-void mcpe::ByteBuffer::retrieveInt64() noexcept { return retrieve(sizeof(int64_t)); }
-
-void mcpe::ByteBuffer::retrieveInt32() noexcept { return retrieve(sizeof(int32_t)); }
-
-void mcpe::ByteBuffer::retrieveInt16() noexcept { return retrieve(sizeof(int16_t)); }
-
-void mcpe::ByteBuffer::retrieveInt8() noexcept { return retrieve(sizeof(int8_t)); }
-
-void mcpe::ByteBuffer::retrieveFloat() noexcept { return retrieve(sizeof(float)); }
-
-void mcpe::ByteBuffer::retrieveDouble() noexcept { return retrieve(sizeof(double)); }
 
 void mcpe::ByteBuffer::retrieveAll() noexcept {
   readerIndex_ = kCheapPrepend;
@@ -210,7 +204,7 @@ void mcpe::ByteBuffer::ensureWritableBytes(size_t len) {
 }
 
 void mcpe::ByteBuffer::makeSpace(size_t len) {
-  if (readableBytes() + prependableBytes() < len + kCheapPrepend) {
+  if (writableBytes() + prependableBytes() < len + kCheapPrepend) {
     buffer_.resize(writerIndex_ + len);
   } else {
     assert(kCheapPrepend < readerIndex_);
@@ -220,4 +214,14 @@ void mcpe::ByteBuffer::makeSpace(size_t len) {
     writerIndex_ = readerIndex_ + readable;
     assert(readable == readableBytes());
   }
+}
+
+const char* mcpe::toString(DecodeError error) noexcept {
+  switch (error) {
+    case DecodeError::kIncomplete:
+      return "kIncomplete(need more data)";
+    case DecodeError::kMalformed:
+      return "kMalformed(protocol limit exceeded)";
+  }
+  return "kUnknown";
 }

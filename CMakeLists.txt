@@ -144,6 +144,22 @@ set_target_properties(test_bytebuffer PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+# VarInt / VarLong 边界极限测试（TASK-0.5）
+add_executable(test_varint
+    tests/test_varint.cc
+)
+
+target_link_libraries(test_varint PRIVATE
+    mcpe_common
+    GTest::gtest_main
+)
+
+set_target_properties(test_varint PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
+gtest_discover_tests(test_varint)
