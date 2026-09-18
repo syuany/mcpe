@@ -50,16 +50,32 @@ class ByteBuffer {
   // 交换两个 Buffer 的内部状态
   void swap(ByteBuffer& rhs) noexcept;
 
-  size_t readableBytes() const noexcept { return writerIndex_ - readerIndex_; }
-  size_t writableBytes() const noexcept { return buffer_.size() - writerIndex_; }
-  size_t prependableBytes() const noexcept { return readerIndex_; }
+  size_t
+  readableBytes() const noexcept {
+    return writerIndex_ - readerIndex_;
+  }
+  size_t
+  writableBytes() const noexcept {
+    return buffer_.size() - writerIndex_;
+  }
+  size_t
+  prependableBytes() const noexcept {
+    return readerIndex_;
+  }
 
-  const char* peek() const noexcept { return begin() + readerIndex_; }
-  char* beginWrite() noexcept { return begin() + writerIndex_; }
+  const char*
+  peek() const noexcept {
+    return begin() + readerIndex_;
+  }
+  char*
+  beginWrite() noexcept {
+    return begin() + writerIndex_;
+  }
 
   void ensureWritableBytes(size_t len);
 
-  void hasWritten(size_t len) noexcept {
+  void
+  hasWritten(size_t len) noexcept {
     assert(len <= writableBytes());
     writerIndex_ += len;
   }
@@ -74,11 +90,17 @@ class ByteBuffer {
   void append(std::string_view str);
 
   // 向末尾追加单个字节（常用原始字节写入）
-  void appendByte(uint8_t byte) { append(&byte, 1); }
+  void
+  appendByte(uint8_t byte) {
+    append(&byte, 1);
+  }
 
   /** ① 谓词层：可读字节是否 ≥ count（不消费、不改状态、不涉及错误分类）。
    *  拆包器用它判断整包是否到齐：if (!buf.hasBytes(packet_len)) return; */
-  [[nodiscard]] bool hasBytes(size_t count) const noexcept { return readableBytes() >= count; }
+  [[nodiscard]] bool
+  hasBytes(size_t count) const noexcept {
+    return readableBytes() >= count;
+  }
 
   // ---------------------------------------------------------------------------
   // 现代 C++ 泛型定宽基础数值读写 (Big-Endian)
@@ -89,7 +111,8 @@ class ByteBuffer {
   /** 以网络字节序（大端 Big-Endian）向末尾追加定长数值 */
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  void writeBe(T value) {
+  void
+  writeBe(T value) {
     if constexpr (sizeof(T) == 1) {
       append(&value, 1);
     } else if constexpr (std::integral<T>) {
@@ -112,7 +135,8 @@ class ByteBuffer {
    *  - 数据足够时转换为主机字节序，消费对应字节并返回结果。 */
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  [[nodiscard]] std::expected<T, DecodeError> readBe() noexcept {
+  [[nodiscard]] std::expected<T, DecodeError>
+  readBe() noexcept {
     if (!hasBytes(sizeof(T))) {
       return std::unexpected(DecodeError::kIncomplete);
     }
@@ -143,7 +167,8 @@ class ByteBuffer {
   /** 非消费安全预览定长数值：成败均不移动读游标 */
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  [[nodiscard]] std::expected<T, DecodeError> peekBe() const noexcept {
+  [[nodiscard]] std::expected<T, DecodeError>
+  peekBe() const noexcept {
     if (!hasBytes(sizeof(T))) {
       return std::unexpected(DecodeError::kIncomplete);
     }
@@ -176,8 +201,8 @@ class ByteBuffer {
 
   [[nodiscard]] std::expected<int32_t, DecodeError> readVarInt() noexcept;
   [[nodiscard]] std::expected<int64_t, DecodeError> readVarLong() noexcept;
-  [[nodiscard]] std::expected<std::string, DecodeError> readString(
-      size_t maxBytes = 32767) noexcept;
+  [[nodiscard]] std::expected<std::string, DecodeError>
+  readString(size_t maxBytes = 32767) noexcept;
 
   [[nodiscard]] std::expected<int32_t, DecodeError> peekVarInt() const noexcept;
   [[nodiscard]] std::expected<int64_t, DecodeError> peekVarLong() const noexcept;
@@ -226,10 +251,14 @@ class ByteBuffer {
     ~Mark() { rollback(); }
 
     /** 确认消费：析构时不再回滚 */
-    void commit() noexcept { buf_ = nullptr; }
+    void
+    commit() noexcept {
+      buf_ = nullptr;
+    }
 
     /** 立即回滚到快照点（幂等，可重复调用） */
-    void rollback() noexcept {
+    void
+    rollback() noexcept {
       if (buf_ != nullptr) {
         buf_->readerIndex_ = pos_;
         buf_ = nullptr;
@@ -243,8 +272,14 @@ class ByteBuffer {
 
  private:
   // 获取底层 vector 内存起始地址指针
-  char* begin() { return buffer_.data(); }
-  const char* begin() const { return buffer_.data(); }
+  char*
+  begin() {
+    return buffer_.data();
+  }
+  const char*
+  begin() const {
+    return buffer_.data();
+  }
 
   // 扩容/碎片整理内部实现：当 writableBytes() < len 时被调用
   void makeSpace(size_t len);

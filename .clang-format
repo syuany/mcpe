@@ -1,3 +1,27 @@
 BasedOnStyle: Google
 IndentWidth: 2
 ColumnLimit: 100
+
+# 让返回值单独成行：
+# - TopLevelDefinitions: 针对所有顶级函数定义（如 .cc 中的成员函数实现），将返回值单独置于首行，函数名下一行顶格；
+#   且不会打碎头文件内短小的单行内联函数（如 readableBytes() 仍可保持单行）。
+# AlwaysBreakAfterReturnType: TopLevelDefinitions
+
+# 当任意函数声明或表达式超过 ColumnLimit 需要折行时，优先在返回值后断行（降低惩罚权重大于换行修饰符）
+PenaltyReturnTypeOnItsOwnLine: 0
+
+# 1. 解决超长返回值：在函数定义时将返回值单独成行                             
+AlwaysBreakAfterReturnType: AllDefinitions  # Clang-Format 14+ 也可以写作 BreakAfterReturnType: AllDefinitions                                            
+                                                                              
+# 2. 解决参数换行：超长时禁止多个参数挤在同一行                               
+BinPackParameters: false                                                      
+                                                                              
+# 3. 禁止将“所有参数作为一个整体”全推到下一行                                 
+AllowAllParametersOfDeclarationOnNextLine: false                              
+                                                                              
+# 4. 参数换行后的对齐方式（二选一）：                                         
+# 选项 A (Align): 传统 Google 风格，后续参数与第一行的 '(' 对齐               
+AlignAfterOpenBracket: Align                                                  
+                                                                              
+# 选项 B (BlockIndent): 现代工业界推荐风格，'(' 后立即换行，每行缩进 4 格，')' 单独一行                                                                        
+# AlignAfterOpenBracket: BlockIndent

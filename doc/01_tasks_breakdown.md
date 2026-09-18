@@ -133,9 +133,10 @@
 
 ---
 
-### [ ] TASK-1.1: [Spike] Wireshark 抓包分析与报文 Hex 留存
+### [x] TASK-1.1: [Spike] Wireshark 抓包分析与报文 Hex 留存
 * **任务类型**：技术探针 (Spike)
 * **预估耗时**：1 小时
+* **产出文档**：详见 [`doc/packets_hex_dump.md`](packets_hex_dump.md)
 * **任务目标**：
   * 开启 Wireshark 监听 `Loopback: lo`，端口 `25565`。
   * 启动任意现成的 Minecraft 服务端（或模拟客户端请求），刷新列表，捕获握手与 Ping 过程。
@@ -181,6 +182,7 @@
 ### [ ] TASK-1.4: 协议数据包拆包器（Packet Framing）
 * **任务类型**：协议核心 (Core)
 * **预估耗时**：3 小时
+* **技术与面试专题**：详见 [`doc/05_tcp_framing_and_network_interview_qa.md`](05_tcp_framing_and_network_interview_qa.md)
 * **任务目标**：
   * 在 `TcpSession` 内部维护一块累积接收缓冲区。
   * 按照 `[Packet Length: VarInt] + [Packet ID: VarInt] + [Payload]` 格式实现拆包逻辑：
