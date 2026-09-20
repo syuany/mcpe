@@ -180,7 +180,24 @@ set_target_properties(test_varint PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+# TcpSession 消息队列与并发安全测试（TASK-1.3）
+add_executable(test_tcp_session
+    tests/test_tcp_session.cc
+)
+
+target_link_libraries(test_tcp_session PRIVATE
+    mcpe_network
+    mcpe_common
+    GTest::gtest_main
+)
+
+set_target_properties(test_tcp_session PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
 gtest_discover_tests(test_varint)
+gtest_discover_tests(test_tcp_session)

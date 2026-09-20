@@ -21,7 +21,7 @@ AllowAllParametersOfDeclarationOnNextLine: false
                                                                               
 # 4. 参数换行后的对齐方式（二选一）：                                         
 # 选项 A (Align): 传统 Google 风格，后续参数与第一行的 '(' 对齐               
-AlignAfterOpenBracket: Align                                                  
+# AlignAfterOpenBracket: Align                                                  
                                                                               
 # 选项 B (BlockIndent): 现代工业界推荐风格，'(' 后立即换行，每行缩进 4 格，')' 单独一行                                                                        
-# AlignAfterOpenBracket: BlockIndent
+AlignAfterOpenBracket: BlockIndent
