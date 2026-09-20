@@ -177,8 +177,20 @@ target_link_libraries(test_tcp_session PRIVATE
     GTest::gtest_main
 )
 
+# PacketFraming 测试（TASK-1.4）
+add_executable(test_framing
+    tests/test_framing.cc
+)
+
+target_link_libraries(test_framing PRIVATE
+    mcpe_network
+    mcpe_common
+    GTest::gtest_main
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
 gtest_discover_tests(test_varint)
 gtest_discover_tests(test_tcp_session)
+gtest_discover_tests(test_framing)

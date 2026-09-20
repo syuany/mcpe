@@ -44,6 +44,8 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
 
   std::array<char, 4096> read_buffer_;
 
+  ByteBuffer cumulative_buf_;
+
   std::deque<ByteBuffer> write_queue_;
   bool is_writing_{false};
 

@@ -2,10 +2,12 @@
 
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
 #include <asio/error_code.hpp>
 #include <asio/write.hpp>
 #include <cstddef>
+
+#include "mcpe/common/ByteBuffer.h"
+#include "mcpe/network/PacketFraming.h"
 
 namespace mcpe::network {
 
@@ -66,7 +68,27 @@ TcpSession::doRead() {
         if (is_stopped_) return;
 
         if (!ec) {
-          spdlog::debug("[Session] Read {} bytes from {}", bytes_transferred, remote_address_);
+          cumulative_buf_.append(read_buffer_.data(), bytes_transferred);
+
+          while (true) {
+            auto frame_res = PacketFraming::slicePacket(cumulative_buf_);
+            if (!frame_res) {
+              if (frame_res.error() == FramingError::kIncomplete) {
+                break;
+              }
+              spdlog::error("[Session] Malformed packet from {}, disconnect!", remote_address_);
+              stop();
+              return;
+            }
+
+            ByteBuffer packet = std::move(*frame_res);
+            // TODO
+
+            spdlog::debug(
+                "[Session] Slice complete packet with {} bytes from {}", bytes_transferred,
+                remote_address_
+            );
+          }
           doRead();
         } else {
           if (ec == asio::error::eof || ec == asio::error::connection_reset) {
