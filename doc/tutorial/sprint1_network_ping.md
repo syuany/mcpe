@@ -22,6 +22,12 @@
   - [TASK-1.9: Sprint 1 集成验收与原版客户端联调](#task-19-sprint-1-集成验收与原版客户端联调)
 - [四、 自动化调试利器：Python 极速探测验证脚本](#四-自动化调试利器python-极速探测验证脚本)
 - [五、 Sprint 1 避坑与面试高频考点速查表](#五-sprint-1-避坑与面试高频考点速查表)
+- [六、 权威源码对照与推荐参考资源（Cuberite & Muduo 精准导读）](#六-权威源码对照与推荐参考资源cuberite--muduo-精准导读)
+  - [6.1 Cuberite 开源仓库精确定位与对照清单](#61-cuberite-开源仓库精确定位与对照清单)
+  - [6.2 学其精华：Cuberite 的优秀设计模式](#62-学其精华cuberite-的优秀设计模式)
+  - [6.3 弃其糟粕：Cuberite 的设计缺陷与本项目现代 C++23 升级](#63-弃其糟粕cuberite-的设计缺陷与本项目现代-c23-升级)
+  - [6.4 Muduo 源码精准映射（从经典 Reactor 到 Asio 游戏网关）](#64-muduo-源码精准映射从经典-reactor-到-asio-游戏网关)
+  - [6.5 本地免翻墙离线资源清单（最高优先级）](#65-本地免翻墙离线资源清单最高优先级)
 
 ---
 
@@ -1239,3 +1245,145 @@ python3 scripts/test_ping.py
 | **3** | **客户端报“协议错误”或断连** | VarInt 长度未处理半包；直接把不完整的字节当作有效长度消费，导致后续所有字节偏移错位。 | **事务性回滚**：使用 `ByteBuffer::peekVarInt()` 与 `Mark` 机制，半包时绝不消费任何字节，等待更多数据到来。 |
 | **4** | **多人游戏列表无限菊花，算不出延迟** | 将 `Ping/Pong` 的时间戳当作 `VarInt` 或 `Int`（4 字节）解析。 | 协议铁律：Ping/Pong 载荷严格为 **8 字节大端定长整数**（`int64_t`），用 `readBe<int64_t>()` / `writeBe<int64_t>()` 读写。 |
 | **5** | **客户端显示红叉“不兼容的协议版本”** | Status JSON 中的 `protocol` 填错（例如填成 1.8 的 47），或者没有对应 `"name": "1.12.2"`。 | 严格填报 Protocol ID `340` 和名称 `"1.12.2"`。 |
+
+---
+
+## 六、 权威源码对照与推荐参考资源（Cuberite & Muduo 精准导读）
+
+在工业级 C++ 开发中，“**读优秀的开源参考代码**”是快速建立架构直觉的最短路径。除了 Minecraft 同款业务服务端 **[Cuberite](https://github.com/cuberite/cuberite)** 之外，国内几乎人手一本的陈硕老师经典网络库 **[muduo](https://github.com/chenshuo/muduo)** 更是理解网络底座、拆包器与生命周期管理的极品教材！
+
+为了避免你在 Cuberite 庞大的数十万行代码里“大海捞针”，下面精确为你标出**每个任务对应 Cuberite 的哪个文件、哪个函数、第几行**，以及**哪些可以直接借鉴、哪些存在历史缺陷绝不能学**。
+
+---
+
+### 6.1 Cuberite 开源仓库精确定位与对照清单
+
+> 官方仓库：`https://github.com/cuberite/cuberite`
+
+| Sprint 1 任务 | Cuberite 对应源文件路径 | 核心类与函数 | 对照学习核心点 |
+| :--- | :--- | :--- | :--- |
+| **TASK-1.2: 网络连接与会话骨架** | `src/ClientHandle.h`<br>`src/ClientHandle.cpp` | `cClientHandle::DataReceived()`<br>`cClientHandle::Destroy()` | 观察 Cuberite 如何抽象单个客户端连接、如何在底层断开时清理 Session。 |
+| **TASK-1.4: 拆包器（Packet Framing）** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::AddReceivedData()` | **必读经典**！学习其外层 `while` 循环切包结构：`ReadVarInt32(PacketLen)` -> 检查载荷是否到齐 -> 切割交由下游。 |
+| **TASK-1.5: 握手识别与状态切换** | `src/Protocol/ProtocolRecognizer.h`<br>`src/Protocol/ProtocolRecognizer.cpp` | `cProtocolRecognizer::TryRecognizeProtocol()` | 学习 Cuberite 如何在收到连接的第一秒，解析 Handshake 并根据 `NextState`（1 还是 2）决定转入 Status 还是绑定 Protocol。 |
+| **TASK-1.6: Handshake 包字段解析** | `src/Protocol/ProtocolRecognizer.cpp` | `cProtocolRecognizer::HandleHandshake()` | 查看原版 Handshake 4 个字段的解包顺序：`ProtocolVersion` (VarInt)、`Host` (String)、`Port` (Short)、`NextState` (VarInt)。 |
+| **TASK-1.7: Status Request 与 MOTD JSON** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::HandlePacketStatusRequest()`<br>`cProtocol_1_8_0::SendResponse()` | 查看 Cuberite 如何组装 JSON 格式描述、如何向客户端下发带 VarInt 字符串长度前缀的响应包。 |
+| **TASK-1.8: Ping 与 Pong 时间戳回送** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::HandlePacketStatusPing()`<br>`cProtocol_1_8_0::SendPingResponse()` | **铁证对照**：查看其源码 `Int64 Timestamp; a_ByteBuffer.ReadBEInt64(Timestamp);`，再次证实此处必须是 **8 字节大端整数**！ |
+
+---
+
+### 6.2 学其精华：Cuberite 的优秀设计模式
+
+1. **协议层与网络层解耦架构（Protocol vs ClientHandle）**：
+   * Cuberite 中，`cClientHandle` 负责 Socket I/O、环形缓冲与高层事件（如玩家移动）。
+   * `cProtocol` 纯粹负责**二进制编解码与封包**，不掺杂任何具体玩家业务逻辑。
+   * 这与本项目中 `TcpSession`（网络传输）与 `PacketRouter` / `StatusHandler`（协议解耦）的分层思想完全契合。
+
+2. **版本继承链（Base Protocol 1.8）**：
+   * 在 Cuberite 中，`cProtocol_1_9_0`、`cProtocol_1_12_2` 均继承自 `cProtocol_1_8_0`。
+   * 因为 1.8 引入的 VarInt 长度定界帧格式（Framing）和 Server List Ping 流程，在 1.12.2 中完全没有改变！因此 Cuberite 的 1.12.2 列表探测直接复用了 `Protocol_1_8.cpp` 的逻辑。你在实现 Sprint 1 时，看 `Protocol_1_8.cpp` 是最权威准确的。
+
+---
+
+### 6.3 弃其糟粕：Cuberite 的设计缺陷与本项目现代 C++23 升级
+
+Cuberite 是十多年前启动的老项目，存在不少受限于老旧标准（C++03/C++11）的妥协设计。**切勿直接照抄**：
+
+| 设计维度 | Cuberite 的老旧做法 | 存在的问题/故障模式 | 本项目（MCPE）现代 C++23 做法 |
+| :--- | :--- | :--- | :--- |
+| **拆包错误模型** | `bool ReadVarInt32(UInt32 & a_Value)` 只返回 `bool` | **无法区分“半包”与“畸形包”**：面对超过 5 字节的恶意 VarInt，返回 `false` 被外层当成半包 `ResetRead()` 回滚，导致恶意数据卡死在 Buffer 里无法排出。 | 返回 `std::expected<int32_t, DecodeError>`：清晰区分 `kIncomplete`（静默等待）与 `kMalformed`（立即切断恶意连接）。 |
+| **I/O 并发模型** | 自定义 `cSocket` 与多线程 `select` / `poll` 轮询 | 代码繁重（数千行底层套接字封装），跨平台胶水代码多，无法利用现代内核事件通知（epoll/kqueue/IOCP）的最佳抽象。 | 采用工业级 **Asio 异步 Proactor 风格模型** + `io_context`，天然具备高性能、低开销、跨平台高并发能力。 |
+| **生命周期安全** | 手工裸指针、粗粒度互斥锁、老式引用计数 | 异步回调时容易因生命周期悬空出现野指针，多线程竞态排查困难。 | 严格遵守 **`std::enable_shared_from_this`** 智能指针自保原则；异步回调必捕获 `self`。 |
+| **JSON 组装** | 字符串反复加减拼接（`AString Response = "{\"version\":...";`） | 堆内存碎片多，代码可读性差，转义符号极其杂乱。 | 使用 C++23 原生**原始字符串字面量（Raw String Literals）** + **`std::format`**，极简优雅零外部依赖。 |
+
+---
+
+### 6.4 Muduo 源码精准映射（从经典 Reactor 到 Asio 游戏网关）
+
+如果你此前读过陈硕老师的《Linux多线程服务端编程》或看过 **[muduo](https://github.com/chenshuo/muduo)** 源码，你其实已经掌握了高性能网络编程 80% 的心智底座！
+
+下面精准列出 Muduo 中与 Sprint 1 核心任务对应的源文件、函数与设计模式映射，教你如何将 Muduo 的经验“无缝升级”到本项目中：
+
+#### ① 连接抽象与生命周期管理（对应 TASK-1.2）
+* **Muduo 源文件**：`muduo/net/TcpConnection.h` / `TcpConnection.cc`
+* **核心类/函数**：
+  * `class TcpConnection : public std::enable_shared_from_this<TcpConnection>`
+  * `TcpConnection::connectEstablished()` / `TcpConnection::connectDestroyed()`
+  * `TcpConnection::handleClose()`
+* **映射到本项目**：
+  * 对标类：`mcpe::network::TcpSession`。
+  * **设计精髓**：陈硕在书中反复强调的“**基于智能指针的对象生命周期管理**”——`TcpConnection` 继承 `enable_shared_from_this`，在所有的内部回调中绑定 `shared_from_this()`，以延长自身的生命周期直到回调结束。
+  * **Asio 升级点**：Muduo 是在注册的 Channel 事件中绑定的；而在 Asio 中，我们在每一个 `socket_.async_read_some(...)` 和 `asio::async_write(...)` 的 lambda 里捕获 `self = shared_from_this()`，底层的生命周期“自保”哲学完全一致！
+
+#### ② 发送缓冲区与并发安全（对应 TASK-1.3）
+* **Muduo 源文件**：`muduo/net/TcpConnection.cc`
+* **核心函数**：
+  * `TcpConnection::sendInLoop(const void* data, size_t len)`
+  * `TcpConnection::handleWrite()`
+* **映射到本项目**：
+  * 对标机制：`TcpSession::sendPacket()` 与 `std::deque<ByteBuffer> write_queue_`。
+  * **设计精髓**：
+    1. Muduo 发送时，如果 `outputBuffer_` 为空且当前没有在关注可写事件，会尝试直接写一次网卡（`::write()`）；
+    2. 如果一次没写完，或者当前本身就有数据积压，**绝对不能盲目继续写**，而是将未写完的数据追加到发送缓冲区 `outputBuffer_`，并向 EventLoop 注册 `POLLOUT` 可写事件，排队等待 `handleWrite()` 慢慢消费。
+  * **Asio 升级点**：Muduo 是 Reactor（通知就绪后用户写）；Asio 是 Proactor（用户投递写任务，内核通知写完成）。因此在 Asio 下，我们无需自己监听 `POLLOUT`，直接用一个简单的 `std::deque<ByteBuffer> write_queue_` + `bool is_writing_` 就能以极少代码实现更优雅、绝不并发冲突的串行写入！
+
+#### ③ 长度前缀定界拆包器（对应 TASK-1.4）
+* **Muduo 源文件**：`examples/protobuf/codec/codec.h` / `codec.cc`
+* **核心函数**：
+  * `LengthHeaderCodec::onMessage(const TcpConnectionPtr& conn, Buffer* buf, Timestamp receiveTime)`
+* **映射到本项目**：
+  * 对标类：`mcpe::network::PacketFraming::slicePacket(ByteBuffer& recv_buf)`。
+  * **设计精髓**（陈硕的教科书级拆包范式）：
+    ```cpp
+    // muduo 的典型长度拆包循环 (examples/protobuf/codec/codec.cc)
+    while (buf->readableBytes() >= kHeaderLen) {
+      const void* data = buf->peek();
+      int32_t be32 = *static_cast<const int32_t*>(data);
+      const int32_t len = sockets::networkToHost32(be32);
+      if (len > kMaxMessageLen || len < 0) {
+        conn->shutdown(); // 超长或负数：非法攻击，掐线！
+        break;
+      } else if (buf->readableBytes() >= len + kHeaderLen) {
+        buf->retrieve(kHeaderLen); // 消费包头
+        messageCallback_(conn, message, receiveTime); // 派发完整消息
+      } else {
+        break; // 半包：数据不够一个整包，静默等待下一次 read
+      }
+    }
+    ```
+  * **Minecraft 协议进化点**：
+    * Muduo 的头部是固定的 4 字节整数（`kHeaderLen = 4`）；而 Minecraft 协议采用 **1~5 字节变长的 VarInt**。
+    * 因此，不能简单用 `readableBytes() >= 4` 判断，而是要用我们在 Sprint 0 实现的 `recv_buf.peekVarInt()`。
+    * 但**外层 while 循环、peek 预读、防 OOM 边界防御、半包退出等待、全包 retrieve 消费的算法结构 100% 相同**！
+
+#### ④ 预留头部零拷贝设计（对应 Sprint 0 & 1 的 `ByteBuffer`）
+* **Muduo 源文件**：`muduo/net/Buffer.h` / `Buffer.cc`
+* **核心常量/设计**：
+  * `static const size_t kCheapPrepend = 8;`
+  * `readerIndex_` / `writerIndex_` 双游标。
+  * `prepend(const void* data, size_t len)`
+* **映射到本项目**：
+  * 对标类：`mcpe::common::ByteBuffer`。
+  * **设计精髓**：Muduo 创造性地在 Buffer 头部预留了 8 字节的 `kCheapPrepend`。当你要发送一个业务包时，先在可写区序列化好 Payload，最后直接调用 `prepend()` 把最外层的长度头追加在头部，**全程零内存重新分配、零内存搬移拷贝**！我们在 Sprint 0 实现的 `ByteBuffer` 也继承了这个优秀特性。
+
+#### ⑤ 协议消息分发路由器（对应 TASK-1.5 的 `PacketRouter`）
+* **Muduo 源文件**：`examples/protobuf/codec/dispatcher.h`
+* **核心类**：`ProtobufDispatcher`
+* **映射到本项目**：
+  * 对标类：`mcpe::protocol::PacketRouter`。
+  * **设计精髓**：陈硕在此展示了如何使用 `std::map<Descriptor*, Callback>` 回调表代替冗长的 `switch-case`。在我们的 Minecraft 协议中，我们在 `PacketRouter` 中按 `(ConnectionState, PacketID)` 建立清晰的业务派发矩阵。
+
+---
+
+### 6.5 本地免翻墙离线资源清单（最高优先级）
+
+无需在网上到处寻找不可靠的二手博客，本项目根目录的 `doc/` 已经为你整理好了一套“离线黄金资料库”：
+
+1. **真实网络报文基准（Ground Truth）**：
+   * 📄 [`doc/packets_hex_dump.md`](file:///home/ubu/dev/my/mcpe/doc/packets_hex_dump.md)：Sprint 1 TASK-1.1 用 Wireshark 在网卡上抓取下来的真实十六进制数据，逐字节标注了每一个 VarInt 和 JSON 字段，代码写不通时拿它当尺子量。
+2. **协议 340 权威速查**：
+   * 📄 [`doc/03_protocol_340_cheatsheet.md`](file:///home/ubu/dev/my/mcpe/doc/03_protocol_340_cheatsheet.md)：本项目的唯一定义基准，所有包 ID（如 Handshake 0x00, Status 0x00, Ping 0x01）与字段类型一应俱全。
+3. **权威协议百科全书（本地镜像）**：
+   * 📄 [`doc/reference/wiki.vg/Server_List_Ping.html`](file:///home/ubu/dev/my/mcpe/doc/reference/wiki.vg/Server_List_Ping.html)（文本版：[Server_List_Ping.txt](file:///home/ubu/dev/my/mcpe/doc/reference/wiki.vg/Server_List_Ping.txt)）：官方 Wiki 关于 Server List Ping 交互过程的唯一权威原始文档。
+4. **机器可读 1.12.2 协议定义**：
+   * 📄 `doc/reference/minecraft-data/1.12.2/protocol.json`：PrismarineJS 提取的机器可读 JSON，包含所有包名、状态机对应关系。
+

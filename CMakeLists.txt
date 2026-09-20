@@ -79,7 +79,7 @@ if(NOT asio_POPULATED)
 endif()
 
 # ----------------------------------------------
-# 模块1：mcpe_common 静态库
+# 模块1: mcpe_common 静态库
 # ----------------------------------------------
 # 【显式列出源文件，不使用 GLOB】
 add_library(mcpe_common STATIC
@@ -102,12 +102,33 @@ set_target_properties(mcpe_common PROPERTIES
 )
 
 # ----------------------------------------------
+# 模块2: mcpe_network 静态库
+# ----------------------------------------------
+add_library(mcpe_network STATIC
+    src/network/TcpSession.cc
+    src/network/TcpServer.cc
+)
+
+target_include_directories(mcpe_network PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(mcpe_network PUBLIC mcpe_common)
+
+# 可选：为库目标设置 C++ 标准（继承自项目全局）
+set_target_properties(mcpe_common PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+)
+
+# ----------------------------------------------
 # 可执行文件 main_app
 # ----------------------------------------------
 add_executable(main src/main.cc)
 
 # 链接 mcpe_common（私有链接即可，因为 main 不需要暴露内部依赖）
-target_link_libraries(main PRIVATE mcpe_common)
+target_link_libraries(main PRIVATE mcpe_common mcpe_network)
 
 # ----------------------------------------------
 # 单元测试（仅在开启测试时构建）
