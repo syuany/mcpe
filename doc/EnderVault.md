@@ -1,13 +1,17 @@
-针对 **项目二（基于 Go + gRPC 的分布式游戏数据中心与资产微服务）**，同样为你提供一份无需贴大段代码的**保姆级规划与任务拆解**。
+# EnderVault：基于 Go + gRPC 的分布式游戏数据中心与资产微服务
 
-该项目将与项目一（C++ 游戏网关）完美联动，补齐简历在 **微服务通信、缓存架构（Redis）、数据库持久化（MySQL）及并发数据一致性** 上的核心技术点。
+> **项目命名**：**EnderVault（末影宝库）** —— 取自 Minecraft **末影箱（Ender Chest）**“跨维度/跨空间共享且持久一致”的特性，隐喻分布式跨服玩家数据与资产持久化中心。  
+> **工程架构**：作为 `mcpe` 项目的 **Monorepo（单体大仓）子服务**，源码存放于 `services/endervault/`，共享根目录下的跨语言 `proto/` 契约，支持随 `mcpe` 启动时自动伴随拉起与优雅停止。
+
+该项目将与项目一（C++ 游戏网关 `mcpe`）完美联动，补齐简历在 **跨语言微服务通信、缓存架构（Redis）、数据库持久化（MySQL）及并发数据一致性** 上的核心技术点。
 
 ---
 
-### 一、 技术选型与技术基准
+### 一、 技术选型、工程布局与协同拉起机制
 
+#### 1. 技术栈选型
 * **开发语言**：Go (Golang 1.20+)
-  * *优势*：语法精简、内置原生高并发（Goroutine）、极易与 C++ 共享 Protobuf 协议。
+  * *优势*：语法精简、内置原生高并发（Goroutine）、标准库完善、极易与 C++ 共享 Protobuf 协议。
 * **开发耗时预估**：**2.5 周（约 18~20 天）**（前 3 天学习 Go 基础，后 2 周专注于工程实现与压测）。
 * **核心技术栈选型**：
   * **RPC 通信**：`google.golang.org/grpc` + `google.golang.org/protobuf`
@@ -15,6 +19,39 @@
   * **缓存与分布式组件**：Redis 7.0 + `github.com/redis/go-redis/v9`
   * **鉴权与配置**：`golang-jwt/jwt/v5`、`spf13/viper`、`uber-go/zap`（高性能日志）
   * **性能分析与压测**：Go 原生 `pprof` + `ghz`（专门用于 gRPC 压测的工具）
+
+#### 2. Monorepo 工程目录规划
+```bash
+mcpe/                         # 根项目 (Monorepo)
+├── CMakeLists.txt            # 顶层构建脚本
+├── proto/                    # ⭐️ 跨语言核心契约 (单处修改，双端生成)
+│   └── game_service.proto    # 定义 AuthService, PlayerDataService, RankService
+├── include/mcpe/             # C++ 头文件
+├── src/                      # C++ 网关与场景同步引擎源码
+├── services/
+│   └── endervault/           # ⭐️ EnderVault Go 微服务子项目 (独立 go.mod)
+│       ├── go.mod
+│       ├── go.sum
+│       ├── main.go
+│       ├── config/           # MySQL / Redis 连接配置 (yaml)
+│       └── internal/
+│           ├── auth/         # JWT 鉴权与 bcrypt 密码哈希
+│           ├── storage/      # MySQL GORM 乐观锁 / Redis Cache-Aside
+│           └── server/       # gRPC Server 实现桩
+└── scripts/
+    ├── generate_proto.sh     # 一键同时生成 C++ 和 Go 的桩代码
+    └── dev_run.sh            # ⭐️ 一键协同启动与就绪探针脚本
+```
+
+#### 3. 伴随 C++ 网关自动启动机制（二选一或结合使用）
+* **方案 A：脚本/编排级自动拉起（推荐工业级标准）**
+  * 在 `scripts/dev_run.sh` 中一键拉起 Redis/MySQL，后台启动 `endervault`；
+  * 执行端口健康探针（等待 `127.0.0.1:50051` 就绪），随后启动 C++ `mcpe`；
+  * 注册退出钩子 `trap "kill -SIGTERM $GO_PID" EXIT`，实现单命令一键启停与优雅退出。
+* **方案 B：C++ 进程内直接拉起子进程（单可执行文件体验）**
+  * 在 `mcpe` 的 `main.cc` 启动时，检查 `./bin/endervault` 可执行文件；
+  * 使用 `fork()` + `execl()` 派生 Go 服务子进程，利用 Linux `prctl(PR_SET_PDEATHSIG, SIGTERM)` 确保父进程异常崩溃时子进程自动退出，防止孤儿/僵尸进程；
+  * `mcpe` 捕获 `SIGINT`/`SIGTERM` 时向子进程下发终止信号并通过 `waitpid` 回收资源。
 
 ---
 
@@ -141,7 +178,7 @@
 
 ---
 
-#### **项目名称：基于 Go + gRPC 的分布式游戏数据中台与资产微服务**
+#### **项目名称：EnderVault - 基于 Go + gRPC 的分布式游戏数据中心与资产微服务**
 
 * **项目定位**：基于 Go 语言与 gRPC 框架构建的高并发、低延迟分布式中心微服务系统，负责对接高性能游戏网关，承载玩家跨服分布式鉴权、数据持久化事务及全服实时排行榜等核心业务。
 * **核心职责与技术实现**：

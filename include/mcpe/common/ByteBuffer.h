@@ -13,24 +13,16 @@
 #include <string_view>
 #include <vector>
 
-namespace mcpe {
+#include "mcpe/common/VarInt.h"
 
-/** 解析错误分类（两种语义完全不同，禁止压成一个 bool）：
- *  - kIncomplete 数据不足（TCP 半包）。这是正常控制流：保留读游标、等下一次 read，
- *                不要打 warn 日志、不要断连、更不要当异常抛。
- *  - kMalformed  畸形或突破协议上限（VarInt > 5 字节 / VarLong > 10 字节 / 字符串越界）。
- *                属于不可信输入，应当断开连接。
- *
- *  统一契约（所有解析函数都遵守）：失败零副作用 —— 失败时既不消费任何字节，
- *  也不产生任何可用值。因此"半包 → 原样返回 → 下次数据到了重试"永远安全。 */
-enum class DecodeError : std::uint8_t { kIncomplete, kMalformed };
+namespace mcpe {
 
 class ByteBuffer {
  public:
   static constexpr size_t kCheapPrepend = 8;
   static constexpr size_t kInitialSize = 1024;
-  static constexpr size_t kMaxVarIntBytes = 5;
-  static constexpr size_t kMaxVarLongBytes = 10;
+  static constexpr size_t kMaxVarIntBytes = varint::kMaxVarIntBytes;
+  static constexpr size_t kMaxVarLongBytes = varint::kMaxVarLongBytes;
 
   ByteBuffer(size_t initialSize = kInitialSize)
       : buffer_(kCheapPrepend + initialSize),
@@ -197,15 +189,25 @@ class ByteBuffer {
   // ---------------------------------------------------------------------------
   void appendVarInt(int32_t value);
   void appendVarLong(int64_t value);
+  void prependVarInt(int32_t value);
   void appendString(std::string_view str);
 
   [[nodiscard]] std::expected<int32_t, DecodeError> readVarInt() noexcept;
   [[nodiscard]] std::expected<int64_t, DecodeError> readVarLong() noexcept;
+
+  /** 读取 VarInt / VarLong 并返回数值及实际消费的字节数（成功时推进读游标） */
+  [[nodiscard]] std::expected<VarIntResult, DecodeError> readVarIntWithBytes() noexcept;
+  [[nodiscard]] std::expected<VarLongResult, DecodeError> readVarLongWithBytes() noexcept;
+
   [[nodiscard]] std::expected<std::string, DecodeError>
   readString(size_t maxBytes = 32767) noexcept;
 
   [[nodiscard]] std::expected<int32_t, DecodeError> peekVarInt() const noexcept;
   [[nodiscard]] std::expected<int64_t, DecodeError> peekVarLong() const noexcept;
+
+  /** 预览 VarInt / VarLong 并返回数值及占用的字节数（零副作用，不移动读游标） */
+  [[nodiscard]] std::expected<VarIntResult, DecodeError> peekVarIntWithBytes() const noexcept;
+  [[nodiscard]] std::expected<VarLongResult, DecodeError> peekVarLongWithBytes() const noexcept;
 
   // 消费/移出 len 字节已读数据（向前移动 readerIndex_）
   void retrieve(size_t len) noexcept;
@@ -288,9 +290,6 @@ class ByteBuffer {
   size_t readerIndex_;
   size_t writerIndex_;
 };
-
-/** 日志友好的错误名（禁止用于业务判断，业务判断请直接比较枚举值） */
-[[nodiscard]] const char* toString(DecodeError error) noexcept;
 
 }  // namespace mcpe
 

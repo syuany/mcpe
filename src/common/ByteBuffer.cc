@@ -1,7 +1,6 @@
 #include "include/mcpe/common/ByteBuffer.h"
 
 #include <algorithm>
-#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -13,35 +12,6 @@
 #include <utility>
 
 using namespace mcpe;
-
-namespace {
-constexpr uint8_t kValueMask = 0x7F;
-constexpr uint8_t kContinuationBit = 0x80;
-
-/** VarInt / VarLong 解析核心：不消费、不越界、三态返回。
- *
- *  UInt      : uint32_t（VarInt）或 uint64_t（VarLong）
- *  kMaxBytes : 5 或 10 —— 协议规定的字节数上限
- */
-template <typename UInt, size_t kMaxBytes>
-std::expected<UInt, DecodeError>
-decodeVar(const char* data, size_t available, size_t& consumed) noexcept {
-  UInt value = 0;
-  for (size_t i = 0; i < kMaxBytes; ++i) {
-    if (i >= available) {
-      return std::unexpected(DecodeError::kIncomplete);  // 半包：还差字节，等下次 read
-    }
-    const uint8_t byte = static_cast<uint8_t>(data[i]);
-    value |= static_cast<UInt>(byte & kValueMask) << (7 * i);
-    if ((byte & kContinuationBit) == 0) {
-      consumed = i + 1;
-      return value;
-    }
-  }
-  // 用满上限仍带继续位：只有畸形包才会走到这里
-  return std::unexpected(DecodeError::kMalformed);
-}
-}  // namespace
 
 void
 ByteBuffer::append(const char* data, size_t len) {
@@ -62,28 +32,23 @@ ByteBuffer::append(std::string_view str) {
 
 void
 ByteBuffer::appendVarInt(int32_t value) {
-  uint32_t val = static_cast<uint32_t>(value);
-  do {
-    uint8_t temp = static_cast<uint8_t>(val & kValueMask);
-    val >>= 7;
-    if (val != 0) {
-      temp |= kContinuationBit;
-    }
-    writeBe(temp);
-  } while (val != 0);
+  ensureWritableBytes(varint::kMaxVarIntBytes);
+  const size_t bytes = varint::encodeVarInt(value, beginWrite());
+  hasWritten(bytes);
 }
 
 void
 ByteBuffer::appendVarLong(int64_t value) {
-  uint64_t val = static_cast<uint64_t>(value);
-  do {
-    uint8_t temp = static_cast<uint8_t>(val & kValueMask);
-    val >>= 7;
-    if (val != 0) {
-      temp |= kContinuationBit;
-    }
-    writeBe(temp);
-  } while (val != 0);
+  ensureWritableBytes(varint::kMaxVarLongBytes);
+  const size_t bytes = varint::encodeVarLong(value, beginWrite());
+  hasWritten(bytes);
+}
+
+void
+ByteBuffer::prependVarInt(int32_t value) {
+  char buf[varint::kMaxVarIntBytes];
+  const size_t bytes = varint::encodeVarInt(value, buf);
+  prepend(buf, bytes);
 }
 
 void
@@ -92,46 +57,70 @@ ByteBuffer::appendString(std::string_view str) {
   append(str.data(), str.size());
 }
 
+std::expected<VarIntResult, DecodeError>
+ByteBuffer::peekVarIntWithBytes() const noexcept {
+  return varint::decodeVarInt(peek(), readableBytes());
+}
+
+std::expected<VarLongResult, DecodeError>
+ByteBuffer::peekVarLongWithBytes() const noexcept {
+  return varint::decodeVarLong(peek(), readableBytes());
+}
+
 std::expected<int32_t, DecodeError>
 ByteBuffer::peekVarInt() const noexcept {
-  size_t consumed = 0;
-  const auto parsed = decodeVar<uint32_t, kMaxVarIntBytes>(peek(), readableBytes(), consumed);
-  if (!parsed) {
-    return std::unexpected(parsed.error());
+  const auto res = peekVarIntWithBytes();
+  if (!res) {
+    return std::unexpected(res.error());
   }
-  return static_cast<int32_t>(*parsed);
+  return res->value;
 }
 
 std::expected<int64_t, DecodeError>
 ByteBuffer::peekVarLong() const noexcept {
-  size_t consumed = 0;
-  const auto parsed = decodeVar<uint64_t, kMaxVarLongBytes>(peek(), readableBytes(), consumed);
-  if (!parsed) {
-    return std::unexpected(parsed.error());
+  const auto res = peekVarLongWithBytes();
+  if (!res) {
+    return std::unexpected(res.error());
   }
-  return static_cast<int64_t>(*parsed);
+  return res->value;
+}
+
+std::expected<VarIntResult, DecodeError>
+ByteBuffer::readVarIntWithBytes() noexcept {
+  const auto res = peekVarIntWithBytes();
+  if (!res) {
+    return std::unexpected(res.error());
+  }
+  retrieve(res->bytes);
+  return res;
+}
+
+std::expected<VarLongResult, DecodeError>
+ByteBuffer::readVarLongWithBytes() noexcept {
+  const auto res = peekVarLongWithBytes();
+  if (!res) {
+    return std::unexpected(res.error());
+  }
+  retrieve(res->bytes);
+  return res;
 }
 
 std::expected<int32_t, DecodeError>
 ByteBuffer::readVarInt() noexcept {
-  size_t consumed = 0;
-  const auto parsed = decodeVar<uint32_t, kMaxVarIntBytes>(peek(), readableBytes(), consumed);
-  if (!parsed) {
-    return std::unexpected(parsed.error());  // 失败零副作用：一个字节都不消费
+  const auto res = readVarIntWithBytes();
+  if (!res) {
+    return std::unexpected(res.error());
   }
-  retrieve(consumed);  // 只有成功才推进读游标
-  return static_cast<int32_t>(*parsed);
+  return res->value;
 }
 
 std::expected<int64_t, DecodeError>
 ByteBuffer::readVarLong() noexcept {
-  size_t consumed = 0;
-  const auto parsed = decodeVar<uint64_t, kMaxVarLongBytes>(peek(), readableBytes(), consumed);
-  if (!parsed) {
-    return std::unexpected(parsed.error());
+  const auto res = readVarLongWithBytes();
+  if (!res) {
+    return std::unexpected(res.error());
   }
-  retrieve(consumed);
-  return static_cast<int64_t>(*parsed);
+  return res->value;
 }
 
 std::expected<std::string, DecodeError>
@@ -242,15 +231,4 @@ ByteBuffer::makeSpace(size_t len) {
     writerIndex_ = readerIndex_ + readable;
     assert(readable == readableBytes());
   }
-}
-
-const char*
-mcpe::toString(DecodeError error) noexcept {
-  switch (error) {
-    case DecodeError::kIncomplete:
-      return "kIncomplete(need more data)";
-    case DecodeError::kMalformed:
-      return "kMalformed(protocol limit exceeded)";
-  }
-  return "kUnknown";
 }

@@ -42,6 +42,7 @@ TcpSession::stop() {
 void
 TcpSession::sendPacket(ByteBuffer buffer) {
   if (is_stopped_ || buffer.readableBytes() == 0) return;
+
   asio::post(
       socket_.get_executor(),
       [this, self = shared_from_this(), buf = std::move(buffer)]() mutable {

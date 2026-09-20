@@ -84,6 +84,7 @@ endif()
 # 【显式列出源文件，不使用 GLOB】
 add_library(mcpe_common STATIC
     src/common/ByteBuffer.cc
+    src/common/VarInt.cc
 )
 
 # 导出头文件目录（PUBLIC 使链接者也能获得该路径）
@@ -96,10 +97,10 @@ target_include_directories(mcpe_common PUBLIC
 target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio)
 
 # 可选：为库目标设置 C++ 标准（继承自项目全局）
-set_target_properties(mcpe_common PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
-)
+# set_target_properties(mcpe_common PROPERTIES
+#     CXX_STANDARD 23
+#     CXX_STANDARD_REQUIRED ON
+# )
 
 # ----------------------------------------------
 # 模块2: mcpe_network 静态库
@@ -107,6 +108,7 @@ set_target_properties(mcpe_common PROPERTIES
 add_library(mcpe_network STATIC
     src/network/TcpSession.cc
     src/network/TcpServer.cc
+    src/network/PacketFraming.cc
 )
 
 target_include_directories(mcpe_network PUBLIC
@@ -115,12 +117,6 @@ target_include_directories(mcpe_network PUBLIC
 )
 
 target_link_libraries(mcpe_network PUBLIC mcpe_common)
-
-# 可选：为库目标设置 C++ 标准（继承自项目全局）
-set_target_properties(mcpe_common PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
-)
 
 # ----------------------------------------------
 # 可执行文件 main_app
@@ -160,11 +156,6 @@ target_link_libraries(test_bytebuffer PRIVATE
     GTest::gtest_main
 )
 
-set_target_properties(test_bytebuffer PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
-)
-
 # VarInt / VarLong 边界极限测试（TASK-0.5）
 add_executable(test_varint
     tests/test_varint.cc
@@ -173,11 +164,6 @@ add_executable(test_varint
 target_link_libraries(test_varint PRIVATE
     mcpe_common
     GTest::gtest_main
-)
-
-set_target_properties(test_varint PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
 )
 
 # TcpSession 消息队列与并发安全测试（TASK-1.3）
@@ -189,11 +175,6 @@ target_link_libraries(test_tcp_session PRIVATE
     mcpe_network
     mcpe_common
     GTest::gtest_main
-)
-
-set_target_properties(test_tcp_session PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
 )
 
 # 让 CTest 自动发现每个 TEST 用例

@@ -569,3 +569,68 @@ TEST(VarIntTest, ExtremeValuesRoundTrip) {
   EXPECT_EQ(*buf.readVarLong(), std::numeric_limits<int64_t>::min());
   EXPECT_EQ(buf.readableBytes(), 0u);
 }
+
+// ===========================================================================
+// 独立 VarInt 模块与带字节计数 API 测试
+// ===========================================================================
+
+TEST(StandaloneVarIntTest, EncodeAndDecodeSpan) {
+  const auto encoded = mcpe::varint::encodeVarInt(300);
+  EXPECT_EQ(encoded.size, 2u);
+  // 300 in VarInt is 0xAC 0x02
+  EXPECT_EQ(encoded.data[0], static_cast<char>(0xAC));
+  EXPECT_EQ(encoded.data[1], static_cast<char>(0x02));
+
+  // decode over std::span
+  const auto decoded = mcpe::varint::decodeVarInt(encoded.span());
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->value, 300);
+  EXPECT_EQ(decoded->bytes, 2u);
+}
+
+TEST(StandaloneVarIntTest, VarLongEncodeAndDecode) {
+  const int64_t val = 123456789012345LL;
+  const auto encoded = mcpe::varint::encodeVarLong(val);
+  const auto decoded = mcpe::varint::decodeVarLong(encoded.span());
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->value, val);
+  EXPECT_EQ(decoded->bytes, encoded.size);
+}
+
+TEST(ByteBufferWithBytesTest, PeekAndReadVarIntWithBytes) {
+  ByteBuffer buf;
+  buf.appendVarInt(25565);  // 常见端口 25565 > 16384，在 VarInt 中占用 3 字节 (DD C7 01)
+
+  // 1. peek 不消费
+  const auto peek_res = buf.peekVarIntWithBytes();
+  ASSERT_TRUE(peek_res.has_value());
+  EXPECT_EQ(peek_res->value, 25565);
+  EXPECT_EQ(peek_res->bytes, 3u);
+  EXPECT_EQ(buf.readableBytes(), 3u);
+
+  // 2. read 消费
+  const auto read_res = buf.readVarIntWithBytes();
+  ASSERT_TRUE(read_res.has_value());
+  EXPECT_EQ(read_res->value, 25565);
+  EXPECT_EQ(read_res->bytes, 3u);
+  EXPECT_EQ(buf.readableBytes(), 0u);
+}
+
+TEST(ByteBufferWithBytesTest, PrependVarInt) {
+  ByteBuffer buf;
+  buf.append("DATA", 4);
+  // 前插 VarInt 长度 4 (1 字节)
+  buf.prependVarInt(4);
+  EXPECT_EQ(buf.readableBytes(), 5u);
+
+  const auto peek_res = buf.peekVarIntWithBytes();
+  ASSERT_TRUE(peek_res.has_value());
+  EXPECT_EQ(peek_res->value, 4);
+  EXPECT_EQ(peek_res->bytes, 1u);
+
+  const auto len = buf.readVarInt();
+  ASSERT_TRUE(len.has_value());
+  EXPECT_EQ(*len, 4);
+  EXPECT_EQ(buf.retrieveAllAsString(), "DATA");
+}
+
