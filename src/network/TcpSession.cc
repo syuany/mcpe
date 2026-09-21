@@ -61,10 +61,9 @@ TcpSession::sendPacket(ByteBuffer buffer) {
 
 void
 TcpSession::doRead() {
-  auto self = shared_from_this();
   socket_.async_read_some(
       asio::buffer(read_buffer_),
-      [this, self](const asio::error_code& ec, std::size_t bytes_transferred) {
+      [this, self = shared_from_this()](const asio::error_code& ec, std::size_t bytes_transferred) {
         if (is_stopped_) return;
 
         if (!ec) {
