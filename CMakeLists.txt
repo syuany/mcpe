@@ -119,12 +119,27 @@ target_include_directories(mcpe_network PUBLIC
 target_link_libraries(mcpe_network PUBLIC mcpe_common)
 
 # ----------------------------------------------
+# 模块3: mcpe_protocol 静态库
+# ----------------------------------------------
+add_library(mcpe_protocol STATIC
+    src/protocol/PacketRouter.cc
+    src/protocol/StatusHandler.cc
+)
+
+target_include_directories(mcpe_protocol PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(mcpe_protocol PUBLIC mcpe_network mcpe_common)
+
+# ----------------------------------------------
 # 可执行文件 main_app
 # ----------------------------------------------
 add_executable(main src/main.cc)
 
-# 链接 mcpe_common（私有链接即可，因为 main 不需要暴露内部依赖）
-target_link_libraries(main PRIVATE mcpe_common mcpe_network)
+# 链接 mcpe_protocol, mcpe_network, mcpe_common
+target_link_libraries(main PRIVATE mcpe_protocol mcpe_network mcpe_common)
 
 # ----------------------------------------------
 # 单元测试（仅在开启测试时构建）
@@ -188,9 +203,22 @@ target_link_libraries(test_framing PRIVATE
     GTest::gtest_main
 )
 
+# PacketRouter 测试（TASK-1.5）
+add_executable(test_packet_router
+    tests/test_packet_router.cc
+)
+
+target_link_libraries(test_packet_router PRIVATE
+    mcpe_protocol
+    mcpe_network
+    mcpe_common
+    GTest::gtest_main
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
 gtest_discover_tests(test_varint)
 gtest_discover_tests(test_tcp_session)
 gtest_discover_tests(test_framing)
+gtest_discover_tests(test_packet_router)

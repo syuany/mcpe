@@ -8,6 +8,7 @@
 #include <string>
 
 #include "mcpe/common/ByteBuffer.h"
+#include "mcpe/protocol/ConnectionState.h"
 
 namespace mcpe::network {
 
@@ -33,6 +34,21 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
     return remote_address_;
   }
 
+  protocol::ConnectionState
+  state() const noexcept {
+    return state_;
+  }
+
+  void
+  setState(protocol::ConnectionState s) noexcept {
+    state_ = s;
+  }
+
+  bool
+  isStopped() const noexcept {
+    return is_stopped_;
+  }
+
   void sendPacket(ByteBuffer buffer);
 
  private:
@@ -41,6 +57,8 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
 
   asio::ip::tcp::socket socket_;
   std::string remote_address_;
+
+  protocol::ConnectionState state_{protocol::ConnectionState::HANDSHAKING};
 
   std::array<char, 4096> read_buffer_;
 
