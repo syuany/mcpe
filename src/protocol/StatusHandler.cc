@@ -4,7 +4,9 @@
 
 #include <cstdint>
 #include <format>
+#include <utility>
 
+#include "mcpe/common/ByteBuffer.h"
 #include "mcpe/network/TcpSession.h"
 #include "mcpe/protocol/ConnectionState.h"
 
@@ -48,10 +50,39 @@ StatusHandler::handleHandshake(
 }
 
 void
-StatusHandler::handleStatusRequest(const std::shared_ptr<network::TcpSession>& session) {}
+StatusHandler::handleStatusRequest(const std::shared_ptr<network::TcpSession>& session) {
+  spdlog::debug("[StatusHandler] Responding to Status Request from {}", session->remoteAddress());
+
+  const std::string json_payload = std::format(
+      R"({{"version":{{"name":"1.12.2","protocol":340}},"players":{{"max":100,"online":0}},"description":{{"text":"§aA High Performance C++ Server §7[Asio/C++23]"}}}})"
+  );
+
+  ByteBuffer packet;
+  packet.appendVarInt(0x00);
+  packet.appendString(std::move(json_payload));
+  packet.prependVarInt(packet.readableBytes());
+
+  session->sendPacket(std::move(packet));
+}
 
 void
 StatusHandler::handlePing(
     const std::shared_ptr<network::TcpSession>& session,
     ByteBuffer& payload
-) {}
+) {
+  auto time_res = payload.readBe<int64_t>();
+  if (!time_res) {
+    spdlog::warn("[StatusHandler] Malformed Ping packet from {}", session->remoteAddress());
+    session->stop();
+    return;
+  }
+
+  const auto client_time = *time_res;
+  ByteBuffer packet;
+  packet.appendVarInt(0x01);
+  packet.writeBe(client_time);
+  packet.prependVarInt(packet.readableBytes());
+
+  session->sendPacket(packet);
+  spdlog::info("[StatusHandler] Server List Ping flow completed for {}", session->remoteAddress());
+}

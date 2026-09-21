@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -190,6 +191,15 @@ class ByteBuffer {
   void appendVarInt(int32_t value);
   void appendVarLong(int64_t value);
   void prependVarInt(int32_t value);
+  void
+  prependVarInt(size_t value) {
+    assert(
+        value <= static_cast<size_t>(std::numeric_limits<int32_t>::max()) &&
+        "Packet size exceeds int32_t"
+    );
+    prependVarInt(static_cast<int32_t>(value));
+  };
+
   void appendString(std::string_view str);
 
   [[nodiscard]] std::expected<int32_t, DecodeError> readVarInt() noexcept;

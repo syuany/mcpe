@@ -18,7 +18,7 @@ PacketFraming::slicePacket(ByteBuffer& recv_buf) {
   }
 
   const auto [packet_len, varint_len] = *length_res;
-  if (packet_len <= 0 || packet_len > kMaxPacketSize) {
+  if (packet_len <= 0 || static_cast<size_t>(packet_len) > kMaxPacketSize) {
     return std::unexpected(FramingError::kInvalidPacketSize);
   }
 
