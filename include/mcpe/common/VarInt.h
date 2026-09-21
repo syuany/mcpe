@@ -1,3 +1,13 @@
+/**
+ * @file VarInt.h
+ * @brief Minecraft 协议变长整数（VarInt 32 位 / VarLong 64 位）极速无堆分配编解码器
+ *
+ * 采用 7 位小端分段编码规则（LEB128 变种），包含：
+ * - 栈上零分配编码（encodeVarInt / encodeVarLong）
+ * - 无拷贝、无副作用错误返回的安全解码（decodeVarInt / decodeVarLong）
+ * - 完备的半包（kIncomplete）与越界/畸形（kMalformed）防御契约
+ */
+
 #ifndef MCPE_COMMON_VARINT_H
 #define MCPE_COMMON_VARINT_H
 
@@ -45,10 +55,12 @@ struct EncodedVarInt {
   std::array<char, kMaxVarIntBytes> data{};
   size_t size{0};
 
-  [[nodiscard]] std::string_view view() const noexcept {
+  [[nodiscard]] std::string_view
+  view() const noexcept {
     return std::string_view(data.data(), size);
   }
-  [[nodiscard]] std::span<const char> span() const noexcept {
+  [[nodiscard]] std::span<const char>
+  span() const noexcept {
     return std::span<const char>(data.data(), size);
   }
 };
@@ -58,10 +70,12 @@ struct EncodedVarLong {
   std::array<char, kMaxVarLongBytes> data{};
   size_t size{0};
 
-  [[nodiscard]] std::string_view view() const noexcept {
+  [[nodiscard]] std::string_view
+  view() const noexcept {
     return std::string_view(data.data(), size);
   }
-  [[nodiscard]] std::span<const char> span() const noexcept {
+  [[nodiscard]] std::span<const char>
+  span() const noexcept {
     return std::span<const char>(data.data(), size);
   }
 };
@@ -120,7 +134,8 @@ decodeVarLong(std::span<const char> data) noexcept {
 /** 将 int32_t 编码为 VarInt 写入 out 缓冲区（out 必须至少有 kMaxVarIntBytes = 5 字节容量）
  *  @return 实际写入的字节数（1~5）
  */
-inline size_t encodeVarInt(int32_t value, char* out) noexcept {
+inline size_t
+encodeVarInt(int32_t value, char* out) noexcept {
   uint32_t val = static_cast<uint32_t>(value);
   size_t bytes = 0;
   do {
@@ -137,7 +152,8 @@ inline size_t encodeVarInt(int32_t value, char* out) noexcept {
 /** 将 int64_t 编码为 VarLong 写入 out 缓冲区（out 必须至少有 kMaxVarLongBytes = 10 字节容量）
  *  @return 实际写入的字节数（1~10）
  */
-inline size_t encodeVarLong(int64_t value, char* out) noexcept {
+inline size_t
+encodeVarLong(int64_t value, char* out) noexcept {
   uint64_t val = static_cast<uint64_t>(value);
   size_t bytes = 0;
   do {
@@ -152,13 +168,15 @@ inline size_t encodeVarLong(int64_t value, char* out) noexcept {
 }
 
 /** 返回栈上编码对象，方便直接使用 .view() 或 .span() */
-[[nodiscard]] inline EncodedVarInt encodeVarInt(int32_t value) noexcept {
+[[nodiscard]] inline EncodedVarInt
+encodeVarInt(int32_t value) noexcept {
   EncodedVarInt res;
   res.size = encodeVarInt(value, res.data.data());
   return res;
 }
 
-[[nodiscard]] inline EncodedVarLong encodeVarLong(int64_t value) noexcept {
+[[nodiscard]] inline EncodedVarLong
+encodeVarLong(int64_t value) noexcept {
   EncodedVarLong res;
   res.size = encodeVarLong(value, res.data.data());
   return res;

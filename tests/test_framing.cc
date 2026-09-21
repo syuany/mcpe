@@ -1,3 +1,13 @@
+/**
+ * @file test_framing.cc
+ * @brief 传输层拆包器（Packet Framing）单元测试
+ *
+ * 覆盖 Minecraft 协议网络流切包的核心场景：
+ * 1. 完整单个数据包即时切出
+ * 2. TCP 粘包（一次收到多个包，连环切包）
+ * 3. TCP 半包（分批陆续到达，零副作用等待）
+ */
+
 #include <gtest/gtest.h>
 
 #include "mcpe/network/PacketFraming.h"

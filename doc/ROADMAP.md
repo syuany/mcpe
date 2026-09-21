@@ -59,7 +59,7 @@
   * [x] TASK-1.6: 握手包解码与协议版本协商 (Handshake Packet 0x00)
   * [x] TASK-1.7: 状态查询响应与 MOTD 协议构造 (Status Request/Response 0x00)
   * [x] TASK-1.8: 延迟探测与双向保活链路闭环 (Ping/Pong 0x01)
-  * [ ] TASK-1.9: Sprint 1 联调、真实客户端接入与质量收敛
+  * [x] TASK-1.9: Sprint 1 联调、真实客户端接入与质量收敛
 * **技术文档**：
   * [Sprint 1 敏捷开发指引](file:///home/ubu/dev/my/mcpe/docs/sprints/02_sprint1_network_ping.md)
   * [Sprint 1 保姆级实战开发教程](file:///home/ubu/dev/my/mcpe/docs/tutorial/sprint1_network_ping.md)

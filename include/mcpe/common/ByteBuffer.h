@@ -18,13 +18,37 @@
 
 namespace mcpe {
 
+/**
+ * @brief 现代 C++ 高性能非阻塞网络字节缓冲区
+ *
+ * 采用类似 Muduo 的三段式连续内存布局设计：
+ * +-------------------+------------------+------------------+
+ * | prependable bytes |  readable bytes  |  writable bytes  |
+ * |                   |     (CONTENT)    |                  |
+ * +-------------------+------------------+------------------+
+ * |                   |                  |                  |
+ * 0      <=      readerIndex_   <=   writerIndex_    <=    size
+ *
+ * 核心特性：
+ * 1. Cheap Prepend（头部预留 8 字节）：允许在不重新分配和挪动内存的情况下，O(1) 前插协议包长 VarInt
+ * 前缀。
+ * 2.
+ * 自动扩容与内存碎片整理：当可写空间不足但头部有已读空闲时，自动向前挪动数据复用空间（makeSpace）。
+ * 3. 泛型大端数值读写：支持 int8_t~int64_t, uint8_t~uint64_t, float, double 大端序列化与反序列化。
+ * 4. 原生支持 Minecraft 协议类型：VarInt, VarLong, String。
+ * 5. 零副作用预览（peek*）与 RAII 事务快照（Mark），支撑协议拆包与多字段原子解析。
+ */
 class ByteBuffer {
  public:
-  static constexpr size_t kCheapPrepend = 8;
-  static constexpr size_t kInitialSize = 1024;
-  static constexpr size_t kMaxVarIntBytes = varint::kMaxVarIntBytes;
-  static constexpr size_t kMaxVarLongBytes = varint::kMaxVarLongBytes;
+  static constexpr size_t kCheapPrepend = 8;    ///< 头部预留用于前插协议头的字节数
+  static constexpr size_t kInitialSize = 1024;  ///< 默认初始容量
+  static constexpr size_t kMaxVarIntBytes = varint::kMaxVarIntBytes;    ///< VarInt 最大 5 字节
+  static constexpr size_t kMaxVarLongBytes = varint::kMaxVarLongBytes;  ///< VarLong 最大 10 字节
 
+  /**
+   * @brief 构造函数：初始化具有预留头部的缓冲区
+   * @param initialSize 初始可写空间大小（默认为 1024 字节）
+   */
   ByteBuffer(size_t initialSize = kInitialSize)
       : buffer_(kCheapPrepend + initialSize),
         readerIndex_(kCheapPrepend),
