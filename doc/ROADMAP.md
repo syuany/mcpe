@@ -65,6 +65,7 @@
   * [Sprint 1 保姆级实战开发教程](file:///home/ubu/dev/my/mcpe/docs/tutorial/sprint1_network_ping.md)
   * [Asio 核心原语快速入门](file:///home/ubu/dev/my/mcpe/docs/guides/asio_primer_guide.md)
   * [TCP 拆包与高频面试核心 QA](file:///home/ubu/dev/my/mcpe/docs/guides/tcp_framing_and_interview_qa.md)
+  * [Cuberite 工业级架构全景解析与参考指南](file:///home/ubu/dev/my/mcpe/doc/guides/cuberite_architecture_guide.md)
 
 ---
 
