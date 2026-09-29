@@ -11,7 +11,7 @@
 在 TASK-1.9 之前，`TcpSession::doRead()` 在切出完整数据包后执行的是 `(void)packet;`，网络层未与上层协议层连通。**TASK-1.9 的目标是打通这一链路，实现完整的 Server List Ping 协议闭环**。
 
 ### 2. DoD（Definition of Done）完成定义
-1. **协议链路打通**：客户端通过 TCP 连接服务端 `0.0.0.0:25565`，发送 Handshake、Status Request 和 Ping 包，服务端依次响应 Status Response（MOTD JSON）和 Pong（原样 8 字节时间戳）。
+1. **协议链路打通**：客户端通过 TCP 连接服务端 `0.0.0.0:25566`，发送 Handshake、Status Request 和 Ping 包，服务端依次响应 Status Response（MOTD JSON）和 Pong（原样 8 字节时间戳）。
 2. **架构解耦无环**：网络库 `mcpe_network` 与协议库 `mcpe_protocol` 之间维持单向依赖，不产生静态库循环依赖，保证单元测试可独立构建与执行。
 3. **测试 100% 通过**：既有 146 个 GoogleTest 单元测试全部通过。
 4. **自动化脚本验收**：通过 `python3 scripts/test_ping.py` 端到端验证，所有 5 个步骤均校验成功。
@@ -183,8 +183,8 @@ flowchart LR
  main() {
 @@ -24,6 +25,14 @@
  
-     // 2. 监听 Minecraft 默认端口 25565
-     mcpe::network::TcpServer server(io_context, 25565);
+     // 2. 监听 25566 端口，避免与 Cuberite 冲突
+     mcpe::network::TcpServer server(io_context, 25566);
 +
 +    // 注入协议层路由器回调：保持网络层与业务协议层的低耦合
 +    server.setPacketHandler(
@@ -231,12 +231,12 @@ kill $SERVER_PID
 **输出日志**：
 ```text
 [info] MCPE Server (Protocol 340 / MC 1.12.2) 
-[info] [TcpServer] Listening on 0.0.0.0:25565
-[*] 正在连接本地 Minecraft 服务端 127.0.0.1:25565 ...
+[info] [TcpServer] Listening on 0.0.0.0:25566
+[*] 正在连接本地 Minecraft 服务端 127.0.0.1:25566 ...
 [info] [Session] Connected from 127.0.0.1:54708
 [debug] [Session] Sliced complete packet with 16 bytes from 127.0.0.1:54708
 [debug] [Router] State: HANDSHAKING, PacketID: 0x00, PayloadBytes: 15
-[info] [Hanshake] Client 127.0.0.1:54708 -> ProtoVer: 340, Host: 127.0.0.1:25565, NextState: 1
+[info] [Hanshake] Client 127.0.0.1:54708 -> ProtoVer: 340, Host: 127.0.0.1:25566, NextState: 1
 [+] 1. Handshake (0x00, Proto=340, NextState=1) 已发送
 
 [debug] [Session] Sliced complete packet with 1 bytes from 127.0.0.1:54708

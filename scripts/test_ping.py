@@ -41,7 +41,7 @@ def read_varint(s: socket.socket) -> int:
 
 def main():
     host = "127.0.0.1"
-    port = 25565
+    port = 25566
     print(f"[*] 正在连接本地 Minecraft 服务端 {host}:{port} ...")
     
     try:
@@ -51,7 +51,7 @@ def main():
         sys.exit(1)
 
     try:
-        # 1. 发送 Handshake 包 (ID=0x00, Proto=340, Host="127.0.0.1", Port=25565, NextState=1)
+        # 1. 发送 Handshake 包 (ID=0x00, Proto=340, Host="127.0.0.1", Port=port, NextState=1)
         host_bytes = host.encode('utf-8')
         handshake_payload = (
             encode_varint(0x00) +

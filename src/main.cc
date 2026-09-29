@@ -2,15 +2,20 @@
  * @file main.cc
  * @brief MCPE (Minecraft Pocket / Java Edition) 服务端主程序入口
  *
- * 负责启动 Asio 事件循环，在 0.0.0.0:25565 监听原版 Minecraft 1.12.2 (Protocol 340) 客户端连入。
+ * 负责启动 Asio 事件循环，在 0.0.0.0:25566 监听原版 Minecraft 1.12.2 (Protocol 340) 客户端连入。
  */
 
 #include <spdlog/spdlog.h>
 
 #include <asio.hpp>
+#include <cstdint>
 
 #include "mcpe/network/TcpServer.h"
 #include "mcpe/protocol/PacketRouter.h"
+
+namespace {
+constexpr uint16_t kServerPort = 25566;
+}
 
 int
 main() {
@@ -24,8 +29,8 @@ main() {
     // 1. 初始化核心 Asio IO 上下文
     asio::io_context io_context;
 
-    // 2. 监听 Minecraft 默认端口 25565
-    mcpe::network::TcpServer server(io_context, 25565);
+    // 2. 使用独立端口，避免与 Cuberite 的 25565 冲突
+    mcpe::network::TcpServer server(io_context, kServerPort);
 
     // 注入协议层路由器回调：保持网络层与业务协议层的低耦合
     server.setPacketHandler([](const std::shared_ptr<mcpe::network::TcpSession>& session,

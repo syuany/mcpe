@@ -157,7 +157,7 @@
   * 编写 `TcpSession`：继承 `std::enable_shared_from_this<TcpSession>`，管理单个 Socket 的生命周期。
   * 实现 `start()`，开启循环异步读取 `socket.async_read_some(...)`。
 * **DoD（完成定义）**：
-  * 启动服务，使用终端运行 `nc 127.0.0.1 25565` 连接，服务端打印连接接入日志；`nc` 退出后，服务端能捕获 EOF 并正常析构 Session（无内存泄漏）。
+  * 启动服务，使用终端运行 `nc 127.0.0.1 25566` 连接，服务端打印连接接入日志；`nc` 退出后，服务端能捕获 EOF 并正常析构 Session（无内存泄漏）。
 * **易错点**：
   * 所有的 Asio 回调 lambda 捕获列表中，必须捕获 `self = shared_from_this()`，严禁只捕获 `this`。
 * **推荐提交**：`feat(network): implement basic TcpServer and TcpSession lifetime`
@@ -254,8 +254,8 @@
 * **任务类型**：集成验证 (Integration)
 * **预估耗时**：1 小时
 * **任务目标**：
-  * 启动编译出的 `main_app`，监听 `0.0.0.0:25565`。
-  * 打开 Minecraft **1.12.2** 客户端 -> 多人游戏 -> 添加服务器 `127.0.0.1:25565`。
+  * 启动编译出的 `main_app`，监听 `0.0.0.0:25566`。
+  * 打开 Minecraft **1.12.2** 客户端 -> 多人游戏 -> 添加服务器 `127.0.0.1:25566`。
 * **DoD（完成定义）**：
   * 客户端列表中成功显示绿色信号延迟（Ping 值正常，如 `<5ms`）。
   * 显示出自定义的 MOTD 内容与在线人数 `0/100`。

@@ -15,7 +15,7 @@ namespace mcpe::network {
  * @brief 高性能异步 TCP 服务器
  *
  * 基于 Asio 实现的非阻塞网络服务器骨架，负责：
- * 1. 绑定并监听指定端口（默认 0.0.0.0:25565）
+ * 1. 绑定并监听调用方指定的端口
  * 2. 持续异步接收客户端 TCP 连接请求（accept）
  * 3. 为新连接配置 TCP 参数（禁用 Nagle 算法降低延迟）并封装为独立的 TcpSession 生命周期对象
  */
@@ -26,7 +26,7 @@ class TcpServer {
   /**
    * @brief 构造函数：初始化服务器监听器
    * @param io_context Asio 事件循环上下文引用
-   * @param port 监听的 TCP 端口号（例如 Minecraft 默认 25565）
+   * @param port 监听的 TCP 端口号
    */
   TcpServer(asio::io_context& io_context, uint16_t port);
 

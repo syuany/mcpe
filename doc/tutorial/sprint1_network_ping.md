@@ -333,8 +333,8 @@ int main() {
   try {
     asio::io_context io_context;
     
-    // 监听 Minecraft 默认端口 25565
-    mcpe::network::TcpServer server(io_context, 25565);
+    // 监听 25566 端口，避免与 Cuberite 冲突
+    mcpe::network::TcpServer server(io_context, 25566);
     server.start();
 
     // 阻塞运行事件循环
@@ -379,12 +379,12 @@ cmake --build build -j4
 ./build/main
 
 # 3. 终端 2：使用 nc 模拟连入与断开
-nc 127.0.0.1 25565
+nc 127.0.0.1 25566
 # 在 nc 中随便敲几个字符回车，然后按 Ctrl+C 退出
 ```
 * **控制台预期输出**：
   ```text
-  [info] [TcpServer] Listening on 0.0.0.0:25565
+  [info] [TcpServer] Listening on 0.0.0.0:25566
   [info] [Session] Connected from 127.0.0.1:xxxxx
   [debug] [Session] Read 5 bytes from 127.0.0.1:xxxxx
   [info] [Session] Client disconnected: 127.0.0.1:xxxxx
@@ -489,7 +489,7 @@ ByteBuffer b2; b2.append("WORLD\n", 6);
 sendPacket(b1);
 sendPacket(b2);
 ```
-用 `nc 127.0.0.1 25565` 连接，能够完整、有序收到 `HELLO` 与 `WORLD` 字符串，且服务端无任何断言崩溃。
+用 `nc 127.0.0.1 25566` 连接，能够完整、有序收到 `HELLO` 与 `WORLD` 字符串，且服务端无任何断言崩溃。
 
 ---
 
@@ -1182,16 +1182,16 @@ def read_varint(s: socket.socket) -> int:
             return val
     raise ValueError("VarInt too big")
 
-print("[*] 正在连接本地 127.0.0.1:25565 ...")
-sock = socket.create_connection(('127.0.0.1', 25565), timeout=3.0)
+print("[*] 正在连接本地 127.0.0.1:25566 ...")
+sock = socket.create_connection(('127.0.0.1', 25566), timeout=3.0)
 
-# 1. 发送 Handshake 包 (ID=0x00, Proto=340, Host="127.0.0.1", Port=25565, NextState=1)
+# 1. 发送 Handshake 包 (ID=0x00, Proto=340, Host="127.0.0.1", Port=25566, NextState=1)
 host_bytes = b"127.0.0.1"
 handshake_payload = (
     encode_varint(0x00) +
     encode_varint(340) +
     encode_varint(len(host_bytes)) + host_bytes +
-    struct.pack('>H', 25565) +
+    struct.pack('>H', 25566) +
     encode_varint(1)
 )
 sock.sendall(encode_varint(len(handshake_payload)) + handshake_payload)
@@ -1386,4 +1386,3 @@ Cuberite 是十多年前启动的老项目，存在不少受限于老旧标准�
    * 📄 [`doc/reference/wiki.vg/Server_List_Ping.html`](file:///home/ubu/dev/my/mcpe/doc/reference/wiki.vg/Server_List_Ping.html)（文本版：[Server_List_Ping.txt](file:///home/ubu/dev/my/mcpe/doc/reference/wiki.vg/Server_List_Ping.txt)）：官方 Wiki 关于 Server List Ping 交互过程的唯一权威原始文档。
 4. **机器可读 1.12.2 协议定义**：
    * 📄 `doc/reference/minecraft-data/1.12.2/protocol.json`：PrismarineJS 提取的机器可读 JSON，包含所有包名、状态机对应关系。
-

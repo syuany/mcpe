@@ -29,7 +29,7 @@ MCPE 旨在利用 **现代 C++23 原生编译语言** 的零开销抽象与高�
 ### 2.1 协议版本定义
 * **目标客户端**：Minecraft Java Edition **1.12.2** 官方标准发行版。
 * **协议版本号（Protocol Number）**：**`340`**。
-* **传输层**：标准 TCP / IP 协议，默认监听端口 **`25565`**。
+* **传输层**：标准 TCP / IP 协议，默认监听端口 **`25566`**（避开 Cuberite 的 `25565`）。
 * **参考规范**：严谨遵循 wiki.vg Protocol 340 规约（参见离线镜像规范 [`docs/protocol/protocol_340_cheatsheet.md`](protocol/protocol_340_cheatsheet.md)）。
 
 ### 2.2 协议版本校验规约
