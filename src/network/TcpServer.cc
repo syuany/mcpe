@@ -1,6 +1,9 @@
 #include "mcpe/network/TcpServer.h"
 
+#include <asio/co_spawn.hpp>
+#include <asio/error.hpp>
 #include <asio/error_code.hpp>
+#include <asio/use_awaitable.hpp>
 #include <memory>
 
 #include "mcpe/network/TcpSession.h"
@@ -17,7 +20,7 @@ TcpServer::TcpServer(asio::io_context& io_context, uint16_t port)
 void
 TcpServer::start() {
   is_running_ = true;
-  doAccept();
+  asio::co_spawn(acceptor_.get_executor(), [this]() { return listenLoop(); }, asio::detached);
 }
 
 void
@@ -28,30 +31,29 @@ TcpServer::stop() {
   acceptor_.close(ec);
 }
 
-void
-TcpServer::doAccept() {
-  acceptor_.async_accept([this](const asio::error_code& ec, asio::ip::tcp::socket socket) {
+asio::awaitable<void>
+TcpServer::listenLoop() {
+  while (is_running_) {
     // 服务器已停止时，丢弃回调并不再继续注册新的 accept
-    if (!is_running_) return;
-
-    if (!ec) {
-      // 开启 TCP_NODELAY，禁用 Nagle 算法，确保小包（如 Ping、微小移动包）无缓冲即时发出
-      asio::error_code opt_ec;
-      socket.set_option(asio::ip::tcp::no_delay(true), opt_ec);
-
-      // 创建客户端会话生命周期对象并启动异步读循环
-      auto session = std::make_shared<TcpSession>(std::move(socket));
-      if (packet_handler_) {
-        session->setPacketHandler(packet_handler_);
+    auto [ec, socket] = co_await acceptor_.async_accept(asio::as_tuple(asio::use_awaitable));
+    if (ec) {
+      if (ec != asio::error::operation_aborted) {
+        spdlog::error("[TcpServer] Accept error: {}", ec.message());
       }
-      session->start();
-    } else {
-      spdlog::error("[TcpServer] Accept error: {}", ec.message());
+      break;
     }
+    // 开启 TCP_NODELAY，禁用 Nagle 算法，确保小包（如 Ping、微小移动包）无缓冲即时发出
+    asio::error_code opt_ec;
+    socket.set_option(asio::ip::tcp::no_delay(true), opt_ec);
 
-    // 继续链式注册下一个 accept 操作，维持并发监听
-    doAccept();
-  });
+    // 创建客户端会话生命周期对象并启动异步读循环
+    auto session = std::make_shared<TcpSession>(std::move(socket));
+    if (packet_handler_) {
+      session->setPacketHandler(packet_handler_);
+    }
+    session->start();
+  }
+  co_return;
 }
 
 }  // namespace mcpe::network

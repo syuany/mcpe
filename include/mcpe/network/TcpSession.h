@@ -2,7 +2,12 @@
 #define TCPSESSION_H
 
 #include <array>
+#include <asio/as_tuple.hpp>   // 提供 asio::as_tuple 打包机制
+#include <asio/awaitable.hpp>  // 提供 asio::awaitable<T> 类型支持
+#include <asio/co_spawn.hpp>   // 提供 asio::co_spawn 函数
+#include <asio/detached.hpp>   // 提供 asio::detached 完成标记
 #include <asio/ip/tcp.hpp>
+#include <asio/use_awaitable.hpp>  // 提供 asio::use_awaitable
 #include <deque>
 #include <functional>
 #include <memory>
@@ -106,7 +111,9 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
    * @brief 异步读循环驱动函数
    * 从 socket 中读取数据写入临时 buffer，追加到 cumulative_buf_，并通过 PacketFraming 循环切包
    */
-  void doRead();
+  // void doRead();
+
+  asio::awaitable<void> readerLoop();
 
   /**
    * @brief 异步写队列链式泵送函数

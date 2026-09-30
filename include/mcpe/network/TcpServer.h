@@ -3,6 +3,7 @@
 
 #include <netdb.h>
 
+#include <asio/awaitable.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <cstdint>
@@ -60,7 +61,7 @@ class TcpServer {
    * @brief 异步接收客户端连接循环
    * 在事件循环中链式触发 async_accept，实现无阻塞持续接收新连接
    */
-  void doAccept();
+  asio::awaitable<void> listenLoop();
 
   asio::io_context& io_context_;      ///< 关联的 Asio IO 上下文
   asio::ip::tcp::acceptor acceptor_;  ///< 底层 TCP 接受器

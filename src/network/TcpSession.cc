@@ -2,7 +2,11 @@
 
 #include <spdlog/spdlog.h>
 
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/error.hpp>
 #include <asio/error_code.hpp>
+#include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 #include <cstddef>
 #include <utility>
@@ -27,8 +31,11 @@ TcpSession::~TcpSession() { spdlog::info("[Session] Destroyed: {}", remote_addre
 
 void
 TcpSession::start() {
-  // 开启异步读循环，开始接收客户端发来的网络字节流
-  doRead();
+  // 使用 asio::co_spawn 将协程投递到底层 socket 所在的 executor 上并发运行
+  asio::co_spawn(
+      socket_.get_executor(), [self = shared_from_this()]() { return self->readerLoop(); },
+      asio::detached  // asio::detached 表示分离执行，协程自生自灭，异常与退出自主管理
+  );
 }
 
 void
@@ -66,59 +73,59 @@ TcpSession::sendPacket(ByteBuffer buffer) {
   );
 }
 
-void
-TcpSession::doRead() {
-  // 异步读取任意可用的字节数据到固定大小的 read_buffer_ 中
-  socket_.async_read_some(
-      asio::buffer(read_buffer_),
-      [this, self = shared_from_this()](const asio::error_code& ec, std::size_t bytes_transferred) {
-        if (is_stopped_) return;
+asio::awaitable<void>
+TcpSession::readerLoop() {
+  auto self = shared_from_this();
 
-        if (!ec) {
-          // 1. 将本次读取到的原始字节追加到累积接收缓冲区
-          cumulative_buf_.append(read_buffer_.data(), bytes_transferred);
+  while (!is_stopped_) {
+    auto [ec, bytes_transferred] = co_await socket_.async_read_some(
+        asio::buffer(read_buffer_), asio::as_tuple(asio::use_awaitable)
+    );
 
-          // 2. 循环拆包：应对 TCP 粘包（一次收到多个包）和半包（数据包未收全）
-          while (true) {
-            auto frame_res = PacketFraming::slicePacket(cumulative_buf_);
-            if (!frame_res) {
-              if (frame_res.error() == FramingError::kIncomplete) {
-                // 半包：数据未到齐，跳出循环等待下一次 TCP 读取
-                break;
-              }
-              // 畸形包（包长超过上限或非法负数）：视为恶意攻击，立即踢出并记录日志
-              spdlog::error("[Session] Malformed packet from {}, disconnect!", remote_address_);
-              stop();
-              return;
-            }
-
-            // 成功切出一个完整 Minecraft 协议包
-            ByteBuffer packet = std::move(*frame_res);
-            const std::size_t packet_size = packet.readableBytes();
-
-            spdlog::debug(
-                "[Session] Sliced complete packet with {} bytes from {}", packet_size,
-                remote_address_
-            );
-
-            // 通过注册的回调函数将数据包分发至协议层（保持网络层与协议层解耦）
-            if (packet_handler_) {
-              packet_handler_(shared_from_this(), std::move(packet));
-            }
-          }
-          // 3. 继续监听后续网络输入
-          doRead();
-        } else {
-          // 处理断开连接与网络异常
-          if (ec == asio::error::eof || ec == asio::error::connection_reset) {
-            spdlog::info("[Session] Client disconnected: {}", remote_address_);
-          } else {
-            spdlog::warn("[Session] Read error on {}: {}", remote_address_, ec.message());
-          }
-          stop();
-        }
+    if (ec) {
+      // 处理断开连接与网络异常
+      if (ec == asio::error::eof || ec == asio::error::connection_reset) {
+        spdlog::info("[Session] Client disconnected: {}", remote_address_);
+      } else if (ec != asio::error::operation_aborted) {
+        spdlog::warn("[Session] Read error on {}: {}", remote_address_, ec.message());
       }
-  );
+      break;
+    }
+
+    // 1. 将本次读取到的原始字节追加到累积接收缓冲区
+    cumulative_buf_.append(read_buffer_.data(), bytes_transferred);
+
+    // 2. 循环拆包：应对 TCP 粘包（一次收到多个包）和半包（数据包未收全）
+    bool has_malformed_packet = false;
+    while (true) {
+      auto frame_res = PacketFraming::slicePacket(cumulative_buf_);
+      if (!frame_res) {
+        if (frame_res.error() == FramingError::kIncomplete) {
+          // 半包：数据未到齐，跳出循环等待下一次 TCP 读取
+          break;
+        }
+        // 畸形包（包长超过上限或非法负数）：视为恶意攻击，立即踢出并记录日志
+        spdlog::error("[Session] Malformed packet from {}, disconnect!", remote_address_);
+        has_malformed_packet = true;
+        break;
+      }
+
+      // 成功切出一个完整 Minecraft 协议包
+      ByteBuffer packet = std::move(*frame_res);
+      spdlog::debug(
+          "[Session] Sliced complete packet with {} bytes from {}", packet.readableBytes(),
+          remote_address_
+      );
+
+      // 通过注册的回调函数将数据包分发至协议层（保持网络层与协议层解耦）
+      if (packet_handler_) {
+        packet_handler_(shared_from_this(), std::move(packet));
+      }
+    }
+    if (has_malformed_packet) break;
+  }
+  stop();
+  co_return;
 }
 
 void
