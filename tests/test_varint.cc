@@ -23,7 +23,7 @@
 #include <string_view>
 #include <vector>
 
-#include "mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 using mcpe::ByteBuffer;
 using mcpe::DecodeError;

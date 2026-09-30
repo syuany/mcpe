@@ -30,12 +30,12 @@
 #include <thread>
 #include <utility>
 
-#include "mcpe/common/ByteBuffer.h"
-#include "mcpe/network/PacketFraming.h"
-#include "mcpe/network/TcpSession.h"
-#include "mcpe/protocol/ConnectionState.h"
-#include "mcpe/protocol/PacketRouter.h"
-#include "mcpe/protocol/StatusHandler.h"
+#include "common/ByteBuffer.h"
+#include "network/PacketFraming.h"
+#include "network/TcpSession.h"
+#include "protocol/ConnectionState.h"
+#include "protocol/PacketRouter.h"
+#include "protocol/StatusHandler.h"
 
 using namespace mcpe;
 using namespace mcpe::protocol;

@@ -1,4 +1,4 @@
-#include "include/mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 #include <algorithm>
 #include <cassert>

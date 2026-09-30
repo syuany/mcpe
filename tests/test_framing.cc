@@ -10,7 +10,7 @@
 
 #include <gtest/gtest.h>
 
-#include "mcpe/network/PacketFraming.h"
+#include "network/PacketFraming.h"
 
 using namespace mcpe;
 using namespace mcpe::network;

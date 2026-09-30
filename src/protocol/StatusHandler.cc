@@ -1,4 +1,4 @@
-#include "mcpe/protocol/StatusHandler.h"
+#include "protocol/StatusHandler.h"
 
 #include <spdlog/spdlog.h>
 
@@ -6,9 +6,9 @@
 #include <format>
 #include <utility>
 
-#include "mcpe/common/ByteBuffer.h"
-#include "mcpe/network/TcpSession.h"
-#include "mcpe/protocol/ConnectionState.h"
+#include "common/ByteBuffer.h"
+#include "network/TcpSession.h"
+#include "protocol/ConnectionState.h"
 
 using namespace mcpe::protocol;
 

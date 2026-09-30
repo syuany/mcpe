@@ -8,8 +8,8 @@
 #include <thread>
 #include <vector>
 
-#include "mcpe/common/ByteBuffer.h"
-#include "mcpe/network/TcpSession.h"
+#include "common/ByteBuffer.h"
+#include "network/TcpSession.h"
 
 using mcpe::ByteBuffer;
 using mcpe::network::TcpSession;

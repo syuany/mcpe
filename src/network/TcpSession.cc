@@ -1,4 +1,4 @@
-#include "mcpe/network/TcpSession.h"
+#include "network/TcpSession.h"
 
 #include <spdlog/spdlog.h>
 
@@ -11,8 +11,8 @@
 #include <cstddef>
 #include <utility>
 
-#include "mcpe/common/ByteBuffer.h"
-#include "mcpe/network/PacketFraming.h"
+#include "common/ByteBuffer.h"
+#include "network/PacketFraming.h"
 
 namespace mcpe::network {
 

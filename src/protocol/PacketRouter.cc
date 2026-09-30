@@ -1,8 +1,8 @@
-#include "mcpe/protocol/PacketRouter.h"
+#include "protocol/PacketRouter.h"
 
-#include "mcpe/network/TcpSession.h"
-#include "mcpe/protocol/ConnectionState.h"
-#include "mcpe/protocol/StatusHandler.h"
+#include "network/TcpSession.h"
+#include "protocol/ConnectionState.h"
+#include "protocol/StatusHandler.h"
 #include "spdlog/spdlog.h"
 
 using namespace mcpe::protocol;

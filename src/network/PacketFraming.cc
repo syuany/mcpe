@@ -1,9 +1,9 @@
-#include "include/mcpe/network/PacketFraming.h"
+#include "network/PacketFraming.h"
 
 #include <cstddef>
 #include <expected>
 
-#include "mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 using namespace mcpe;
 using namespace mcpe::network;

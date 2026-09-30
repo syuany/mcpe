@@ -1,4 +1,4 @@
-#include "mcpe/network/TcpServer.h"
+#include "network/TcpServer.h"
 
 #include <asio/co_spawn.hpp>
 #include <asio/error.hpp>
@@ -6,7 +6,7 @@
 #include <asio/use_awaitable.hpp>
 #include <memory>
 
-#include "mcpe/network/TcpSession.h"
+#include "network/TcpSession.h"
 #include "spdlog/spdlog.h"
 
 namespace mcpe::network {

@@ -10,8 +10,8 @@
 #include <asio.hpp>
 #include <cstdint>
 
-#include "mcpe/network/TcpServer.h"
-#include "mcpe/protocol/PacketRouter.h"
+#include "network/TcpServer.h"
+#include "protocol/PacketRouter.h"
 
 namespace {
 constexpr uint16_t kServerPort = 25566;

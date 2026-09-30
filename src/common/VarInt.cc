@@ -1,4 +1,4 @@
-#include "mcpe/common/VarInt.h"
+#include "common/VarInt.h"
 
 namespace mcpe {
 
