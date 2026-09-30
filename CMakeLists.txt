@@ -80,6 +80,8 @@ target_link_libraries(mcpe_network PUBLIC mcpe_common)
 add_library(mcpe_protocol STATIC
     src/protocol/PacketRouter.cc
     src/protocol/StatusHandler.cc
+    src/protocol/AuthUtils.cc
+    src/protocol/LoginHandler.cc
 )
 
 target_include_directories(mcpe_protocol PUBLIC
@@ -153,6 +155,16 @@ target_link_libraries(test_packet_router PRIVATE
     GTest::gtest_main
 )
 
+# UUID 测试
+add_executable(test_uuid
+    tests/test_uuid.cc
+)
+
+target_link_libraries(test_uuid PRIVATE
+    mcpe_protocol
+    GTest::gtest_main
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
@@ -160,3 +172,4 @@ gtest_discover_tests(test_varint)
 gtest_discover_tests(test_tcp_session)
 gtest_discover_tests(test_framing)
 gtest_discover_tests(test_packet_router)
+gtest_discover_tests(test_uuid)
