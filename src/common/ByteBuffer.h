@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/BufferPool.h"
 #include "common/VarInt.h"
 
 namespace mcpe {
@@ -40,32 +41,26 @@ namespace mcpe {
  */
 class ByteBuffer {
  public:
-  static constexpr size_t kCheapPrepend = 8;    ///< 头部预留用于前插协议头的字节数
-  static constexpr size_t kInitialSize = 1024;  ///< 默认初始容量
-  static constexpr size_t kMaxVarIntBytes = varint::kMaxVarIntBytes;    ///< VarInt 最大 5 字节
-  static constexpr size_t kMaxVarLongBytes = varint::kMaxVarLongBytes;  ///< VarLong 最大 10 字节
+  static constexpr size_t kCheapPrepend = 8;
+  static constexpr size_t kInitialSize = BufferPool::kBlockSize - kCheapPrepend;
+  static constexpr size_t kMaxVarIntBytes = varint::kMaxVarIntBytes;
+  static constexpr size_t kMaxVarLongBytes = varint::kMaxVarLongBytes;
 
-  /**
-   * @brief 构造函数：初始化具有预留头部的缓冲区
-   * @param initialSize 初始可写空间大小（默认为 1024 字节）
-   */
-  ByteBuffer(size_t initialSize = kInitialSize)
-      : buffer_(kCheapPrepend + initialSize),
-        readerIndex_(kCheapPrepend),
-        writerIndex_(kCheapPrepend) {
-    assert(readableBytes() == 0);
-    assert(writableBytes() == initialSize);
-    assert(prependableBytes() == kCheapPrepend);
-  }
+  ByteBuffer();
+  explicit ByteBuffer(size_t initialSize);
+  explicit ByteBuffer(PooledBlock block, size_t capacity = BufferPool::kBlockSize) noexcept;
 
-  ByteBuffer(const ByteBuffer&) = default;
-  ByteBuffer& operator=(const ByteBuffer&) = default;
-  ByteBuffer(ByteBuffer&&) noexcept = default;
-  ByteBuffer& operator=(ByteBuffer&&) noexcept = default;
+  // Move-Only 契约：禁止隐式深拷贝
+  ByteBuffer(const ByteBuffer&) = delete;
+  ByteBuffer& operator=(const ByteBuffer&) = delete;
+
+  ByteBuffer(ByteBuffer&& other) noexcept;
+  ByteBuffer& operator=(ByteBuffer&& other) noexcept;
   ~ByteBuffer() = default;
 
-  // 交换两个 Buffer 的内部状态
+  [[nodiscard]] ByteBuffer clone() const;
   void swap(ByteBuffer& rhs) noexcept;
+  [[nodiscard]] bool isPooled() const noexcept { return pooled_block_ != nullptr; }
 
   size_t
   readableBytes() const noexcept {
@@ -73,7 +68,7 @@ class ByteBuffer {
   }
   size_t
   writableBytes() const noexcept {
-    return buffer_.size() - writerIndex_;
+    return capacity_ - writerIndex_;
   }
   size_t
   prependableBytes() const noexcept {
@@ -307,22 +302,23 @@ class ByteBuffer {
   };
 
  private:
-  // 获取底层 vector 内存起始地址指针
   char*
-  begin() {
-    return buffer_.data();
+  begin() noexcept {
+    return data_ptr_;
   }
   const char*
-  begin() const {
-    return buffer_.data();
+  begin() const noexcept {
+    return data_ptr_;
   }
 
-  // 扩容/碎片整理内部实现：当 writableBytes() < len 时被调用
   void makeSpace(size_t len);
 
-  std::vector<char> buffer_;
-  size_t readerIndex_;
-  size_t writerIndex_;
+  PooledBlock pooled_block_{nullptr};
+  std::vector<char> heap_fallback_;
+  char* data_ptr_{nullptr};
+  size_t capacity_{0};
+  size_t readerIndex_{kCheapPrepend};
+  size_t writerIndex_{kCheapPrepend};
 };
 
 }  // namespace mcpe

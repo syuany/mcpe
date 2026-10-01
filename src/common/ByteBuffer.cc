@@ -11,7 +11,88 @@
 #include <string_view>
 #include <utility>
 
+#include "common/ShardedBufferPool.h"
+
 using namespace mcpe;
+
+ByteBuffer::ByteBuffer()
+    : pooled_block_(ShardedBufferPool::instance().allocate()),
+      data_ptr_(pooled_block_.get()),
+      capacity_(BufferPool::kBlockSize),
+      readerIndex_(kCheapPrepend),
+      writerIndex_(kCheapPrepend) {}
+
+ByteBuffer::ByteBuffer(size_t initialSize) {
+  if (initialSize + kCheapPrepend <= BufferPool::kBlockSize) {
+    pooled_block_ = ShardedBufferPool::instance().allocate();
+    data_ptr_ = pooled_block_.get();
+    capacity_ = BufferPool::kBlockSize;
+  } else {
+    heap_fallback_.resize(kCheapPrepend + initialSize);
+    data_ptr_ = heap_fallback_.data();
+    capacity_ = heap_fallback_.size();
+  }
+  readerIndex_ = kCheapPrepend;
+  writerIndex_ = kCheapPrepend;
+}
+
+ByteBuffer::ByteBuffer(PooledBlock block, size_t capacity) noexcept
+    : pooled_block_(std::move(block)),
+      data_ptr_(pooled_block_.get()),
+      capacity_(capacity),
+      readerIndex_(kCheapPrepend),
+      writerIndex_(kCheapPrepend) {}
+
+ByteBuffer::ByteBuffer(ByteBuffer&& other) noexcept
+    : pooled_block_(std::move(other.pooled_block_)),
+      heap_fallback_(std::move(other.heap_fallback_)),
+      capacity_(other.capacity_),
+      readerIndex_(other.readerIndex_),
+      writerIndex_(other.writerIndex_) {
+  if (pooled_block_) {
+    data_ptr_ = pooled_block_.get();
+  } else if (!heap_fallback_.empty()) {
+    data_ptr_ = heap_fallback_.data();
+  } else {
+    data_ptr_ = nullptr;
+  }
+  other.data_ptr_ = nullptr;
+  other.capacity_ = 0;
+  other.readerIndex_ = kCheapPrepend;
+  other.writerIndex_ = kCheapPrepend;
+}
+
+ByteBuffer&
+ByteBuffer::operator=(ByteBuffer&& other) noexcept {
+  if (this != &other) {
+    pooled_block_ = std::move(other.pooled_block_);
+    heap_fallback_ = std::move(other.heap_fallback_);
+    capacity_ = other.capacity_;
+    readerIndex_ = other.readerIndex_;
+    writerIndex_ = other.writerIndex_;
+    if (pooled_block_) {
+      data_ptr_ = pooled_block_.get();
+    } else if (!heap_fallback_.empty()) {
+      data_ptr_ = heap_fallback_.data();
+    } else {
+      data_ptr_ = nullptr;
+    }
+    other.data_ptr_ = nullptr;
+    other.capacity_ = 0;
+    other.readerIndex_ = kCheapPrepend;
+    other.writerIndex_ = kCheapPrepend;
+  }
+  return *this;
+}
+
+ByteBuffer
+ByteBuffer::clone() const {
+  ByteBuffer copy(readableBytes());
+  if (readableBytes() > 0) {
+    copy.append(peek(), readableBytes());
+  }
+  return copy;
+}
 
 void
 ByteBuffer::append(const char* data, size_t len) {
@@ -224,7 +305,10 @@ ByteBuffer::shrink(size_t reserve) {
 
 void
 ByteBuffer::swap(ByteBuffer& rhs) noexcept {
-  buffer_.swap(rhs.buffer_);
+  pooled_block_.swap(rhs.pooled_block_);
+  heap_fallback_.swap(rhs.heap_fallback_);
+  std::swap(data_ptr_, rhs.data_ptr_);
+  std::swap(capacity_, rhs.capacity_);
   std::swap(readerIndex_, rhs.readerIndex_);
   std::swap(writerIndex_, rhs.writerIndex_);
 }
@@ -239,11 +323,22 @@ ByteBuffer::ensureWritableBytes(size_t len) {
 
 void
 ByteBuffer::makeSpace(size_t len) {
-  // 若当前可写空间加上头部已被消费的空间仍不够需求，则直接扩容 buffer_
   if (writableBytes() + prependableBytes() < len + kCheapPrepend) {
-    buffer_.resize(writerIndex_ + len);
+    size_t new_cap = std::max(capacity_ * 2, writerIndex_ + len);
+    if (pooled_block_) {
+      heap_fallback_.resize(new_cap);
+      if (data_ptr_ && writerIndex_ > 0) {
+        std::memcpy(heap_fallback_.data(), data_ptr_, writerIndex_);
+      }
+      pooled_block_.reset();
+      data_ptr_ = heap_fallback_.data();
+      capacity_ = heap_fallback_.size();
+    } else {
+      heap_fallback_.resize(new_cap);
+      data_ptr_ = heap_fallback_.data();
+      capacity_ = heap_fallback_.size();
+    }
   } else {
-    // 内存碎片整理：将已读留下的头部空间挪动复用（类似 muduo 的内部整理）
     assert(kCheapPrepend < readerIndex_);
     size_t readable = readableBytes();
     std::copy(begin() + readerIndex_, begin() + writerIndex_, begin() + kCheapPrepend);

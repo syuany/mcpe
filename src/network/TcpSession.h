@@ -112,7 +112,6 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
    * @brief 异步读循环驱动函数
    * 从 socket 中读取数据写入临时 buffer，追加到 cumulative_buf_，并通过 PacketFraming 循环切包
    */
-  // void doRead();
 
   asio::awaitable<void> readerLoop();
 
@@ -127,7 +126,8 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
 
   protocol::ConnectionState state_{protocol::ConnectionState::HANDSHAKING};  ///< 当前协议状态
 
-  SessionReadBuffer read_buffer_;  ///< 零常驻、惰性池化接收缓冲区，用于拼凑半包与处理粘包（直读零拷贝）
+  SessionReadBuffer
+      read_buffer_;  ///< 零常驻、惰性池化接收缓冲区，用于拼凑半包与处理粘包（直读零拷贝）
 
   std::deque<ByteBuffer> write_queue_;  ///< 发送写缓冲队列，排队待下发的数据包
   bool is_writing_{false};  ///< 当前是否有尚未完成的 async_write 正在飞行中
