@@ -14,6 +14,7 @@
 #include <string>
 
 #include "common/ByteBuffer.h"
+#include "network/SessionReadBuffer.h"
 #include "protocol/ConnectionState.h"
 
 namespace mcpe::network {
@@ -126,9 +127,7 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
 
   protocol::ConnectionState state_{protocol::ConnectionState::HANDSHAKING};  ///< 当前协议状态
 
-  std::array<char, 4096> read_buffer_;  ///< 每次底层 read_some 的临时栈/静态内存缓冲区
-
-  ByteBuffer cumulative_buf_;  ///< 接收端累积缓冲区，用于拼凑半包与处理粘包
+  SessionReadBuffer read_buffer_;  ///< 零常驻、惰性池化接收缓冲区，用于拼凑半包与处理粘包（直读零拷贝）
 
   std::deque<ByteBuffer> write_queue_;  ///< 发送写缓冲队列，排队待下发的数据包
   bool is_writing_{false};  ///< 当前是否有尚未完成的 async_write 正在飞行中

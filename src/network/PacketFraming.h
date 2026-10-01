@@ -28,6 +28,19 @@ class PacketFraming {
   /// 单包最大合法上限（2MB = 2097151 字节，超出则直接拒绝，防止恶意连接发动 OOM 攻击）
   static constexpr size_t kMaxPacketSize = 2097151;
 
+  struct FrameResult {
+    ByteBuffer packet;
+    size_t consumed_bytes{0};
+  };
+
+  /**
+   * @brief 从连续内存视图中尝试切出一个完整数据包（零拷贝输入，支持基于 SessionReadBuffer 切包）
+   *
+   * @param view 当前未消费的可读数据零拷贝视图
+   * @return 成功返回拆分出的数据包 ByteBuffer 以及消耗的总字节数（包长前缀 + 包体），失败返回 FramingError
+   */
+  static std::expected<FrameResult, FramingError> slicePacketFromView(std::string_view view);
+
   /**
    * @brief 从累积接收缓冲区中尝试切出一个完整的数据包
    *

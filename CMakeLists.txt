@@ -52,6 +52,7 @@ add_library(mcpe_common STATIC
     src/common/ByteBuffer.cc
     src/common/VarInt.cc
     src/common/BufferPool.cc
+    src/common/ShardedBufferPool.cc
 )
 
 target_include_directories(mcpe_common PUBLIC
@@ -178,6 +179,29 @@ target_link_libraries(test_buffer_pool PRIVATE
     GTest::gtest_main
 )
 
+# ShardedBufferPool 分片内存池与工作窃取测试
+add_executable(test_sharded_buffer_pool
+    tests/test_sharded_buffer_pool.cc
+)
+
+target_compile_options(test_sharded_buffer_pool PRIVATE -O3)
+target_link_libraries(test_sharded_buffer_pool PRIVATE
+    mcpe_common
+    GTest::gtest_main
+)
+
+# SessionReadBuffer 零常驻池化网络接收缓冲测试
+add_executable(test_session_read_buffer
+    tests/test_session_read_buffer.cc
+)
+
+target_compile_options(test_session_read_buffer PRIVATE -O3)
+target_link_libraries(test_session_read_buffer PRIVATE
+    mcpe_network
+    mcpe_common
+    GTest::gtest_main
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
@@ -187,4 +211,6 @@ gtest_discover_tests(test_framing)
 gtest_discover_tests(test_packet_router)
 gtest_discover_tests(test_uuid)
 gtest_discover_tests(test_buffer_pool)
+gtest_discover_tests(test_sharded_buffer_pool)
+gtest_discover_tests(test_session_read_buffer)
 

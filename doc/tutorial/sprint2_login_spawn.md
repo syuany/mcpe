@@ -839,7 +839,7 @@ void TcpSession::startKeepAliveTimer() {
   // 启动独立的保活心跳协程
   asio::co_spawn(
       socket_.get_executor(),
-      [self = shared_from_this()]() { return self->keepAliveLoop(); },
+      std::bind_front(&TcpSession::keepAliveLoop, shared_from_this()),
       asio::detached
   );
 }

@@ -9,6 +9,7 @@
 
 #include <asio.hpp>
 #include <cstdint>
+#include <functional>
 
 #include "network/TcpServer.h"
 #include "protocol/PacketRouter.h"
@@ -16,6 +17,10 @@
 namespace {
 constexpr uint16_t kServerPort = 25566;
 }
+
+using namespace mcpe;
+using namespace mcpe::network;
+using namespace mcpe::protocol;
 
 int
 main() {
@@ -30,12 +35,11 @@ main() {
     asio::io_context io_context;
 
     // 2. 使用独立端口，避免与 Cuberite 的 25565 冲突
-    mcpe::network::TcpServer server(io_context, kServerPort);
+    TcpServer server(io_context, kServerPort);
 
     // 注入协议层路由器回调：保持网络层与业务协议层的低耦合
-    server.setPacketHandler([](const std::shared_ptr<mcpe::network::TcpSession>& session,
-                               mcpe::ByteBuffer packet) {
-      mcpe::protocol::PacketRouter::dispatch(session, session->state(), std::move(packet));
+    server.setPacketHandler([](const std::shared_ptr<TcpSession>& session, ByteBuffer packet) {
+      PacketRouter::dispatch(session, session->state(), std::move(packet));
     });
 
     server.start();

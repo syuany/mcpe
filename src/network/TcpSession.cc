@@ -33,7 +33,10 @@ void
 TcpSession::start() {
   // 使用 asio::co_spawn 将协程投递到底层 socket 所在的 executor 上并发运行
   asio::co_spawn(
-      socket_.get_executor(), [self = shared_from_this()]() { return self->readerLoop(); },
+      socket_.get_executor(),
+      [self = shared_from_this()]() {
+        return self->readerLoop();
+      },
       asio::detached  // asio::detached 表示分离执行，协程自生自灭，异常与退出自主管理
   );
 }
@@ -43,6 +46,8 @@ TcpSession::stop() {
   // 保证幂等：若已经处于停止状态则直接返回，防止并发或重复关闭
   if (is_stopped_) return;
   is_stopped_ = true;
+
+  read_buffer_.recycle();
 
   asio::error_code ec;
   socket_.close(ec);
@@ -79,7 +84,8 @@ TcpSession::readerLoop() {
 
   while (!is_stopped_) {
     auto [ec, bytes_transferred] = co_await socket_.async_read_some(
-        asio::buffer(read_buffer_), asio::as_tuple(asio::use_awaitable)
+        read_buffer_.prepareWriteBuffer(),
+        asio::as_tuple(asio::use_awaitable)
     );
 
     if (ec) {
@@ -89,19 +95,21 @@ TcpSession::readerLoop() {
       } else if (ec != asio::error::operation_aborted) {
         spdlog::warn("[Session] Read error on {}: {}", remote_address_, ec.message());
       }
+      read_buffer_.recycle();
       break;
     }
 
-    // 1. 将本次读取到的原始字节追加到累积接收缓冲区
-    cumulative_buf_.append(read_buffer_.data(), bytes_transferred);
+    // 1. 推进缓冲区写游标（内核直写物理块，0 次额外用户态拷贝）
+    read_buffer_.commit(bytes_transferred);
 
     // 2. 循环拆包：应对 TCP 粘包（一次收到多个包）和半包（数据包未收全）
     bool has_malformed_packet = false;
     while (true) {
-      auto frame_res = PacketFraming::slicePacket(cumulative_buf_);
+      auto frame_res = PacketFraming::slicePacketFromView(read_buffer_.unconsumedView());
       if (!frame_res) {
         if (frame_res.error() == FramingError::kIncomplete) {
-          // 半包：数据未到齐，跳出循环等待下一次 TCP 读取
+          // 半包：就地碎片整理并等待后续 TCP 读取
+          read_buffer_.compactIfIncomplete();
           break;
         }
         // 畸形包（包长超过上限或非法负数）：视为恶意攻击，立即踢出并记录日志
@@ -110,16 +118,18 @@ TcpSession::readerLoop() {
         break;
       }
 
-      // 成功切出一个完整 Minecraft 协议包
-      ByteBuffer packet = std::move(*frame_res);
+      // 划过该整包字节（若整块刚好被切包读完，内部立即触发 recycle() 恢复 0 字节占用）
+      read_buffer_.consume(frame_res->consumed_bytes);
+
       spdlog::debug(
-          "[Session] Sliced complete packet with {} bytes from {}", packet.readableBytes(),
+          "[Session] Sliced complete packet with {} bytes from {}",
+          frame_res->packet.readableBytes(),
           remote_address_
       );
 
       // 通过注册的回调函数将数据包分发至协议层（保持网络层与协议层解耦）
       if (packet_handler_) {
-        packet_handler_(shared_from_this(), std::move(packet));
+        packet_handler_(shared_from_this(), std::move(frame_res->packet));
       }
     }
     if (has_malformed_packet) break;
@@ -141,7 +151,8 @@ TcpSession::doWrite() {
   auto self = shared_from_this();
 
   asio::async_write(
-      socket_, asio::buffer(front_buf.peek(), front_buf.readableBytes()),
+      socket_,
+      asio::buffer(front_buf.peek(), front_buf.readableBytes()),
       [this, self](const asio::error_code& ec, std::size_t bytes_transferred) {
         (void)bytes_transferred;
         if (is_stopped_) return;

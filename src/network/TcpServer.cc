@@ -4,6 +4,7 @@
 #include <asio/error.hpp>
 #include <asio/error_code.hpp>
 #include <asio/use_awaitable.hpp>
+#include <functional>
 #include <memory>
 
 #include "network/TcpSession.h"
@@ -20,7 +21,11 @@ TcpServer::TcpServer(asio::io_context& io_context, uint16_t port)
 void
 TcpServer::start() {
   is_running_ = true;
-  asio::co_spawn(acceptor_.get_executor(), [this]() { return listenLoop(); }, asio::detached);
+  asio::co_spawn(
+      acceptor_.get_executor(),
+      std::bind_front(&TcpServer::listenLoop, this),
+      asio::detached
+  );
 }
 
 void
