@@ -51,12 +51,14 @@ add_subdirectory(lib/googletest EXCLUDE_FROM_ALL)
 add_library(mcpe_common STATIC
     src/common/ByteBuffer.cc
     src/common/VarInt.cc
+    src/common/BufferPool.cc
 )
 
 target_include_directories(mcpe_common PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
+target_compile_options(mcpe_common PRIVATE -O3)
 target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio)
 
 # ==============================================
@@ -165,6 +167,17 @@ target_link_libraries(test_uuid PRIVATE
     GTest::gtest_main
 )
 
+# BufferPool 测试
+add_executable(test_buffer_pool
+    tests/test_buffer_pool.cc
+)
+
+target_compile_options(test_buffer_pool PRIVATE -O3)
+target_link_libraries(test_buffer_pool PRIVATE
+    mcpe_common
+    GTest::gtest_main
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
@@ -173,3 +186,5 @@ gtest_discover_tests(test_tcp_session)
 gtest_discover_tests(test_framing)
 gtest_discover_tests(test_packet_router)
 gtest_discover_tests(test_uuid)
+gtest_discover_tests(test_buffer_pool)
+
