@@ -157,7 +157,7 @@ target_link_libraries(mcpe_protocol PUBLIC mcpe_network mcpe_common)
 # ==============================================
 # 可执行文件 server
 # ==============================================
-add_executable(server src/main.cc)
+add_executable(server src/server.cc)
 
 target_link_libraries(server PRIVATE mcpe_protocol mcpe_network mcpe_common)
 

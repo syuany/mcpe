@@ -1,5 +1,5 @@
 /**
- * @file main.cc
+ * @file server.cc
  * @brief MCPE (Minecraft Pocket / Java Edition) 服务端主程序入口
  *
  * 负责启动 Asio 事件循环，在 0.0.0.0:25566 监听原版 Minecraft 1.12.2 (Protocol 340) 客户端连入。
