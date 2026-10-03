@@ -1,0 +1,16 @@
+backup/
+build/
+bin/
+# .vscode/
+examples/
+*.md
+# 例外：docs/ 与 doc/ 下的技术文档与协议存档必须纳入版本控制
+!docs/**/*.md
+!docs/*.md
+!doc/**/*.md
+!doc/*.md
+!README.md
+
+reference/
+/sprints/
+/tutorial/

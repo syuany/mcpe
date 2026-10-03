@@ -1,4 +1,23 @@
 {
+    "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/**": true,
+    "**/build/**": true,
+    "**/lib/**": true
+    },
+
+    // 2. 避免全局搜索和快速打开时扫描 build 目录
+    "search.exclude": {
+        "**/build": true,
+        "**/*.o": true,
+        "**/*.a": true
+    },
+
+    // 3. 避免 Git 插件扫描大型构建产物
+    "git.autorefresh": false,
+    "git.status.submodules": false,
+
     "clangd.path": "clangd",
     "clangd.arguments": [
         "--compile-commands-dir=${workspaceFolder}/build",

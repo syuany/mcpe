@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # 生成 compile_commands.json 供 clangd 使用
 
+# 统一二进制产物输出路径：主程序输出至 bin/，归档静态库输出至 build/lib/
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
 # 开启编译警告（便于发现潜在问题）
 if(MSVC)
     add_compile_options(/W4)
@@ -37,13 +41,71 @@ if(WIN32)
     target_compile_definitions(asio INTERFACE _WIN32_WINNT=0x0A00)
 endif()
 
-# 2. spdlog (静态库)
-add_subdirectory(lib/spdlog EXCLUDE_FROM_ALL)
+# 2. spdlog (纯头文件接口库，零编译开销)
+add_library(spdlog INTERFACE)
+target_include_directories(spdlog SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/lib/spdlog/include)
+target_link_libraries(spdlog INTERFACE Threads::Threads)
+add_library(spdlog::spdlog ALIAS spdlog)
 
 # 3. GoogleTest (单元测试框架)
 # Windows 上避免 gtest 强制替换 CRT 设置
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 add_subdirectory(lib/googletest EXCLUDE_FROM_ALL)
+
+# 4. jemalloc 高性能多线程内存分配器（预编译静态库，强制依赖）
+set(JEMALLOC_PREBUILT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/jemalloc")
+
+if(EXISTS "${JEMALLOC_PREBUILT_DIR}/lib/libjemalloc.a" AND EXISTS "${JEMALLOC_PREBUILT_DIR}/include/jemalloc/jemalloc.h")
+    set(JEMALLOC_LIB "${JEMALLOC_PREBUILT_DIR}/lib/libjemalloc.a")
+    set(JEMALLOC_INCLUDE_DIR "${JEMALLOC_PREBUILT_DIR}/include")
+    message(STATUS "Using embedded prebuilt jemalloc: ${JEMALLOC_LIB}")
+else()
+    # 兜底查找系统已安装的 jemalloc
+    find_path(JEMALLOC_INCLUDE_DIR
+        NAMES jemalloc/jemalloc.h
+        PATHS /usr/include /usr/local/include
+    )
+    find_library(JEMALLOC_LIB
+        NAMES jemalloc
+        PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib
+    )
+    if(NOT JEMALLOC_LIB)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(JEMALLOC QUIET jemalloc)
+            if(JEMALLOC_FOUND)
+                set(JEMALLOC_LIB ${JEMALLOC_LIBRARIES})
+                set(JEMALLOC_INCLUDE_DIR ${JEMALLOC_INCLUDE_DIRS})
+            endif()
+        endif()
+    endif()
+endif()
+
+if(NOT JEMALLOC_LIB)
+    message(FATAL_ERROR 
+        "jemalloc is strictly REQUIRED but was not found in lib/jemalloc or system!\n"
+        "Please provide prebuilt lib/jemalloc or install development package:\n"
+        "  Debian/Ubuntu: sudo apt-get install -y libjemalloc-dev\n"
+        "  RHEL/CentOS:   sudo yum install -y jemalloc-devel\n"
+        "  macOS:         brew install jemalloc\n"
+    )
+endif()
+
+message(STATUS "Found jemalloc library: ${JEMALLOC_LIB}")
+if(JEMALLOC_INCLUDE_DIR)
+    message(STATUS "Found jemalloc include: ${JEMALLOC_INCLUDE_DIR}")
+endif()
+
+# 创建全局静态导入目标 jemalloc::jemalloc
+add_library(jemalloc::jemalloc STATIC IMPORTED GLOBAL)
+set_target_properties(jemalloc::jemalloc PROPERTIES
+    IMPORTED_LOCATION "${JEMALLOC_LIB}"
+)
+if(JEMALLOC_INCLUDE_DIR)
+    set_target_properties(jemalloc::jemalloc PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${JEMALLOC_INCLUDE_DIR}"
+    )
+endif()
 
 # ==============================================
 # 模块1: mcpe_common 静态库
@@ -51,8 +113,6 @@ add_subdirectory(lib/googletest EXCLUDE_FROM_ALL)
 add_library(mcpe_common STATIC
     src/common/ByteBuffer.cc
     src/common/VarInt.cc
-    src/common/BufferPool.cc
-    src/common/ShardedBufferPool.cc
 )
 
 target_include_directories(mcpe_common PUBLIC
@@ -60,7 +120,7 @@ target_include_directories(mcpe_common PUBLIC
 )
 
 target_compile_options(mcpe_common PRIVATE -O3)
-target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio)
+target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio jemalloc::jemalloc ${CMAKE_DL_LIBS})
 
 # ==============================================
 # 模块2: mcpe_network 静态库
@@ -85,6 +145,7 @@ add_library(mcpe_protocol STATIC
     src/protocol/StatusHandler.cc
     src/protocol/AuthUtils.cc
     src/protocol/LoginHandler.cc
+    src/protocol/PlayHandler.cc
 )
 
 target_include_directories(mcpe_protocol PUBLIC
@@ -101,9 +162,10 @@ add_executable(main src/main.cc)
 target_link_libraries(main PRIVATE mcpe_protocol mcpe_network mcpe_common)
 
 # ==============================================
-# 单元测试
+# 单元测试（归档输出至 bin/tests 保持顶层 bin 清洁）
 # ==============================================
 enable_testing()
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin/tests)
 
 add_executable(test_bytebuffer
     tests/test_bytebuffer.cc
@@ -168,40 +230,6 @@ target_link_libraries(test_uuid PRIVATE
     GTest::gtest_main
 )
 
-# BufferPool 测试
-add_executable(test_buffer_pool
-    tests/test_buffer_pool.cc
-)
-
-target_compile_options(test_buffer_pool PRIVATE -O3)
-target_link_libraries(test_buffer_pool PRIVATE
-    mcpe_common
-    GTest::gtest_main
-)
-
-# ShardedBufferPool 分片内存池与工作窃取测试
-add_executable(test_sharded_buffer_pool
-    tests/test_sharded_buffer_pool.cc
-)
-
-target_compile_options(test_sharded_buffer_pool PRIVATE -O3)
-target_link_libraries(test_sharded_buffer_pool PRIVATE
-    mcpe_common
-    GTest::gtest_main
-)
-
-# SessionReadBuffer 零常驻池化网络接收缓冲测试
-add_executable(test_session_read_buffer
-    tests/test_session_read_buffer.cc
-)
-
-target_compile_options(test_session_read_buffer PRIVATE -O3)
-target_link_libraries(test_session_read_buffer PRIVATE
-    mcpe_network
-    mcpe_common
-    GTest::gtest_main
-)
-
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
@@ -210,7 +238,3 @@ gtest_discover_tests(test_tcp_session)
 gtest_discover_tests(test_framing)
 gtest_discover_tests(test_packet_router)
 gtest_discover_tests(test_uuid)
-gtest_discover_tests(test_buffer_pool)
-gtest_discover_tests(test_sharded_buffer_pool)
-gtest_discover_tests(test_session_read_buffer)
-

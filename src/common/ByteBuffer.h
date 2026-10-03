@@ -14,7 +14,6 @@
 #include <string_view>
 #include <vector>
 
-#include "common/BufferPool.h"
 #include "common/VarInt.h"
 
 namespace mcpe {
@@ -31,86 +30,85 @@ namespace mcpe {
  * 0      <=      readerIndex_   <=   writerIndex_    <=    size
  *
  * 核心特性：
- * 1. Cheap Prepend（头部预留 8 字节）：允许在不重新分配和挪动内存的情况下，O(1) 前插协议包长 VarInt
- * 前缀。
- * 2.
- * 自动扩容与内存碎片整理：当可写空间不足但头部有已读空闲时，自动向前挪动数据复用空间（makeSpace）。
+ * 1. Cheap Prepend（头部预留 8 字节）：允许在不重新分配和挪动内存的情况下，O(1) 前插协议包长 VarInt 前缀。
+ * 2. 自动扩容与内存碎片整理：当可写空间不足但头部有已读空闲时，自动向前挪动数据复用空间（makeSpace）。
  * 3. 泛型大端数值读写：支持 int8_t~int64_t, uint8_t~uint64_t, float, double 大端序列化与反序列化。
  * 4. 原生支持 Minecraft 协议类型：VarInt, VarLong, String。
  * 5. 零副作用预览（peek*）与 RAII 事务快照（Mark），支撑协议拆包与多字段原子解析。
  */
 class ByteBuffer {
  public:
-  static constexpr size_t kCheapPrepend = 8;
-  static constexpr size_t kInitialSize = BufferPool::kBlockSize - kCheapPrepend;
-  static constexpr size_t kMaxVarIntBytes = varint::kMaxVarIntBytes;
-  static constexpr size_t kMaxVarLongBytes = varint::kMaxVarLongBytes;
+  static constexpr size_t kCheapPrepend = 8;    ///< 头部预留用于前插协议头的字节数
+  static constexpr size_t kInitialSize = 1024;  ///< 默认初始容量
+  static constexpr size_t kMaxVarIntBytes = varint::kMaxVarIntBytes;    ///< VarInt 最大 5 字节
+  static constexpr size_t kMaxVarLongBytes = varint::kMaxVarLongBytes;  ///< VarLong 最大 10 字节
 
-  ByteBuffer();
-  explicit ByteBuffer(size_t initialSize);
-  explicit ByteBuffer(PooledBlock block, size_t capacity = BufferPool::kBlockSize) noexcept;
+  /**
+   * @brief 构造函数：初始化具有预留头部的缓冲区
+   * @param initialSize 初始可写空间大小（默认为 1024 字节）
+   */
+  explicit ByteBuffer(size_t initialSize = kInitialSize)
+      : buffer_(kCheapPrepend + initialSize),
+        readerIndex_(kCheapPrepend),
+        writerIndex_(kCheapPrepend) {
+    assert(readableBytes() == 0);
+    assert(writableBytes() == initialSize);
+    assert(prependableBytes() == kCheapPrepend);
+  }
 
-  // Move-Only 契约：禁止隐式深拷贝
+  // Move-Only 契约：禁止隐式深拷贝（如需复制请显式调用 clone()）
   ByteBuffer(const ByteBuffer&) = delete;
   ByteBuffer& operator=(const ByteBuffer&) = delete;
 
-  ByteBuffer(ByteBuffer&& other) noexcept;
-  ByteBuffer& operator=(ByteBuffer&& other) noexcept;
+  // 支持高效的移动语义
+  ByteBuffer(ByteBuffer&& other) noexcept = default;
+  ByteBuffer& operator=(ByteBuffer&& other) noexcept = default;
   ~ByteBuffer() = default;
 
-  [[nodiscard]] ByteBuffer clone() const;
-  void swap(ByteBuffer& rhs) noexcept;
-  [[nodiscard]] bool isPooled() const noexcept { return pooled_block_ != nullptr; }
-
-  size_t
-  readableBytes() const noexcept {
-    return writerIndex_ - readerIndex_;
-  }
-  size_t
-  writableBytes() const noexcept {
-    return capacity_ - writerIndex_;
-  }
-  size_t
-  prependableBytes() const noexcept {
-    return readerIndex_;
+  /**
+   * @brief 显式深拷贝：克隆出一个内容完全一致、拥有独立内存空间的 ByteBuffer
+   */
+  [[nodiscard]] ByteBuffer clone() const {
+    ByteBuffer copy(readableBytes());
+    copy.append(peek(), readableBytes());
+    return copy;
   }
 
-  const char*
-  peek() const noexcept {
-    return begin() + readerIndex_;
+  /**
+   * @brief 与另一个 ByteBuffer 高效交换底层内容
+   */
+  void swap(ByteBuffer& rhs) noexcept {
+    buffer_.swap(rhs.buffer_);
+    std::swap(readerIndex_, rhs.readerIndex_);
+    std::swap(writerIndex_, rhs.writerIndex_);
   }
-  char*
-  beginWrite() noexcept {
-    return begin() + writerIndex_;
-  }
+
+  // ---------------------------------------------------------------------------
+  // 基础游标与容量查询接口
+  // ---------------------------------------------------------------------------
+
+  size_t readableBytes() const noexcept { return writerIndex_ - readerIndex_; }
+  size_t writableBytes() const noexcept { return buffer_.size() - writerIndex_; }
+  size_t prependableBytes() const noexcept { return readerIndex_; }
+
+  const char* peek() const noexcept { return begin() + readerIndex_; }
+  char* beginWrite() noexcept { return begin() + writerIndex_; }
 
   void ensureWritableBytes(size_t len);
 
-  void
-  hasWritten(size_t len) noexcept {
+  void hasWritten(size_t len) noexcept {
     assert(len <= writableBytes());
     writerIndex_ += len;
   }
 
   // 向 Buffer 追加连续内存块区域的数据
   void append(const char* data, size_t len);
-
-  // 向 Buffer 追加无类型指针的数据
   void append(const void* data, size_t len);
-
-  // 向 Buffer 追加字符串视图
   void append(std::string_view str);
 
-  // 向末尾追加单个字节（常用原始字节写入）
-  void
-  appendByte(uint8_t byte) {
-    append(&byte, 1);
-  }
+  void appendByte(uint8_t byte) { append(&byte, 1); }
 
-  /** ① 谓词层：可读字节是否 ≥ count（不消费、不改状态、不涉及错误分类）。
-   *  拆包器用它判断整包是否到齐：if (!buf.hasBytes(packet_len)) return; */
-  [[nodiscard]] bool
-  hasBytes(size_t count) const noexcept {
+  [[nodiscard]] bool hasBytes(size_t count) const noexcept {
     return readableBytes() >= count;
   }
 
@@ -120,11 +118,9 @@ class ByteBuffer {
   // 统一通过 std::expected 返回结果，失败零副作用
   // ---------------------------------------------------------------------------
 
-  /** 以网络字节序（大端 Big-Endian）向末尾追加定长数值 */
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  void
-  writeBe(T value) {
+  void writeBe(T value) {
     if constexpr (sizeof(T) == 1) {
       append(&value, 1);
     } else if constexpr (std::integral<T>) {
@@ -142,13 +138,9 @@ class ByteBuffer {
     }
   }
 
-  /** 安全读取大端定长数值：
-   *  - 数据不足时返回 kIncomplete，读游标绝对不移动（失败零副作用）；
-   *  - 数据足够时转换为主机字节序，消费对应字节并返回结果。 */
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  [[nodiscard]] std::expected<T, DecodeError>
-  readBe() noexcept {
+  [[nodiscard]] std::expected<T, DecodeError> readBe() noexcept {
     if (!hasBytes(sizeof(T))) {
       return std::unexpected(DecodeError::kIncomplete);
     }
@@ -176,11 +168,9 @@ class ByteBuffer {
     }
   }
 
-  /** 非消费安全预览定长数值：成败均不移动读游标 */
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  [[nodiscard]] std::expected<T, DecodeError>
-  peekBe() const noexcept {
+  [[nodiscard]] std::expected<T, DecodeError> peekBe() const noexcept {
     if (!hasBytes(sizeof(T))) {
       return std::unexpected(DecodeError::kIncomplete);
     }
@@ -210,68 +200,39 @@ class ByteBuffer {
   void appendVarInt(int32_t value);
   void appendVarLong(int64_t value);
   void prependVarInt(int32_t value);
-  void
-  prependVarInt(size_t value) {
-    assert(
-        value <= static_cast<size_t>(std::numeric_limits<int32_t>::max()) &&
-        "Packet size exceeds int32_t"
-    );
+  void prependVarInt(size_t value) {
+    assert(value <= static_cast<size_t>(std::numeric_limits<int32_t>::max()) && "Packet size exceeds int32_t");
     prependVarInt(static_cast<int32_t>(value));
-  };
+  }
 
   void appendString(std::string_view str);
 
   [[nodiscard]] std::expected<int32_t, DecodeError> readVarInt() noexcept;
   [[nodiscard]] std::expected<int64_t, DecodeError> readVarLong() noexcept;
 
-  /** 读取 VarInt / VarLong 并返回数值及实际消费的字节数（成功时推进读游标） */
   [[nodiscard]] std::expected<VarIntResult, DecodeError> readVarIntWithBytes() noexcept;
   [[nodiscard]] std::expected<VarLongResult, DecodeError> readVarLongWithBytes() noexcept;
 
-  [[nodiscard]] std::expected<std::string, DecodeError>
-  readString(size_t maxBytes = 32767) noexcept;
+  [[nodiscard]] std::expected<std::string, DecodeError> readString(size_t maxBytes = 32767) noexcept;
 
   [[nodiscard]] std::expected<int32_t, DecodeError> peekVarInt() const noexcept;
   [[nodiscard]] std::expected<int64_t, DecodeError> peekVarLong() const noexcept;
 
-  /** 预览 VarInt / VarLong 并返回数值及占用的字节数（零副作用，不移动读游标） */
   [[nodiscard]] std::expected<VarIntResult, DecodeError> peekVarIntWithBytes() const noexcept;
   [[nodiscard]] std::expected<VarLongResult, DecodeError> peekVarLongWithBytes() const noexcept;
 
-  // 消费/移出 len 字节已读数据（向前移动 readerIndex_）
   void retrieve(size_t len) noexcept;
-
-  // 消费/移出数据直到指定指针位置 end
   void retrieveUntil(const char* end) noexcept;
-
-  // 提取 len 字节数据并作为 std::string 返回，同时将该部分从 Buffer 中移出
   [[nodiscard]] std::string retrieveAsString(size_t len);
-
-  // 提取所有可读数据并作为 std::string 返回，同时清空 Buffer
   [[nodiscard]] std::string retrieveAllAsString();
-
   void retrieveAll() noexcept;
 
-  // 获取当前可读区域的 std::string_view（零拷贝）
   [[nodiscard]] std::string_view toStringView() const noexcept;
-
-  // 获取当前可读区域的 std::span<const char>（零拷贝视图）
   [[nodiscard]] std::span<const char> toSpan() const noexcept;
 
-  // 向 prependable 头部预留区前插数据（通常用于封装协议头）
   void prepend(const void* data, size_t len) noexcept;
-
-  // 释放多余未使用的内存空间，缩减 Buffer 容量至合适大小
   void shrink(size_t reserve = 0);
 
-  /** 读游标快照（RAII 事务）。
-   *
-   *  用途：解析由多个字段组成的包体时"要么全成功、要么全回滚"。
-   *
-   *    ByteBuffer::Mark mark(buf);          // 记录当前读游标
-   *    if (!buf.readVarInt()) return;       // 提前 return：析构自动回滚到快照点
-   *    if (!buf.readString()) return;
-   *    mark.commit();                       // 全部字段成功，确认消费 */
   class Mark {
    public:
     explicit Mark(ByteBuffer& buf) noexcept : buf_(&buf), pos_(buf.readerIndex_) {}
@@ -281,15 +242,8 @@ class ByteBuffer {
     Mark& operator=(Mark&&) = delete;
     ~Mark() { rollback(); }
 
-    /** 确认消费：析构时不再回滚 */
-    void
-    commit() noexcept {
-      buf_ = nullptr;
-    }
-
-    /** 立即回滚到快照点（幂等，可重复调用） */
-    void
-    rollback() noexcept {
+    void commit() noexcept { buf_ = nullptr; }
+    void rollback() noexcept {
       if (buf_ != nullptr) {
         buf_->readerIndex_ = pos_;
         buf_ = nullptr;
@@ -302,23 +256,14 @@ class ByteBuffer {
   };
 
  private:
-  char*
-  begin() noexcept {
-    return data_ptr_;
-  }
-  const char*
-  begin() const noexcept {
-    return data_ptr_;
-  }
+  char* begin() noexcept { return buffer_.data(); }
+  const char* begin() const noexcept { return buffer_.data(); }
 
   void makeSpace(size_t len);
 
-  PooledBlock pooled_block_{nullptr};
-  std::vector<char> heap_fallback_;
-  char* data_ptr_{nullptr};
-  size_t capacity_{0};
-  size_t readerIndex_{kCheapPrepend};
-  size_t writerIndex_{kCheapPrepend};
+  std::vector<char> buffer_;
+  size_t readerIndex_;
+  size_t writerIndex_;
 };
 
 }  // namespace mcpe
