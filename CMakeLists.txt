@@ -155,11 +155,11 @@ target_include_directories(mcpe_protocol PUBLIC
 target_link_libraries(mcpe_protocol PUBLIC mcpe_network mcpe_common)
 
 # ==============================================
-# 可执行文件 main_app
+# 可执行文件 server
 # ==============================================
-add_executable(main src/main.cc)
+add_executable(server src/main.cc)
 
-target_link_libraries(main PRIVATE mcpe_protocol mcpe_network mcpe_common)
+target_link_libraries(server PRIVATE mcpe_protocol mcpe_network mcpe_common)
 
 # ==============================================
 # 单元测试（归档输出至 bin/tests 保持顶层 bin 清洁）
