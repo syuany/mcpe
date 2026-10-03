@@ -1,6 +1,6 @@
 # 从语法小白到架构思维：Minecraft 协议网关与世界同步引擎实战指南
 
-> **目标协议**：**Minecraft Java Edition 1.12.2（protocol 340）** —— 全项目统一版本；所有包 ID、字段类型与区块格式以 [`doc/03_protocol_340_cheatsheet.md`](03_protocol_340_cheatsheet.md) 为唯一权威参考。
+> **目标协议**：**Minecraft Java Edition 1.12.2（protocol 340）** —— 全项目统一版本；所有包 ID、字段类型与区块格式以 [`doc/protocol/protocol_340_cheatsheet.md`](../protocol/protocol_340_cheatsheet.md) 为唯一权威参考。
 > **面向读者**：刚学完 C++ 基本语法、读过或了解过一点 Muduo 网络库，渴望通过一个真实、高复杂度、具备硬核网络与并发特性的项目来提升大型项目架构能力的开发者。  
 > **核心原则**：**授人以渔，不直接贴业务实现代码**。聚焦于架构推演、模块解耦、时序逻辑、接口设计契约、可验证的测试方法、底层避坑指南与权威资源。
 
@@ -32,7 +32,7 @@
 ### 1.1 为什么你学了语法和 Muduo 依然无从下手？
 1. **语法是单词，工程是文章**：学完语法，你懂 `class`、`unique_ptr`、`lambda`，但面对一个庞大系统时，你不知道谁该创建谁、谁持有谁、生命周期何时结束。
 2. **Muduo 是现成的轮子，实际业务是复杂的装配厂**：学习 Muduo 时，教程通常把 `EventLoop`、`Channel`、`TcpServer` 都给你写好了，你只需要写个 `onMessage` 打印消息。但真实协议有粘包、半包、压缩、状态机、多线程数据投递、游戏世界状态同步，这之间的**胶水层与分层架构**才是工程的核心。
-3. **陷入了“在 main.cc 顺序写代码”的线性思维**：新手容易想一口气从 `socket` 监听写到玩家走路。大型项目的正确打开方式是：**定义清晰的模块边界与接口契约，把不确定的大任务拆解成可独立单元测试的微任务**。
+3. **陷入了“在 server.cc 顺序写代码”的线性思维**：新手容易想一口气从 `socket` 监听写到玩家走路。大型项目的正确打开方式是：**定义清晰的模块边界与接口契约，把不确定的大任务拆解成可独立单元测试的微任务**。
 
 ---
 
@@ -74,27 +74,26 @@
 ```
 mcpe/
 ├── CMakeLists.txt              # 顶层 CMake 构建脚本
+├── bin/                        # 产物输出目录（主程序 server、测试程序 tests/）
+├── lib/                        # 内嵌第三方依赖库（asio, spdlog, googletest, jemalloc 等）
 ├── doc/                        # 技术文档与协议备忘
-│   ├── 00_tutorial.md          # 本文：架构推演与阶段路线
-│   ├── 01_tasks_breakdown.md   # 敏捷任务拆解看板（WBS）
-│   ├── 03_protocol_340_cheatsheet.md  # ⭐ 协议 340（1.12.2）包 ID / 字段 / 区块格式唯一权威参考
-│   └── reference/              # ⭐ 离线协议存档（wiki.vg 全站镜像 + 机器可读数据，详见其 README）
-├── include/                    # 公共头文件（外部暴露或全局定义）
-│   └── mcpe/
-│       ├── common/             # 基础工具：ByteBuffer, VarInt, Endian
-│       ├── network/            # 网络层：TcpServer, TcpSession, PacketFraming
-│       ├── protocol/           # 协议层：Packet 定义、序列化、状态机定义
-│       └── world/              # 业务世界层：World, Player, Chunk, ChunkSection
-├── src/                        # 具体实现（内部逻辑）
-│   ├── common/
-│   ├── network/
-│   ├── protocol/
-│   ├── world/
-│   └── main.cc                 # 启动入口：解析配置、启动线程、装配组件
-└── tests/                      # 单元测试与压测工具
-    ├── test_bytebuffer.cc      # 验证缓冲区与大端小端
-    ├── test_varint.cc          # 验证 VarInt 边界与异常
-    └── bot_runner.cc           # 阶段 5 的无头压测机器人
+│   ├── tutorial/               # 教程系列（00_tutorial.md, sprint1..., sprint2...）
+│   ├── protocol/               # 协议规范（protocol_340_cheatsheet.md, packets_hex_dump.md）
+│   ├── sprints/                # 迭代规划与任务拆解看板（tasks_breakdown.md 等）
+│   ├── guides/                 # 架构专题指南
+│   └── reference/              # ⭐ 离线协议存档（wiki.vg 全站镜像 + 机器可读数据）
+├── src/                        # 具体源码与模块头文件（扁平化组织）
+│   ├── common/                 # 基础工具：ByteBuffer, VarInt
+│   ├── network/                # 网络层：TcpServer, TcpSession, PacketFraming
+│   ├── protocol/               # 协议层：PacketRouter, StatusHandler, LoginHandler, PlayHandler, AuthUtils
+│   └── server.cc               # 启动入口：解析配置、启动 Asio 事件循环与 TcpServer
+└── tests/                      # 单元测试（输出至 bin/tests/）
+    ├── test_bytebuffer.cc      # 验证缓冲区与大端读写
+    ├── test_varint.cc          # 验证 VarInt 边界与极限
+    ├── test_tcp_session.cc     # 验证 TcpSession 收发与并发安全
+    ├── test_framing.cc         # 验证包定界拆包
+    ├── test_packet_router.cc   # 验证协议路由器与状态机
+    └── test_uuid.cc            # 验证离线 UUID 生成
 ```
 
 ---
@@ -140,8 +139,8 @@ mcpe/
    * 在右键菜单中可直接以 Hex 查看原始 TCP 载荷，这是对齐协议的终极真理。
 2. **Minecraft 客户端（1.12.2 / protocol 340）**：
    * 推荐使用 **HMCL (Hello Minecraft! Launcher)** 启动器，设置离线模式，下载 **1.12.2** 版本。
-   * 📌 **版本一致性铁律**：本项目实现的是 **1.12.2（协议号 340）**。此处曾规划使用 1.8.8（协议号 47），但 1.8.8 的协议正文已从 wiki.vg 现行文档中下线，字段细节无法自洽核对，因此全项目统一升级到文档完整可得的最老版本：**1.12.2 / protocol 340**（<https://c4k3.github.io/wiki.vg/Protocol.html>）。用 1.8.8 客户端连本服务端会在登录阶段直接收到版本不符的 `Disconnect`，联调必须使用 1.12.2。
-   * 本文所有包 ID、字段类型与区块格式，均以 [`doc/03_protocol_340_cheatsheet.md`](03_protocol_340_cheatsheet.md) 为唯一权威参考。
+   * 📌 **版本一致性铁律**：本项目统一实现 **1.12.2（协议号 340）** 标准。客户端与服务端协议版本必须严格匹配，若客户端协议号不为 340，会在状态查询阶段显示不兼容红叉并在登录阶段收到版本不符的 `Disconnect` 断开提示，联调必须使用 1.12.2 客户端。
+   * 本文所有包 ID、字段类型与区块格式，均以 [`doc/protocol/protocol_340_cheatsheet.md`](../protocol/protocol_340_cheatsheet.md) 为唯一权威参考。
    * **至关重要的一步**：在启动器设置中开启 **“游戏启动时显示日志窗口（Game Log Console）”**。
    * 当你的协议字段写错时，Mojang 官方客户端会在控制台抛出极其明确的 Java 异常（如 `io.netty.handler.codec.DecoderException: VarInt too big` 或 `ArrayIndexOutOfBoundsException`），根据这个日志排查能省下 90% 的猜谜时间！
 3. **编译器 Sanitizer（动态分析消毒器）**：
@@ -230,7 +229,7 @@ mcpe/
 2. **半包不是错误**：它不该产生异常、更不该产生日志。把它当异常处理，等于让所有网络抖动都走一遍抛/捕路径，既慢又误导代码结构。
 3. **上限判断放在读第 6 / 第 11 个字节之前**，这样 `kMalformed` 和 `kIncomplete` 才是两个可判定的不同状态。
 
-> **关于"不想用异常"**：表驱动异常（Linux/GCC、Clang）在**不抛**的路径上是零开销的，成本只在 `throw` 路径与二进制体积上。但这里用错误码不是性能原因，而是语义原因——**半包是最常见的正常情况**，不该用异常表达。异常留给"这条连接没救了"的终止性事件（协议版本不支持等），并在收包回调边界用**唯一一个** `catch` 统一踢人。参考实现见 `doc/reference/`（Cuberite 在其 `cProtocol_1_8_0::AddReceivedData` 里就是 `if (!ReadVarInt(len)) { ResetRead(); break; }`，失败即回滚、等下一包，全程零异常）。
+> **关于"不想用异常"**：表驱动异常（Linux/GCC、Clang）在**不抛**的路径上是零开销的，成本只在 `throw` 路径与二进制体积上。但这里用错误码不是性能原因，而是语义原因——**半包是最常见的正常情况**，不该用异常表达。异常留给"这条连接没救了"的终止性事件（协议版本不支持等），并在收包回调边界用**唯一一个** `catch` 统一踢人。参考实现见 `doc/reference/`（Cuberite 在其 `cProtocol::AddReceivedData` 里就是 `if (!ReadVarInt(len)) { ResetRead(); break; }`，失败即回滚、等下一包，全程零异常）。
 
 #### 6. 分层落地：`bool` 只配待在谓词层
 
@@ -329,7 +328,7 @@ mcpe/
      }
      ```
    * 整个响应包先将 JSON 写为字符串（Minecraft 协议字符串前缀为该字符串长度的 VarInt），打上 Packet ID `0x00`，再计算总长度加在最外层。
-   * 1.12.2 的 `Ping (0x01)` / `Pong (0x01)` 载荷是 **`Long`（8 字节）**，不是 VarInt —— 这一点与 1.8 之后的多个版本一致，但常被写错。
+   * 1.12.2 的 `Ping (0x01)` / `Pong (0x01)` 载荷是 **`Long`（8 字节大端整数 int64_t）**，不是 VarInt。服务端收到后需原样回显该 8 字节时间戳。
    * **压缩包格式暂不启用**：本阶段不发送 `Set Compression (0x03)`，所有包一律走未压缩格式 `[Length:VarInt][ID:VarInt][Payload]`。压缩（`[Length][Data Length][zlib...]`）留到 Sprint 5 作为带宽优化项，避免在第 1 阶段就把拆包器复杂度翻倍。
 
 #### 4. 易错点与避坑指南
@@ -376,7 +375,7 @@ mcpe/
 2. **Join Game (0x23) 核心字段排布（严禁错乱）**：
    * `Entity ID`: `Int`（4 字节自增全局 ID，不可为 0，建议从 1 开始）。
    * `Gamemode`: `Unsigned Byte`（0: 生存, 1: 创造, 2: 冒险, 3: 旁观；bit3 `0x8` 是极限模式标志位）。推荐测试阶段填 `1`（创造模式，可以飞行防止直接掉虚空摔死）。
-   * `Dimension`: **`Int`**（-1: 地狱, 0: 主世界, 1: 末地）。⚠️ 1.12.2 是 **4 字节整数**，不再是 1.8 的 `int8`，也不是 VarInt。
+   * `Dimension`: **`Int`**（-1: 地狱, 0: 主世界, 1: 末地）。⚠️ 严格为 **4 字节大端整数 int32_t**，不要误用 1 字节或 VarInt。
    * `Difficulty`: `Unsigned Byte`（0: 和平, 1: 简单, 2: 普通, 3: 困难）。
    * `Max Players`: `Unsigned Byte`（如 100；1.12.2 客户端已忽略它的显示用途）。
    * `Level Type`: `String`（填 `"flat"` 或 `"default"`；合法枚举：`default` / `flat` / `largeBiomes` / `amplified` / `default_1_1`）。
@@ -385,7 +384,7 @@ mcpe/
    * 坐标：$X$ (`double`), $Y$ (`double`), $Z$ (`double`)。建议 $X=0.0, Y=64.0, Z=0.0$。
    * 视角：$Yaw$ (`float`), $Pitch$ (`float`)。
    * `Flags`: `uint8`。**必须填 `0x00`**（位域含义：`0x01`X 相对, `0x02`Y 相对, `0x04`Z 相对, `0x08`Yaw 相对, `0x10`Pitch 相对；填非零会被当作相对偏移，导致玩家坐标乱飘）。
-   * **`Teleport ID`: `VarInt`（1.9+ 新增，1.8 没有）**：维护一个自增计数器，每发一次 PPAL 就 `++`；客户端会回一个 `Teleport Confirm (0x00)` 携带同一个 ID。**服务端必须消费这个包并记录确认状态**。
+   * **`Teleport ID`: `VarInt`**：维护一个自增计数器，每发一次 PPAL 就 `++`；客户端会回一个 `Teleport Confirm (0x00)` 携带同一个 ID。**服务端必须消费这个包并记录确认状态**。
 4. **PLAY 状态的"必答包"清单（1.12.2 特有）**：
    * 进服后客户端会立刻主动发来 `Client Settings (0x04)` 与 `Plugin Message MC|Brand (0x09)`，之后偶尔发 `Player Abilities (0x13)`、`Held Item Change (0x1A)`、`Client Status (0x03)`。
    * **路由器必须为这些 ID 准备显式分支（哪怕只打一行 debug 日志）**；如果你的实现是"未注册 ID 一律断连"，1.12.2 客户端会在进服后一秒内被你自己踢掉，而且日志上看像是客户端在乱发包。
@@ -393,13 +392,13 @@ mcpe/
 #### 4. 易错点与避坑指南
 * ⚠️ **客户端死锁卡在 "Downloading Terrain" 界面**：
   * 这是 99% 初学者会遇到的头号大坑！
-  * **产生原因**：`Join Game` 之后，没有立刻下发 `Player Position And Look`，或者下发的包字段顺序、数据类型有偏差（例如把 `double` 误写为 `float`，或漏掉了 1.12.2 新增的 `Teleport ID`）。客户端一直在等待坐标确认，导致加载进度条永远卡死。
+  * **产生原因**：`Join Game` 之后，没有立刻下发 `Player Position And Look`，或者下发的包字段顺序、数据类型有偏差（例如把 `double` 误写为 `float`，或漏掉了 1.12.2 的 `Teleport ID`）。客户端一直在等待坐标确认，导致加载进度条永远卡死。
   * **排查手段**：用 Wireshark 抓 `lo` 网卡，逐字节核对 `Join Game` 后紧跟的那个包；`Dimension` 写成 1 字节是引发"后续全错位"的最常见元凶。
 * ⚠️ **20 秒内必踢出（Timed Out）**：
   * Minecraft 客户端内嵌了严格的超时看门狗。进服后，服务端如果不发送 `Keep Alive`，或者服务端发送了 `Keep Alive` 但未能正确读取客户端的 `Keep Alive` 回包，20 秒倒计时一到，客户端就会显示红字 `Timed out` 并主动断开连接。
   * **解决办法**：使用 `asio::steady_timer` 在 Session 中挂载周期任务（建议 10 秒一次，20 秒未收到应答即主动断开）。
 * ⚠️ **Keep Alive 载荷类型写错（1.12.2 高发）**：
-  * 1.12.2 的 `Keep Alive` 载荷是 **`Long`（8 字节）**：服务端下发 `0x1F`，客户端应答 `0x0B`。若按 1.8 的习惯写成 `VarInt`，客户端会在解码时抛 `DecoderException`，表现为"进服后几十秒内莫名断开，且服务端日志毫无异常"。
+  * 1.12.2 的 `Keep Alive` 载荷严格为 **`Long`（8 字节大端整数 int64_t）**：服务端下发 `0x1F`，客户端应答 `0x0B`。若误用 `VarInt`，客户端会在解码时抛 `DecoderException`，表现为"进服后几十秒内莫名断开，且服务端日志毫无异常"。
 
 ---
 
@@ -433,7 +432,7 @@ mcpe/
 1. **ChunkSection 内存组织**：
    * 方块状态存储：每个方块用一个 **全局调色板 state id**（`(blockId << 4) | metadata`，1.12.2 中占 13 位）表示，用 `uint16_t` 存正好合适。
    * 内存表示可用一维数组：`uint16_t blocks[4096]`。
-   * 空间局部性寻址公式（极度关键，1.12.2 与 1.8 完全一致）：
+   * 空间局部性寻址公式（极度关键）：
      `Index = (y << 8) | (z << 4) | x`，其中 $x, z \in [0, 15], y \in [0, 15]$。
 2. **生成简单的超平坦地形**：
    * 只填充 `ChunkSection 0`，写入的是 **全局调色板 state id**：
@@ -442,10 +441,10 @@ mcpe/
      * $Y=3$：草方块（Grass Block，`blockId=2` → state id `32`）
      * $Y \ge 4$：空气（Air，state id `0`）
    * 把 `state_id = (id << 4) | meta` 封装成一个独立函数（如 `to_global_palette_state()`），**绝不要在生成器里散落硬编码数字**——Mojang 已声明未来会重构全局调色板，硬编码会让升级变成噩梦。
-3. **序列化 Chunk Data (0x20) 包结构（1.12.2 全新格式，与 1.8 完全不同）**：
+3. **序列化 Chunk Data (0x20) 包结构（调色板与位压缩格式）**：
    * `Chunk X`: `Int`，`Chunk Z`: `Int`
    * `Ground-Up Continuous`: `bool`（新加载区块填 `true`）
-   * `Primary Bit Mask`: **`VarInt`**（表示哪些 Section 有数据；只填 Section 0 时就是 `0x01`。注意 1.8 是 u16，1.12.2 是 VarInt）
+   * `Primary Bit Mask`: **`VarInt`**（表示哪些 Section 有数据；只填 Section 0 时就是 `0x01`）
    * `Size`: `VarInt`（后续 `Data` 字节流的长度，**必须与实际写入字节数严格相等**）
    * `Data`: 字节流，按顺序拼接：
      1. **每个激活 Section 的完整结构**（自底向上，数量 == Bit Mask 中 1 的个数）：
@@ -481,9 +480,9 @@ mcpe/
     $ChunkX = \lfloor X / 16 \rfloor$。
   * 在 C/C++ 中，对于负数，整数除法 `/` 是**向零截断**的！例如 `-1 / 16 == 0`，但实际它应该属于区块 `-1`！
   * **正确做法**：使用位移运算（在算术右移下）：`int chunk_x = x >> 4;`。这能够天然满足负数向下取整的要求。
-* ⚠️ **把 1.8 的"每方块 2 字节小端"写法带到 1.12.2（最致命的迁移错误）**：
-  * 1.12.2 的方块数据是**调色板 + Long 位压缩数组**，并且 Long 是**大端**。若沿用旧格式，客户端会直接抛解码异常或把光照数据当方块读，表现为满屏乱方块/闪退。
-  * 请把 `doc/03_protocol_340_cheatsheet.md` §6 的算法当作唯一实现依据。
+* ⚠️ **方块数据格式与位压缩陷阱**：
+  * 1.12.2 的方块数据必须采用**调色板 + Long 位压缩数组**，并且每个 Long 在网络流中必须是**大端**。若格式或字节数算错，客户端会直接抛解码异常或把光照数据当方块读，表现为满屏乱方块或闪退。
+  * 请把 `doc/protocol/protocol_340_cheatsheet.md` §6 的算法当作唯一实现依据。
 * ⚠️ **客户端闪退抛出 `ArrayIndexOutOfBoundsException`**：
   * 客户端解析区块包时，完全依赖 `Primary Bit Mask` 中 `1` 的数量来推算后续数据流的长度。
   * 如果你的 BitMask 声称有 2 个 Section，但实际字节流只写了 1 个 Section 的数据，客户端解析到末尾数组越界，整个 Minecraft 进程会当场崩溃闪退。
@@ -557,7 +556,7 @@ mcpe/
   * **铁律**：网络线程只能做“解包”，解完后通过事件队列丢给主线程，主线程是修改游戏状态的唯一裁决者。
 * ⚠️ **相对位移包的 8 方块溢出边界（1.12.2 已从 Byte 改为 Short）**：
   * 1.12.2 的 `Entity Relative Move (0x26)` 中，$\Delta X, \Delta Y, \Delta Z$ 使用 **`Short`（定点数，单位 $\frac{1}{4096}$ 方块）** 存储：`delta = (int16)((current - previous) * 4096)`。
-  * 单轴最大跨度为 $32768 / 4096 = 8$ 个方块（1.8 是 Byte + $\frac{1}{32}$ 方块、上限 4 格，别照抄旧文档）。
+  * 单轴最大跨度为 $32768 / 4096 = 8$ 个方块。
   * 如果玩家发生了瞬移（传送）或者网络延迟后的大跨步位移，使用该包会导致坐标回弹错乱。一旦单轴移动距离 ≥ 8 方块，必须降级发送绝对坐标包 `Entity Teleport (0x4C)`。
   * 转头请用 `Entity Look And Relative Move (0x27)` / `Entity Look (0x28)`，其 `Yaw/Pitch` 是 **`Angle`（1 字节）且为绝对角度**，不是增量。
 * ⚠️ **漏发 `Player List Item (0x2E)` 导致"人不见了"**：
@@ -615,18 +614,18 @@ mcpe/
 
 ### 4.1 协议标准与数据定义手册
 
-> ⚠️ **wiki.vg 原站已彻底下线**（实测 `https://wiki.vg/` 与 `https://wiki.vg/Protocol` 均返回 TCP 连接被拒）。为避免再现"1.8.8 文档找不到"的窘境，**整站快照已随仓库留档**在 [`doc/reference/`](reference/README.md)，并提供机器可读的 1.12.2 协议/方块数据。**查阅请优先用本地副本**。
+> ⚠️ **wiki.vg 原站已彻底下线**（实测 `https://wiki.vg/` 与 `https://wiki.vg/Protocol` 均返回 TCP 连接被拒）。为保证文档长期稳定可用，**整站快照已随仓库留档**在 [`doc/reference/`](../reference/README.md)，并提供机器可读的 1.12.2 协议/方块数据。**查阅请优先用本地副本**。
 
-1. **本地全站存档**：[`doc/reference/wiki.vg/`](reference/README.md) —— 216 个页面（`.html` 保真可离线浏览 + `.txt` 可 grep），含出处 URL、抓取时间与 sha256 校验清单。协议正文见 [`reference/wiki.vg/Protocol.html`](reference/wiki.vg/Protocol.html)。
-2. **[本地] 区块格式专页**：[`reference/wiki.vg/Chunk_Format.html`](reference/wiki.vg/Chunk_Format.html)  
+1. **本地全站存档**：[`doc/reference/wiki.vg/`](../reference/README.md) —— 216 个页面（`.html` 保真可离线浏览 + `.txt` 可 grep），含出处 URL、抓取时间与 sha256 校验清单。协议正文见 [`../reference/wiki.vg/Protocol.html`](../reference/wiki.vg/Protocol.html)。
+2. **[本地] 区块格式专页**：[`../reference/wiki.vg/Chunk_Format.html`](../reference/wiki.vg/Chunk_Format.html)  
    * 区块包 `Data` 字段的权威结构说明：调色板（Palette）、位压缩 Long 数组（Bits Per Block）、光照半字节打包、生物群系数组与 Ground-Up Continuous 语义。
-3. **[本地] 数据类型**：[`reference/wiki.vg/Data_types.html`](reference/wiki.vg/Data_types.html)  
+3. **[本地] 数据类型**：[`../reference/wiki.vg/Data_types.html`](../reference/wiki.vg/Data_types.html)  
    * 规范了 VarInt、VarLong、Position（64位位域打包）、Angle、定点数等特殊数据类型的严格编码算法。
-4. **[本地] 服务器列表 Ping**：[`reference/wiki.vg/Server_List_Ping.html`](reference/wiki.vg/Server_List_Ping.html)  
+4. **[本地] 服务器列表 Ping**：[`../reference/wiki.vg/Server_List_Ping.html`](../reference/wiki.vg/Server_List_Ping.html)  
    * `Handshake → Request → Response → Ping → Pong` 全流程与 JSON 字段语义（含 `favicon`、`players.sample`）。
-5. **机器可读交叉校验**：[`reference/minecraft-data/1.12.2/protocol.json`](reference/minecraft-data/1.12.2/protocol.json)、[`reference/minecraft-data/1.12/blocks.json`](reference/minecraft-data/1.12/blocks.json)  
+5. **机器可读交叉校验**：[`../reference/minecraft-data/1.12.2/protocol.json`](../reference/minecraft-data/1.12.2/protocol.json)、[`../reference/minecraft-data/1.12/blocks.json`](../reference/minecraft-data/1.12/blocks.json)  
    * 前者是协议定义的 JSON/YAML 版（可脚本化比对包 ID），后者是 1.12.2 的方块数字 ID ↔ 名称 ↔ metadata 变体表（实现区块序列化时查表用）。
-6. **本项目速查表**：[`doc/03_protocol_340_cheatsheet.md`](03_protocol_340_cheatsheet.md) —— 从上述文档中抽取、核对后的包 ID 全表与字段/坑位清单，**写代码时看它比翻网页快 10 倍**。
+6. **本项目速查表**：[`doc/protocol/protocol_340_cheatsheet.md`](../protocol/protocol_340_cheatsheet.md) —— 从上述文档中抽取、核对后的包 ID 全表与字段/坑位清单，**写代码时看它比翻网页快 10 倍**。
 
 ### 4.2 推荐必读书籍与对应核心章节
 * **《C++ Primer (第 5 版)》**：重点重温第 12 章（动态内存与智能指针 `shared_ptr` / `weak_ptr`）、第 13 章（拷贝控制与移动语义 `std::move`）。

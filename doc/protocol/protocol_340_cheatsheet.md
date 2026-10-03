@@ -1,53 +1,54 @@
 # Protocol 340（Minecraft 1.12.2）协议速查表 · 全库唯一权威参考
 
 > **文档定位**：本项目（MCPE）所有协议相关文档与代码的**唯一事实来源（Single Source of Truth）**。
-> `doc/00_tutorial.md`、`doc/01_tasks_breakdown.md`、`doc/sprints/*.md` 中出现的一切包 ID、字段类型、字节序、区块格式，均以本文为准；若与本文冲突，以本文为准，并回头修正其他文档。
+> `doc/tutorial/00_tutorial.md`、`doc/sprints/tasks_breakdown.md`、`doc/sprints/*.md` 中出现的一切包 ID、字段类型、字节序、区块格式，均以本文为准；若与本文冲突，以本文为准，并回头修正其他文档。
 >
 > **协议版本**：`340`（Minecraft Java Edition **1.12.2**）
-> **📁 本地全站存档**：[`doc/reference/wiki.vg/`](reference/README.md) —— wiki.vg 原站**已于实测中确认彻底下线**（TCP 连接被拒），故整站快照已随仓库本地留档；查阅原文请优先打开本地副本。
+> **📁 本地全站存档**：[`doc/reference/wiki.vg/`](../reference/README.md) —— wiki.vg 原站**已于实测中确认彻底下线**（TCP 连接被拒），故整站快照已随仓库本地留档；查阅原文请优先打开本地副本。
 > **权威来源（原始 URL，仅作溯源）**：
-> * 协议正文：`https://c4k3.github.io/wiki.vg/Protocol.html` → 本地 [`reference/wiki.vg/Protocol.html`](reference/wiki.vg/Protocol.html) / [`Protocol.txt`](reference/wiki.vg/Protocol.txt)
-> * 区块格式：`https://c4k3.github.io/wiki.vg/Chunk_Format.html`（`oldid=14135`）→ 本地 [`reference/wiki.vg/Chunk_Format.html`](reference/wiki.vg/Chunk_Format.html)
-> * 数据类型：`https://c4k3.github.io/wiki.vg/Data_types.html` → 本地 [`reference/wiki.vg/Data_types.html`](reference/wiki.vg/Data_types.html)
-> * 实体元数据：`https://c4k3.github.io/wiki.vg/Entities.html` → 本地 [`reference/wiki.vg/Entities.html`](reference/wiki.vg/Entities.html)
-> * 机器可读交叉校验：本地 [`reference/minecraft-data/1.12.2/protocol.json`](reference/minecraft-data/1.12.2/protocol.json)、[`reference/minecraft-data/1.12/blocks.json`](reference/minecraft-data/1.12/blocks.json)
+> * 协议正文：`https://c4k3.github.io/wiki.vg/Protocol.html` → 本地 [`../reference/wiki.vg/Protocol.html`](../reference/wiki.vg/Protocol.html) / [`Protocol.txt`](../reference/wiki.vg/Protocol.txt)
+> * 区块格式：`https://c4k3.github.io/wiki.vg/Chunk_Format.html`（`oldid=14135`）→ 本地 [`../reference/wiki.vg/Chunk_Format.html`](../reference/wiki.vg/Chunk_Format.html)
+> * 数据类型：`https://c4k3.github.io/wiki.vg/Data_types.html` → 本地 [`../reference/wiki.vg/Data_types.html`](../reference/wiki.vg/Data_types.html)
+> * 实体元数据：`https://c4k3.github.io/wiki.vg/Entities.html` → 本地 [`../reference/wiki.vg/Entities.html`](../reference/wiki.vg/Entities.html)
+> * 机器可读交叉校验：本地 [`../reference/minecraft-data/1.12.2/protocol.json`](../reference/minecraft-data/1.12.2/protocol.json)、[`../reference/minecraft-data/1.12/blocks.json`](../reference/minecraft-data/1.12/blocks.json)
 >
 > **引用规范**：wiki.vg 内容可自由用于实现服务端/客户端/机器人，但转载其内容需注明来源 `#mcdevs`。
 
 ---
 
-## 一、为什么本项目锁定 protocol 340 而不是 1.8.8（protocol 47）
+## 一、本项目协议规范与版本锁定
 
-| 维度 | 1.8.8（protocol 47） | **1.12.2（protocol 340）** |
-| :--- | :--- | :--- |
-| 协议文档可得性 | wiki.vg 现行页面已不保留该版本正文，仅有零散历史版本链接，字段细节缺失、无法自洽核对 | 官方镜像页正文完整（含每个包的字段表、区块格式专页、样例实现） |
-| 社区实现参考 | 极少 | 大量开源实现（Java / Python / C / C++ 均有 1.12.2 参考代码） |
-| 协议复杂度 | 较低（无 Teleport Confirm、区块为定长 2 字节/方块） | 较高，但**更能训练真实工程能力**（调色板位压缩、传送确认、压缩包格式） |
-| 本项目取舍 | ❌ 放弃 | ✅ **文档可查、可实现、可验收** |
+本项目统一实现 **Minecraft Java Edition 1.12.2（Protocol 340）** 协议标准。
+
+| 维度 | **1.12.2（Protocol 340）规范说明** |
+| :--- | :--- |
+| **协议文档体系** | 采用 wiki.vg 与 minecraft-data 权威正文规范（包含完整的包 ID 映射、字段表、Chunk 调色板格式及实体元数据） |
+| **生态支持与参考** | 现代主流开源服务端/客户端生态成熟，抓包与单测基准完备 |
+| **协议工程复杂度** | 涵盖 VarInt 长度分帧、直接/间接调色板位压缩（Palette Bit Packing）、传送确认（Teleport Confirm）、Keep Alive 定时心跳、可选 zlib 压缩等工业级特性 |
+| **项目实现目标** | 核心网络与协议链路完全自洽，支持原版 1.12.2 客户端免 Mod 直连进服与多人交互 |
 
 > **决策结论**：本项目目标客户端统一为 **Minecraft Java Edition 1.12.2**，握手协议号填写 `340`。
 > 客户端不匹配时的表现：状态查询阶段会显示红色 ✗ 与 "Outdated client/server"；登录阶段会收到 `Disconnect (login)` 并提示版本不符。
 
 ---
 
-## 二、全局替换映射（1.8.8 → 1.12.2）
+## 二、Protocol 340 核心网络与协议规范要素
 
-在阅读/维护旧文档时，按此表做**机械替换**：
+本项目在实现 Protocol 340 时必须严格遵循的底层规范与参数：
 
-| 项目 | 1.8.8 / protocol 47 | **1.12.2 / protocol 340** |
+| 项目 | **1.12.2 / Protocol 340 规范要求** | 备注与实现要点 |
 | :--- | :--- | :--- |
-| 协议号（Handshake / Status JSON） | `47` | **`340`** |
-| 版本名（Status JSON `version.name`） | `"1.8.8"` | **`"1.12.2"`** |
-| 默认端口 | `25565` | `25565`（未变） |
-| 外层包格式 | `[Length:VarInt][ID:VarInt][Payload]` | **未变** |
-| 整数/浮点多字节序 | 大端（Big-Endian） | **未变** |
-| Keep Alive 载荷类型 | `VarInt` | **`Long`（i64）** |
-| Join Game `Dimension` 类型 | `int8` | **`Int`（4 字节）** |
-| 出生点包是否带确认 | 否 | **是（`Teleport ID` + 客户端回 `Teleport Confirm`）** |
-| 区块方块数据 | 每方块 2 字节小端（`blockId<<4\|meta`） | **调色板 + 位压缩 Long 数组（格式完全重写）** |
-| 区块光照顺序 | 方块数据 → 方块光 → 天空光 → 生物群系 | **每个 Section 内：方块数据 → 方块光 → 天空光；生物群系在整列末尾** |
-| 相对位移量化 | `Byte`，$1/32$ 方块 | **`Short`，$1/4096$ 方块** |
-| 相对位移上限 | 4 方块 | **8 方块** |
+| 协议号（Handshake / Status JSON） | **`340`** | 客户端握手包校验与状态响应回显 |
+| 版本名（Status JSON `version.name`） | **`"1.12.2"`** | 显示于多人游戏列表 |
+| 默认监听端口 | **`25566`**（可配置，原版默认 25565） | 避免开发环境端口冲突 |
+| 外层包帧格式 | **`[Length: VarInt][ID: VarInt][Payload]`** | 底层 PacketFraming 长度切分 |
+| 整数/浮点多字节序 | **大端（Big-Endian）** | `writeBe` / `readBe` |
+| Keep Alive 载荷类型 | **`Long`（int64_t / 8 字节）** | 进服后心跳探测，双向一致 |
+| Join Game `Dimension` 类型 | **`Int`（int32_t / 4 字节）** | `-1`: 下界, `0`: 主世界, `1`: 末地 |
+| 出生点位移与确认机制 | **`Teleport ID: VarInt` + 客户端回 `Teleport Confirm`** | 必须由服务端消费确认 |
+| 区块方块数据格式 | **调色板（Palette） + 位压缩 Long 数组** | 详见 §6，直接调色板 13 位 |
+| 区块光照与群系布局 | **每个 Section：方块数据 → 方块光 → 天空光；生物群系位于整列末尾** | Sky Light 仅主世界发送 |
+| 实体相对位移量化 | **`Short`（int16_t），单位 $1/4096$ 方块** | 单轴上限 8 方块，超限降级 Entity Teleport |
 
 ---
 
@@ -136,7 +137,7 @@
 | `0x2C` | Player Abilities (clientbound) | 创造模式飞行开关（建议发） |
 | `0x2D` | Combat Event | — |
 | **`0x2E`** | **Player List Item** | Sprint 4，**必须先于 Spawn Player 发送** |
-| **`0x2F`** | **Player Position And Look (clientbound)** | Sprint 2 出生点，带 `Teleport ID` |
+| **`0x2F`** | **Player Position And Look (clientbound)** | Sprint 2 玩家位置与视线（落脚点与传送），带 `Teleport ID`，跳过地形下载 |
 | `0x30` | Use Bed | — |
 | `0x31` | Unlock Recipes | 可选 |
 | **`0x32`** | **Destroy Entities** | Sprint 4 离开视野 |
@@ -159,7 +160,7 @@
 | `0x43` | Set Passengers | — |
 | `0x44` | Teams | — |
 | `0x45` | Update Score | — |
-| `0x46` | Spawn Position | 指南针/重生点（建议发） |
+| `0x46` | Spawn Position | 世界默认出生点（指南针指向点，载荷为 8 字节 Position） |
 | `0x47` | Time Update | 昼夜时间（建议发） |
 | `0x48` | Title | — |
 | `0x49` | Sound Effect | — |
@@ -222,7 +223,7 @@
 | :--- | :--- | :--- |
 | Protocol Version | `VarInt` | 客户端填 `340` |
 | Server Address | `String (255)` | 客户端输入的地址，服务端可忽略 |
-| Server Port | `Unsigned Short` | 大端 u16，默认 25565 |
+| Server Port | `Unsigned Short` | 大端 u16，服务端口（默认 25566，原版 25565） |
 | Next State | `VarInt Enum` | `1` = Status，`2` = Login |
 
 ### 4.2 Status Response（S→C `0x00`）
@@ -254,7 +255,7 @@
 | :--- | :--- | :--- |
 | Entity ID | `Int` | 全局自增正整数，从 1 开始 |
 | Gamemode | `Unsigned Byte` | `1` = 创造（bit3 `0x8` 为极限模式标志，别误置位） |
-| Dimension | **`Int`** | `0` = 主世界（**注意：4 字节，不是 1.8 的 int8！**） |
+| Dimension | **`Int`** | `0` = 主世界（**严格 4 字节大端整数 int32_t**：`-1`: 下界, `0`: 主世界, `1`: 末地） |
 | Difficulty | `Unsigned Byte` | `0`和平 / `1`简单 / `2`普通 / `3`困难 |
 | Max Players | `Unsigned Byte` | `100`（1.12.2 客户端已忽略该字段的显示用途） |
 | Level Type | `String Enum (16)` | `"flat"` / `"default"` / `"largeBiomes"` / `"amplified"` / `"default_1_1"` |
@@ -285,7 +286,7 @@
 | :--- | :--- | :--- |
 | Keep Alive ID | **`Long`** | 服务端通常用毫秒时间戳；客户端原样回送 |
 
-* ⚠️ **类型陷阱**：1.8.8 是 `VarInt`，1.12.2 是 **`Long`（8 字节）**。写错类型会导致后续字节流整体错位。
+* ⚠️ **类型陷阱**：Protocol 340 的 Keep Alive ID 严格为 **`Long`（8 字节大端整数 int64_t）**。若误用 VarInt 会导致后续字节流整体错位。
 * 超时规则：客户端 20 秒收不到任何 Keep Alive 会自己断开并抛 "Timed out"；服务端 30 秒收不到客户端回包可踢人。本项目建议 **每 10 秒发一次、20 秒未响应即断开**。
 
 ### 4.8 Chunk Data（S→C `0x20`）
@@ -295,7 +296,7 @@
 | Chunk X | `Int` | 方块坐标 ÷ 16 向下取整 |
 | Chunk Z | `Int` | 同上 |
 | Ground-Up Continuous | `Boolean` | 完整区块填 `true` |
-| Primary Bit Mask | **`VarInt`** | 第 n 位为 1 表示包含 y=16n..16n+15 的 Section（1.8 是 u16，这里是 VarInt） |
+| Primary Bit Mask | **`VarInt`** | 第 n 位为 1 表示包含 y=16n..16n+15 的 Section（VarInt 编码） |
 | Size | `VarInt` | 后续 `Data` 的字节数 |
 | Data | `Byte Array` | 见 §6 |
 | Number of block entities | `VarInt` | 不支持方块实体时写 `0` |
@@ -489,7 +490,7 @@ if (z >= (1<<25)) z -= (1<<26);
 * `Angle`：1 字节，`(度 * 256 / 360)` 取整。
 * `UUID`：16 字节原始值（`Login Success` 例外，为 36 字符字符串）。
 * `Boolean`：1 字节 `0x00/0x01`。
-* 所有多字节数值均**大端**；**唯一的小端场景在 1.8 的区块方块数据里，1.12.2 已不存在**（Long 数组同样是大端）。
+* 所有多字节数值均严格使用**大端（Big-Endian）**（包括 Long 数组中每个元素在网络传输时亦为大端 8 字节）。
 
 ---
 
@@ -538,7 +539,7 @@ uint64_t data[kLongs] = {0};
 for (int y = 0; y < 16; ++y)
   for (int z = 0; z < 16; ++z)
     for (int x = 0; x < 16; ++x) {
-      int idx = (y << 8) | (z << 4) | x;           // 与 1.8 相同的空间局部性公式
+      int idx = (y << 8) | (z << 4) | x;           // 空间局部性寻址公式（4096 方块）
       uint64_t value = static_cast<uint64_t>(state_id) & ((1u << kBits) - 1);
       int startLong   = (idx * kBits) / 64;
       int startOffset = (idx * kBits) % 64;
@@ -577,14 +578,14 @@ for (int y = 0; y < 16; ++y)
 
 ---
 
-## 七、1.12.2 行为差异与高发坑位（相对 1.8.8）
+## 七、Protocol 340 核心行为规则与高发坑位避坑指南
 
-1. **`Teleport Confirm` 必须处理**：1.9 起服务端下发的 `Player Position And Look` 带 `Teleport ID`，客户端会回 `Teleport Confirm (0x00)`。若不消费该包，且你的路由器对未知包断连，就会随机掉线。
-2. **Keep Alive 是 `Long`**：写错成 VarInt 会让整个包解析错位，客户端抛出 `DecoderException`。
-3. **Join Game 的 `Dimension` 是 4 字节 Int**：按 1.8 的 int8 写会导致后续所有字段错位（`Difficulty` 变成 0，`Level Type` 变成乱码），客户端报解码异常。
-4. **区块数据是位压缩的**：不再有"每方块 2 字节小端"。`Size` 必须与 `Data` 长度严格一致，Bit Mask 中 1 的个数必须与 `Data` 里 Section 的个数一致。
+1. **`Teleport Confirm` 必须处理**：服务端下发的 `Player Position And Look` 带 `Teleport ID`，客户端会回 `Teleport Confirm (0x00)`。若不消费该包，且你的路由器对未知包断连，就会随机掉线。
+2. **Keep Alive 是 `Long`**：心跳包的 ID 为 8 字节大端整数，写错成 VarInt 会让整个包解析错位，客户端抛出 `DecoderException`。
+3. **Join Game 的 `Dimension` 严格为 4 字节 Int**：必须按 4 字节大端整数写入，若写错字节数会导致后续所有字段错位（`Difficulty` 变成 0，`Level Type` 变成乱码），客户端报解码异常。
+4. **区块数据为位压缩调色板格式**：每个 Section 包含 Bits Per Block、Palette 及压缩的 Data Array。`Size` 必须与 `Data` 长度严格一致，Bit Mask 中 1 的个数必须与 `Data` 里 Section 的个数一致。
 5. **Sky Light 只在主世界发送**：切到地狱维度后仍发 2048 字节天空光会让客户端解析错位。
-6. **相对位移是 `Short`，单位 $1/4096$，上限 8 格**：用 Byte（1.8 语义）会导致坐标跳动，超过 8 格必须降级 `Entity Teleport (0x4C)`。
+6. **相对位移为 `Short`，单位 $1/4096$，单轴上限 8 格**：位移值等于 `(int16)((current - previous) * 4096)`，超过 8 格（32768/4096）必须改用 `Entity Teleport (0x4C)`。
 7. **`Spawn Player` 依赖 `Player List Item`**：漏发则客户端不生成实体（不报错、只是"人不见了"，极难排查）。
 8. **创造模式必须回物品**：创造模式下客户端发送 `Creative Inventory Action (0x1B)`，服务端需回 `Set Slot (0x16)` 把物品放进快捷栏，否则玩家手里没方块、无法放置方块（`Player Block Placement` 会因空手被忽略）。
 9. **客户端会主动发 `Client Settings (0x04)` 与 `Plugin Message MC|Brand (0x09)`**：必须容忍。
@@ -612,22 +613,22 @@ for (int y = 0; y < 16; ++y)
 ## 九、参考链接（本地存档优先）
 
 > ⚠️ **wiki.vg 原站已下线**（实测 `https://wiki.vg/` 与 `https://wiki.vg/Protocol` 均为 TCP 连接被拒），第三方静态镜像也可能随时消失。
-> 因此下列页面的**完整副本已随仓库留档**在 [`doc/reference/wiki.vg/`](reference/README.md)；每个页面同时提供 `.html`（保真、可离线浏览）与 `.txt`（可 grep、可读）。
+> 因此下列页面的**完整副本已随仓库留档**在 [`doc/reference/wiki.vg/`](../reference/README.md)；每个页面同时提供 `.html`（保真、可离线浏览）与 `.txt`（可 grep、可读）。
 > **查资料请优先打开本地副本**，右侧在线 URL 仅用于溯源。
 
 | 页面 | 本地副本 | 原始 URL（可能已失效） |
 | :--- | :--- | :--- |
-| 协议主页（protocol 340，全部包 ID 与字段） | [`reference/wiki.vg/Protocol.html`](reference/wiki.vg/Protocol.html) | <https://c4k3.github.io/wiki.vg/Protocol.html> |
-| 区块格式专页（调色板 / 位压缩 / 光照 / 群系） | [`reference/wiki.vg/Chunk_Format.html`](reference/wiki.vg/Chunk_Format.html) | <https://c4k3.github.io/wiki.vg/Chunk_Format.html> |
-| 数据类型（VarInt / Position 位域 / 定点数） | [`reference/wiki.vg/Data_types.html`](reference/wiki.vg/Data_types.html) | <https://c4k3.github.io/wiki.vg/Data_types.html> |
-| 实体元数据格式 | [`reference/wiki.vg/Entities.html`](reference/wiki.vg/Entities.html) | <https://c4k3.github.io/wiki.vg/Entities.html> |
-| 服务器列表 Ping 细节 | [`reference/wiki.vg/Server_List_Ping.html`](reference/wiki.vg/Server_List_Ping.html) | <https://c4k3.github.io/wiki.vg/Server_List_Ping.html> |
-| 协议加密（本项目离线模式不用） | [`reference/wiki.vg/Protocol_Encryption.html`](reference/wiki.vg/Protocol_Encryption.html) | <https://c4k3.github.io/wiki.vg/Protocol_Encryption.html> |
-| 历史版本差异（升级/降级必查） | [`reference/wiki.vg/Protocol_History.html`](reference/wiki.vg/Protocol_History.html) | <https://c4k3.github.io/wiki.vg/Protocol_History.html> |
-| 版本号 ↔ 协议号对照表 | [`reference/wiki.vg/Protocol_version_numbers.html`](reference/wiki.vg/Protocol_version_numbers.html) | <https://c4k3.github.io/wiki.vg/Protocol_version_numbers.html> |
-| NBT 格式（方块实体 / 物品） | [`reference/wiki.vg/NBT.html`](reference/wiki.vg/NBT.html) | <https://c4k3.github.io/wiki.vg/NBT.html> |
-| 机器可读协议定义（1.12.2，JSON/YAML） | [`reference/minecraft-data/1.12.2/protocol.json`](reference/minecraft-data/1.12.2/protocol.json) | <https://github.com/PrismarineJS/minecraft-data> |
-| 机器可读方块/物品/群系表（1.12.2 用 1.12 的数字 ID） | [`reference/minecraft-data/1.12/blocks.json`](reference/minecraft-data/1.12/blocks.json) | <https://github.com/PrismarineJS/minecraft-data> |
+| 协议主页（protocol 340，全部包 ID 与字段） | [`../reference/wiki.vg/Protocol.html`](../reference/wiki.vg/Protocol.html) | <https://c4k3.github.io/wiki.vg/Protocol.html> |
+| 区块格式专页（调色板 / 位压缩 / 光照 / 群系） | [`../reference/wiki.vg/Chunk_Format.html`](../reference/wiki.vg/Chunk_Format.html) | <https://c4k3.github.io/wiki.vg/Chunk_Format.html> |
+| 数据类型（VarInt / Position 位域 / 定点数） | [`../reference/wiki.vg/Data_types.html`](../reference/wiki.vg/Data_types.html) | <https://c4k3.github.io/wiki.vg/Data_types.html> |
+| 实体元数据格式 | [`../reference/wiki.vg/Entities.html`](../reference/wiki.vg/Entities.html) | <https://c4k3.github.io/wiki.vg/Entities.html> |
+| 服务器列表 Ping 细节 | [`../reference/wiki.vg/Server_List_Ping.html`](../reference/wiki.vg/Server_List_Ping.html) | <https://c4k3.github.io/wiki.vg/Server_List_Ping.html> |
+| 协议加密（本项目离线模式不用） | [`../reference/wiki.vg/Protocol_Encryption.html`](../reference/wiki.vg/Protocol_Encryption.html) | <https://c4k3.github.io/wiki.vg/Protocol_Encryption.html> |
+| 历史版本差异（升级/降级必查） | [`../reference/wiki.vg/Protocol_History.html`](../reference/wiki.vg/Protocol_History.html) | <https://c4k3.github.io/wiki.vg/Protocol_History.html> |
+| 版本号 ↔ 协议号对照表 | [`../reference/wiki.vg/Protocol_version_numbers.html`](../reference/wiki.vg/Protocol_version_numbers.html) | <https://c4k3.github.io/wiki.vg/Protocol_version_numbers.html> |
+| NBT 格式（方块实体 / 物品） | [`../reference/wiki.vg/NBT.html`](../reference/wiki.vg/NBT.html) | <https://c4k3.github.io/wiki.vg/NBT.html> |
+| 机器可读协议定义（1.12.2，JSON/YAML） | [`../reference/minecraft-data/1.12.2/protocol.json`](../reference/minecraft-data/1.12.2/protocol.json) | <https://github.com/PrismarineJS/minecraft-data> |
+| 机器可读方块/物品/群系表（1.12.2 用 1.12 的数字 ID） | [`../reference/minecraft-data/1.12/blocks.json`](../reference/minecraft-data/1.12/blocks.json) | <https://github.com/PrismarineJS/minecraft-data> |
 
 **命令行检索示例**：
 
@@ -635,4 +636,5 @@ for (int y = 0; y < 16; ++y)
 grep -rn "Chunk Data" doc/reference/wiki.vg/*.txt          # 搜全部页面
 grep -n -A25 "Join Game" doc/reference/wiki.vg/Protocol.txt # 看某包的字段表
 ```
+
 

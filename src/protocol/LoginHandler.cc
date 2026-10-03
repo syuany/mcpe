@@ -50,7 +50,7 @@ LoginHandler::handleLoginStart(
   packet.appendVarInt(0x02);
   packet.appendString(uuid_str);
   packet.appendString(username);
-  packet.prependVarInt(static_cast<int32_t>(packet.readableBytes()));
+  packet.prependVarInt(packet.readableBytes());
 
   session->sendPacket(std::move(packet));
   session->setState(ConnectionState::PLAY);

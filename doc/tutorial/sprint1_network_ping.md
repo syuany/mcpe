@@ -38,32 +38,27 @@
 ```
 mcpe/
 ├── CMakeLists.txt                              <-- 【修改】注册网络库、协议库、新测试目标
-├── include/mcpe/
-│   ├── common/
-│   │   └── ByteBuffer.h                        <-- 【已完成】Sprint 0 产出
-│   ├── network/                                <-- 【新建目录】网络 I/O 抽象层
-│   │   ├── TcpSession.h                        <-- [TASK-1.2, 1.3] 连接生命周期与读写队列
-│   │   ├── TcpServer.h                         <-- [TASK-1.2] Acceptor 端口监听
-│   │   └── PacketFraming.h                     <-- [TASK-1.4] VarInt 长度定界拆包器
-│   └── protocol/                               <-- 【新建目录】协议业务层
-│       ├── ConnectionState.h                   <-- [TASK-1.5] 4 种连接状态枚举
-│       ├── PacketRouter.h                      <-- [TASK-1.5] 状态机分发路由器
-│       └── StatusHandler.h                     <-- [TASK-1.6, 1.7, 1.8] Ping/Pong/MOTD 业务
+├── bin/                                        <-- 【构建产物】server 可执行文件与 tests 目录
+├── lib/                                        <-- 【内嵌依赖】asio, spdlog, googletest, jemalloc
 ├── src/
 │   ├── common/
-│   │   └── ByteBuffer.cc                       <-- 【已完成】Sprint 0 产出
-│   ├── network/                                <-- 【新建目录】网络层实现
-│   │   ├── TcpSession.cc                       <-- [TASK-1.2, 1.3] 异步读写、生命周期
-│   │   ├── TcpServer.cc                        <-- [TASK-1.2] 异步接收连接
-│   │   └── PacketFraming.cc                    <-- [TASK-1.4] 拆包算法实现
-│   ├── protocol/                               <-- 【新建目录】协议层实现
-│   │   ├── PacketRouter.cc                     <-- [TASK-1.5] 协议分发逻辑
-│   │   └── StatusHandler.cc                    <-- [TASK-1.6, 1.7, 1.8] 握手、JSON组包、时间戳回显
-│   └── main.cc                                 <-- 【修改】组装启动 TcpServer
+│   │   ├── ByteBuffer.h / ByteBuffer.cc        <-- 【已完成】Sprint 0 产出
+│   │   └── VarInt.h / VarInt.cc                <-- 【已完成】Sprint 0 产出
+│   ├── network/                                <-- 网络 I/O 抽象层
+│   │   ├── TcpSession.h / TcpSession.cc        <-- [TASK-1.2, 1.3] 连接生命周期与读写队列
+│   │   ├── TcpServer.h / TcpServer.cc          <-- [TASK-1.2] Acceptor 端口监听
+│   │   └── PacketFraming.h / PacketFraming.cc  <-- [TASK-1.4] VarInt 长度定界拆包器
+│   ├── protocol/                               <-- 协议业务层
+│   │   ├── ConnectionState.h                   <-- [TASK-1.5] 4 种连接状态枚举
+│   │   ├── PacketRouter.h / PacketRouter.cc    <-- [TASK-1.5] 状态机分发路由器
+│   │   └── StatusHandler.h / StatusHandler.cc  <-- [TASK-1.6, 1.7, 1.8] Ping/Pong/MOTD 业务
+│   └── server.cc                               <-- 【修改】组装启动 TcpServer（输出为 bin/server）
 ├── tests/
 │   ├── test_bytebuffer.cc                      <-- 【已完成】
 │   ├── test_varint.cc                          <-- 【已完成】
-│   └── test_framing.cc                         <-- [TASK-1.4] 拆包器单测（粘包/半包）
+│   ├── test_framing.cc                         <-- [TASK-1.4] 拆包器单测（粘包/半包）
+│   ├── test_tcp_session.cc                     <-- [TASK-1.3] 会话队列单测
+│   └── test_packet_router.cc                   <-- [TASK-1.5] 路由器单测
 └── scripts/
     └── test_ping.py                            <-- [TASK-1.9] 免开游戏的极速联调脚本
 ```
@@ -119,21 +114,21 @@ mcpe/
   3. 对端断开连接（触发 `asio::error::eof` 或 `asio::error::connection_reset`）时，优雅关闭 socket 并打印日志，绝不抛出未捕获异常。
 
 #### 2. 在哪个目录创建什么文件
-1. 创建头文件：`include/mcpe/network/TcpSession.h`
+1. 创建头文件：`src/network/TcpSession.h`
 2. 创建源文件：`src/network/TcpSession.cc`
-3. 创建头文件：`include/mcpe/network/TcpServer.h`
+3. 创建头文件：`src/network/TcpServer.h`
 4. 创建源文件：`src/network/TcpServer.cc`
 
 #### 3. 详细代码实现
 
-##### ① `include/mcpe/network/TcpSession.h`
+##### ① `src/network/TcpSession.h`
 ```cpp
 #pragma once
 
 #include <asio.hpp>
 #include <memory>
 #include <array>
-#include "mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 namespace mcpe::network {
 
@@ -240,14 +235,14 @@ void TcpSession::doRead() {
 }  // namespace mcpe::network
 ```
 
-##### ③ `include/mcpe/network/TcpServer.h`
+##### ③ `src/network/TcpServer.h`
 ```cpp
 #pragma once
 
 #include <asio.hpp>
 #include <cstdint>
 #include <memory>
-#include "mcpe/network/TcpSession.h"
+#include "network/TcpSession.h"
 
 namespace mcpe::network {
 
@@ -272,7 +267,7 @@ class TcpServer {
 
 ##### ④ `src/network/TcpServer.cc`
 ```cpp
-#include "mcpe/network/TcpServer.h"
+#include "network/TcpServer.h"
 #include <spdlog/spdlog.h>
 
 namespace mcpe::network {
@@ -318,11 +313,11 @@ void TcpServer::doAccept() {
 }  // namespace mcpe::network
 ```
 
-##### ⑤ 修改 `src/main.cc`
+##### ⑤ 修改 `src/server.cc`
 ```cpp
 #include <asio.hpp>
 #include <spdlog/spdlog.h>
-#include "mcpe/network/TcpServer.h"
+#include "network/TcpServer.h"
 
 int main() {
   spdlog::set_level(spdlog::level::debug);
@@ -360,14 +355,13 @@ add_library(mcpe_network STATIC
 )
 
 target_include_directories(mcpe_network PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_link_libraries(mcpe_network PUBLIC mcpe_common)
 
-# 修改 main 目标的链接项
-target_link_libraries(main PRIVATE mcpe_network mcpe_common)
+# 修改 server 目标的链接项
+target_link_libraries(server PRIVATE mcpe_network mcpe_common)
 ```
 
 #### 4. 验证命令与预期结果
@@ -375,8 +369,8 @@ target_link_libraries(main PRIVATE mcpe_network mcpe_common)
 # 1. 编译项目
 cmake --build build -j4
 
-# 2. 终端 1：启动服务器
-./build/main
+# 2. 终端 1：启动服务器（构建产物统一输出至 bin/ 目录）
+./bin/server
 
 # 3. 终端 2：使用 nc 模拟连入与断开
 nc 127.0.0.1 25566
@@ -406,14 +400,14 @@ nc 127.0.0.1 25566
 3. 当写操作完成回调执行时，弹出队首。若队列中还有剩余包，继续写下一个；若已发空，将 `is_writing_` 复位为 `false`。
 
 #### 2. 在哪个目录修改什么文件
-1. 修改头文件：`include/mcpe/network/TcpSession.h`
+1. 修改头文件：`src/network/TcpSession.h`
 2. 修改源文件：`src/network/TcpSession.cc`
 
 #### 3. 详细代码实现
 
 ##### ① 在 `TcpSession.h` 中追加声明
 ```cpp
-// 在 include/mcpe/network/TcpSession.h 中：
+// 在 src/network/TcpSession.h 中：
 #include <deque>
 
 class TcpSession : public std::enable_shared_from_this<TcpSession> {
@@ -500,20 +494,20 @@ sendPacket(b2);
 **现代 C++ 优秀架构设计**：抽离出独立的无状态或纯逻辑模块 `PacketFraming`，入参为 `ByteBuffer& recv_buf`，专门负责切出完整的单包。
 
 #### 2. 在哪个目录创建什么文件
-1. 创建头文件：`include/mcpe/network/PacketFraming.h`
+1. 创建头文件：`src/network/PacketFraming.h`
 2. 创建源文件：`src/network/PacketFraming.cc`
 3. 创建单测：`tests/test_framing.cc`
 4. 修改 `CMakeLists.txt`
 
 #### 3. 详细代码实现
 
-##### ① `include/mcpe/network/PacketFraming.h`
+##### ① `src/network/PacketFraming.h`
 ```cpp
 #pragma once
 
 #include <expected>
 #include <optional>
-#include "mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 namespace mcpe::network {
 
@@ -598,14 +592,14 @@ std::expected<ByteBuffer, FramingError> PacketFraming::slicePacket(ByteBuffer& r
 ```
 
 ##### ③ 在 `TcpSession` 中集成拆包驱动
-修改 `include/mcpe/network/TcpSession.h`，添加累积缓冲区 `cumulative_buf_`：
+修改 `src/network/TcpSession.h`，添加累积缓冲区 `cumulative_buf_`：
 ```cpp
 // 在 TcpSession 类内私有成员添加：
 ByteBuffer cumulative_buf_;
 ```
 在 `src/network/TcpSession.cc` 的 `doRead()` 中串联拆包：
 ```cpp
-#include "mcpe/network/PacketFraming.h"
+#include "network/PacketFraming.h"
 
 // 在 async_read_some 成功回调内：
 if (!ec) {
@@ -743,13 +737,13 @@ Minecraft 客户端与服务端的交互是一个严格的有向状态机：
 不同的状态下，相同的 Packet ID 具有完全不同的业务含义（例如 `0x00` 在 HANDSHAKING 下是 Handshake，在 STATUS 下是 Status Request，在 LOGIN 下是 Login Start，在 PLAY 下是 Teleport Confirm）！
 
 #### 2. 在哪个目录创建什么文件
-1. 创建头文件：`include/mcpe/protocol/ConnectionState.h`
-2. 创建头文件：`include/mcpe/protocol/PacketRouter.h`
+1. 创建头文件：`src/protocol/ConnectionState.h`
+2. 创建头文件：`src/protocol/PacketRouter.h`
 3. 创建源文件：`src/protocol/PacketRouter.cc`
 
 #### 3. 详细代码实现
 
-##### ① `include/mcpe/protocol/ConnectionState.h`
+##### ① `src/protocol/ConnectionState.h`
 ```cpp
 #pragma once
 
@@ -778,13 +772,13 @@ constexpr std::string_view toString(ConnectionState state) noexcept {
 }  // namespace mcpe::protocol
 ```
 
-##### ② `include/mcpe/protocol/PacketRouter.h`
+##### ② `src/protocol/PacketRouter.h`
 ```cpp
 #pragma once
 
 #include <memory>
-#include "mcpe/common/ByteBuffer.h"
-#include "mcpe/protocol/ConnectionState.h"
+#include "common/ByteBuffer.h"
+#include "protocol/ConnectionState.h"
 
 namespace mcpe::network {
 class TcpSession;
@@ -876,9 +870,9 @@ void PacketRouter::dispatch(const std::shared_ptr<network::TcpSession>& session,
 ```
 
 ##### ④ 在 `TcpSession` 中绑定状态
-在 `include/mcpe/network/TcpSession.h` 中增加：
+在 `src/network/TcpSession.h` 中增加：
 ```cpp
-#include "mcpe/protocol/ConnectionState.h"
+#include "protocol/ConnectionState.h"
 
 // 在 TcpSession 内：
 public:
@@ -893,7 +887,7 @@ private:
 
 ### TASK-1.6: `Handshake (0x00)` 解析与意图流转
 
-#### 1. 协议定义（详见 `doc/03_protocol_340_cheatsheet.md`）
+#### 1. 协议定义（详见 `doc/protocol/protocol_340_cheatsheet.md`）
 * **Packet ID**: `0x00`
 * **字段排列**：
   1. `Protocol Version`: `VarInt`（1.12.2 原版客户端上报的值为 `340`）
@@ -902,17 +896,17 @@ private:
   4. `Next State`: `VarInt`（`1` 为查状态 Status，`2` 为登录进服 Login）
 
 #### 2. 在哪个目录创建什么文件
-1. 创建头文件：`include/mcpe/protocol/StatusHandler.h`
+1. 创建头文件：`src/protocol/StatusHandler.h`
 2. 创建源文件：`src/protocol/StatusHandler.cc`
 
 #### 3. 详细代码实现
 
-##### ① `include/mcpe/protocol/StatusHandler.h`
+##### ① `src/protocol/StatusHandler.h`
 ```cpp
 #pragma once
 
 #include <memory>
-#include "mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 namespace mcpe::network {
 class TcpSession;
@@ -1030,14 +1024,12 @@ void StatusHandler::handleStatusRequest(const std::shared_ptr<network::TcpSessio
       R"({{"version":{{"name":"1.12.2","protocol":340}},"players":{{"max":100,"online":0}},"description":{{"text":"§aA High Performance C++ Server §7[Asio/C++23]"}}}})");
 
   // 2. 构造包体：[Packet ID (0x00)] + [String (VarInt len + JSON)]
-  ByteBuffer body;
-  body.appendVarInt(0x00);         // Packet ID = 0x00
-  body.appendString(json_payload); // 自动追加 VarInt 长度前缀与字符串内容
-
-  // 3. 封装外层包：[Total Packet Length (VarInt)] + [Body]
   ByteBuffer packet;
-  packet.appendVarInt(static_cast<int32_t>(body.readableBytes()));
-  packet.append(body.peek(), body.readableBytes());
+  packet.appendVarInt(0x00);         // Packet ID = 0x00
+  packet.appendString(json_payload); // 自动追加 VarInt 长度前缀与字符串内容
+
+  // 3. 在最外层头部打入总包长 VarInt 前缀（利用 prependVarInt 实现零内存拷贝原位打包）
+  packet.prependVarInt(packet.readableBytes());
 
   // 4. 下发给客户端
   session->sendPacket(std::move(packet));
@@ -1076,18 +1068,15 @@ void StatusHandler::handlePing(const std::shared_ptr<network::TcpSession>& sessi
   const int64_t client_time = *time_res;
   spdlog::debug("[StatusHandler] Ping timestamp: {} from {}", client_time, session->remoteAddress());
 
-  // 2. 封装 Pong (0x01) 响应包
-  // 包体：Packet ID 0x01 (VarInt) + 8 字节原样时间戳
-  ByteBuffer body;
-  body.appendVarInt(0x01);
-  body.writeBe<int64_t>(client_time);
-
-  // 外层包裹包长 VarInt
+  // 2. 封装 Pong (0x01) 响应包：Packet ID 0x01 (VarInt) + 8 字节原样时间戳
   ByteBuffer packet;
-  packet.appendVarInt(static_cast<int32_t>(body.readableBytes()));
-  packet.append(body.peek(), body.readableBytes());
+  packet.appendVarInt(0x01);
+  packet.writeBe<int64_t>(client_time);
 
-  // 3. 发送 Pong
+  // 3. 利用 prependVarInt 在头部原位打入总包长
+  packet.prependVarInt(packet.readableBytes());
+
+  // 4. 发送 Pong
   session->sendPacket(std::move(packet));
 
   // 4. Minecraft 规范：发完 Pong 后，列表探测流程圆满结束，连接可随客户端主动关闭或保持
@@ -1244,7 +1233,7 @@ python3 scripts/test_ping.py
 | **2** | **Asio 内部断言崩溃** | 在同一个 socket 上并发调用 `async_write`。 | **引入发送队列**：维护 `std::deque<ByteBuffer>` 与 `is_writing_` 标记，严格串行化异步写。 |
 | **3** | **客户端报“协议错误”或断连** | VarInt 长度未处理半包；直接把不完整的字节当作有效长度消费，导致后续所有字节偏移错位。 | **事务性回滚**：使用 `ByteBuffer::peekVarInt()` 与 `Mark` 机制，半包时绝不消费任何字节，等待更多数据到来。 |
 | **4** | **多人游戏列表无限菊花，算不出延迟** | 将 `Ping/Pong` 的时间戳当作 `VarInt` 或 `Int`（4 字节）解析。 | 协议铁律：Ping/Pong 载荷严格为 **8 字节大端定长整数**（`int64_t`），用 `readBe<int64_t>()` / `writeBe<int64_t>()` 读写。 |
-| **5** | **客户端显示红叉“不兼容的协议版本”** | Status JSON 中的 `protocol` 填错（例如填成 1.8 的 47），或者没有对应 `"name": "1.12.2"`。 | 严格填报 Protocol ID `340` 和名称 `"1.12.2"`。 |
+| **5** | **客户端显示红叉“不兼容的协议版本”** | Status JSON 中的 `protocol` 填错（例如未填 340 或名称未匹配 `"1.12.2"`）。 | 严格填报 Protocol ID `340` 和名称 `"1.12.2"`。 |
 
 ---
 
@@ -1263,11 +1252,11 @@ python3 scripts/test_ping.py
 | Sprint 1 任务 | Cuberite 对应源文件路径 | 核心类与函数 | 对照学习核心点 |
 | :--- | :--- | :--- | :--- |
 | **TASK-1.2: 网络连接与会话骨架** | `src/ClientHandle.h`<br>`src/ClientHandle.cpp` | `cClientHandle::DataReceived()`<br>`cClientHandle::Destroy()` | 观察 Cuberite 如何抽象单个客户端连接、如何在底层断开时清理 Session。 |
-| **TASK-1.4: 拆包器（Packet Framing）** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::AddReceivedData()` | **必读经典**！学习其外层 `while` 循环切包结构：`ReadVarInt32(PacketLen)` -> 检查载荷是否到齐 -> 切割交由下游。 |
+| **TASK-1.4: 拆包器（Packet Framing）** | `src/Protocol/Protocol_1_12.cpp`（及基类协议实现） | `cProtocol::AddReceivedData()` | **必读经典**！学习其外层 `while` 循环切包结构：`ReadVarInt32(PacketLen)` -> 检查载荷是否到齐 -> 切割交由下游。 |
 | **TASK-1.5: 握手识别与状态切换** | `src/Protocol/ProtocolRecognizer.h`<br>`src/Protocol/ProtocolRecognizer.cpp` | `cProtocolRecognizer::TryRecognizeProtocol()` | 学习 Cuberite 如何在收到连接的第一秒，解析 Handshake 并根据 `NextState`（1 还是 2）决定转入 Status 还是绑定 Protocol。 |
 | **TASK-1.6: Handshake 包字段解析** | `src/Protocol/ProtocolRecognizer.cpp` | `cProtocolRecognizer::HandleHandshake()` | 查看原版 Handshake 4 个字段的解包顺序：`ProtocolVersion` (VarInt)、`Host` (String)、`Port` (Short)、`NextState` (VarInt)。 |
-| **TASK-1.7: Status Request 与 MOTD JSON** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::HandlePacketStatusRequest()`<br>`cProtocol_1_8_0::SendResponse()` | 查看 Cuberite 如何组装 JSON 格式描述、如何向客户端下发带 VarInt 字符串长度前缀的响应包。 |
-| **TASK-1.8: Ping 与 Pong 时间戳回送** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::HandlePacketStatusPing()`<br>`cProtocol_1_8_0::SendPingResponse()` | **铁证对照**：查看其源码 `Int64 Timestamp; a_ByteBuffer.ReadBEInt64(Timestamp);`，再次证实此处必须是 **8 字节大端整数**！ |
+| **TASK-1.7: Status Request 与 MOTD JSON** | `src/Protocol/Protocol_1_12.cpp`（及基类协议实现） | `cProtocol::HandlePacketStatusRequest()`<br>`cProtocol::SendResponse()` | 查看 Cuberite 如何组装 JSON 格式描述、如何向客户端下发带 VarInt 字符串长度前缀的响应包。 |
+| **TASK-1.8: Ping 与 Pong 时间戳回送** | `src/Protocol/Protocol_1_12.cpp`（及基类协议实现） | `cProtocol::HandlePacketStatusPing()`<br>`cProtocol::SendPingResponse()` | **铁证对照**：查看其源码 `Int64 Timestamp; a_ByteBuffer.ReadBEInt64(Timestamp);`，再次证实此处必须是 **8 字节大端整数**！ |
 
 ---
 
@@ -1278,9 +1267,9 @@ python3 scripts/test_ping.py
    * `cProtocol` 纯粹负责**二进制编解码与封包**，不掺杂任何具体玩家业务逻辑。
    * 这与本项目中 `TcpSession`（网络传输）与 `PacketRouter` / `StatusHandler`（协议解耦）的分层思想完全契合。
 
-2. **版本继承链（Base Protocol 1.8）**：
-   * 在 Cuberite 中，`cProtocol_1_9_0`、`cProtocol_1_12_2` 均继承自 `cProtocol_1_8_0`。
-   * 因为 1.8 引入的 VarInt 长度定界帧格式（Framing）和 Server List Ping 流程，在 1.12.2 中完全没有改变！因此 Cuberite 的 1.12.2 列表探测直接复用了 `Protocol_1_8.cpp` 的逻辑。你在实现 Sprint 1 时，看 `Protocol_1_8.cpp` 是最权威准确的。
+2. **协议分层与定界架构**：
+   * 在 Cuberite 中，由专门的 Protocol 模块负责处理 VarInt 长度定界帧格式（Framing）和 Server List Ping 流程。
+   * 列表探测与时间戳 Ping/Pong 处理逻辑独立封装，可供对照其大端时间戳与 JSON 封装实现。
 
 ---
 
@@ -1379,10 +1368,10 @@ Cuberite 是十多年前启动的老项目，存在不少受限于老旧标准�
 无需在网上到处寻找不可靠的二手博客，本项目根目录的 `doc/` 已经为你整理好了一套“离线黄金资料库”：
 
 1. **真实网络报文基准（Ground Truth）**：
-   * 📄 [`doc/packets_hex_dump.md`](file:///home/ubu/dev/my/mcpe/doc/packets_hex_dump.md)：Sprint 1 TASK-1.1 用 Wireshark 在网卡上抓取下来的真实十六进制数据，逐字节标注了每一个 VarInt 和 JSON 字段，代码写不通时拿它当尺子量。
+   * 📄 [`doc/protocol/packets_hex_dump.md`](../protocol/packets_hex_dump.md)：Sprint 1 TASK-1.1 用 Wireshark 在网卡上抓取下来的真实十六进制数据，逐字节标注了每一个 VarInt 和 JSON 字段，代码写不通时拿它当尺子量。
 2. **协议 340 权威速查**：
-   * 📄 [`doc/03_protocol_340_cheatsheet.md`](file:///home/ubu/dev/my/mcpe/doc/03_protocol_340_cheatsheet.md)：本项目的唯一定义基准，所有包 ID（如 Handshake 0x00, Status 0x00, Ping 0x01）与字段类型一应俱全。
+   * 📄 [`doc/protocol/protocol_340_cheatsheet.md`](../protocol/protocol_340_cheatsheet.md)：本项目的唯一定义基准，所有包 ID（如 Handshake 0x00, Status 0x00, Ping 0x01）与字段类型一应俱全。
 3. **权威协议百科全书（本地镜像）**：
-   * 📄 [`doc/reference/wiki.vg/Server_List_Ping.html`](file:///home/ubu/dev/my/mcpe/doc/reference/wiki.vg/Server_List_Ping.html)（文本版：[Server_List_Ping.txt](file:///home/ubu/dev/my/mcpe/doc/reference/wiki.vg/Server_List_Ping.txt)）：官方 Wiki 关于 Server List Ping 交互过程的唯一权威原始文档。
+   * 📄 [`doc/reference/wiki.vg/Server_List_Ping.html`](../reference/wiki.vg/Server_List_Ping.html)（文本版：[Server_List_Ping.txt](../reference/wiki.vg/Server_List_Ping.txt)）：官方 Wiki 关于 Server List Ping 交互过程的唯一权威原始文档。
 4. **机器可读 1.12.2 协议定义**：
-   * 📄 `doc/reference/minecraft-data/1.12.2/protocol.json`：PrismarineJS 提取的机器可读 JSON，包含所有包名、状态机对应关系。
+   * 📄 [`doc/reference/minecraft-data/1.12.2/protocol.json`](../reference/minecraft-data/1.12.2/protocol.json)：PrismarineJS 提取的机器可读 JSON，包含所有包名、状态机对应关系。

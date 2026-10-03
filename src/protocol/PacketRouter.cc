@@ -2,6 +2,8 @@
 
 #include "network/TcpSession.h"
 #include "protocol/ConnectionState.h"
+#include "protocol/LoginHandler.h"
+#include "protocol/PlayHandler.h"
 #include "protocol/StatusHandler.h"
 #include "spdlog/spdlog.h"
 
@@ -24,7 +26,9 @@ PacketRouter::dispatch(
 
   const int32_t packet_id = *id_res;
   spdlog::debug(
-      "[Router] State: {}, PacketID: 0x{:02X}, PayloadBytes: {}", toString(state), packet_id,
+      "[Router] State: {}, PacketID: 0x{:02X}, PayloadBytes: {}",
+      toString(state),
+      packet_id,
       packet.readableBytes()
   );
 
@@ -53,30 +57,42 @@ PacketRouter::dispatch(
       break;
 
     case ConnectionState::LOGIN:
-      // 登录阶段（Sprint 2 将支持 0x00 Login Start）
-      spdlog::warn("[Router] Unhandled packet in LOGIN: 0x{:02X}", packet_id);
-      session->stop();
+      if (packet_id == 0x00) {
+        LoginHandler::handleLoginStart(session, packet);
+      } else {
+        spdlog::warn("[Router] Unknown packet in LOGIN: 0x{:02X}", packet_id);
+        session->stop();
+      }
       break;
 
     case ConnectionState::PLAY:
-      // 游戏内阶段：处理原版客户端高频发送的例行报文白名单
-      switch (packet_id) {
-        case 0x03:  // Client Status（客户端状态）
-        case 0x04:  // Client Settings（客户端设置：语言、视距、皮肤偏好等）
-        case 0x05:  // Confirm Transaction（窗口事务确认）
-        case 0x08:  // Close Window（关闭窗口）
-        case 0x09:  // Plugin Message（插件通道消息，如 MC|Brand）
-        case 0x13:  // Player Abilities（玩家飞行/疾跑能力同步）
-        case 0x15:  // Entity Action（玩家蹲下、跳跃等实体动作）
-        case 0x18:  // Resource Pack Status（材质包加载状态回执）
-        case 0x1A:  // Held Item Change（快捷栏选定物品切换）
-          // 容忍原版客户端未实现例行包，避免非必要断连导致客户端闪退
-          spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
-          break;
-        default:
-          spdlog::warn("[Router] Unhandled PLAY packet 0x{:02X}", packet_id);
-          session->stop();
-          break;
+      if (packet_id == 0x00) {
+        PlayHandler::handleTeleportConfirm(session, packet);
+      } else if (packet_id == 0x0B) {
+        PlayHandler::handleKeepAlive(session, packet);
+      } else {
+        // 白名单容忍原版客户端高频例行报文（语言、视距、皮肤偏好、快捷栏切换等）
+        switch (packet_id) {
+          case 0x03:  // Client Status
+          case 0x04:  // Client Settings
+          case 0x05:  // Confirm Transaction
+          case 0x08:  // Close Window
+          case 0x09:  // Plugin Message (MC|Brand)
+          case 0x13:  // Player Abilities
+          case 0x15:  // Entity Action
+          case 0x18:  // Resource Pack Status
+          case 0x1A:  // Held Item Change
+            spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
+            break;
+          default:
+            spdlog::warn(
+                "[Router] Unhandled PLAY packet 0x{:02X} from {}",
+                packet_id,
+                session->remoteAddress()
+            );
+            session->stop();
+            break;
+        }
       }
       break;
 

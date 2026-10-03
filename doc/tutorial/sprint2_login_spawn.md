@@ -16,7 +16,7 @@
   - [TASK-2.2: 离线模式 UUID 生成算法（RFC-4122 v3 MD5）与单元测试](#task-22-离线模式-uuid-生成算法rfc-4122-v3-md5与单元测试)
   - [TASK-2.3: Login Success (0x02) 响应与状态切入 PLAY](#task-23-login-success-0x02-响应与状态切入-play)
   - [TASK-2.4: Join Game (0x23) 世界参数包组装（Protocol 340 深度避坑）](#task-24-join-game-0x23-世界参数包组装protocol-340-深度避坑)
-  - [TASK-2.5: Player Position And Look (0x2F) 出生点下发与 Teleport Confirm 闭环](#task-25-player-position-and-look-0x2f-出生点下发与-teleport-confirm-闭环)
+  - [TASK-2.5: Player Position And Look (0x2F) 玩家位置下发与 Teleport Confirm 闭环（辨析 Spawn Position 0x46）](#task-25-player-position-and-look-0x2f-玩家位置下发与-teleport-confirm-闭环辨析-spawn-position-0x46)
   - [TASK-2.6: Keep Alive 心跳保活定时器机制（双向 8 字节 Long）](#task-26-keep-alive-心跳保活定时器机制双向-8-字节-long)
   - [TASK-2.7: Sprint 2 集成验收与虚空漫步测试](#task-27-sprint-2-集成验收与虚空漫步测试)
 - [四、 自动化调试利器：Python 极速进服与虚空保活验证脚本](#四-自动化调试利器python-极速进服与虚空保活验证脚本)
@@ -26,6 +26,7 @@
   - [6.2 学其精华：Cuberite 的登录与协议流转设计](#62-学其精华cuberite-的登录与协议流转设计)
   - [6.3 弃其糟粕：Cuberite 的历史缺陷与本项目现代 C++23 升级](#63-弃其糟粕cuberite-的历史缺陷与本项目现代-c23-升级)
   - [6.4 定时器机制深度对比：Muduo TimerQueue vs Asio steady_timer 协程化](#64-定时器机制深度对比muduo-timerqueue-vs-asio-steadytimer-协程化)
+  - [6.5 本地免翻墙离线资源清单（最高优先级）](#65-本地免翻墙离线资源清单最高优先级)
 
 ---
 
@@ -36,29 +37,24 @@
 ```
 mcpe/
 ├── CMakeLists.txt                              <-- 【修改】注册 uuid 单测与新增源文件
-├── include/mcpe/
-│   ├── common/
-│   │   ├── ByteBuffer.h                        <-- 【已有】
-│   │   └── VarInt.h                            <-- 【已有】
-│   ├── network/
-│   │   ├── TcpSession.h                        <-- 【修改】挂载 steady_timer 协程心跳、玩家身份字段与 TeleportID
-│   │   ├── TcpServer.h                         <-- 【已有】
-│   │   └── PacketFraming.h                     <-- 【已有】
-│   └── protocol/
-│       ├── ConnectionState.h                   <-- 【已有】
-│       ├── PacketRouter.h                      <-- 【修改】注册 LOGIN 与 PLAY 状态路由器分支
-│       ├── StatusHandler.h                     <-- 【已有】Sprint 1 产出
-│       ├── AuthUtils.h                         <-- 【新建】离线模式 UUID 生成工具 (RFC-4122 v3 MD5)
-│       ├── LoginHandler.h                      <-- 【新建】处理 Login Start 并下发 Login Success
-│       └── PlayHandler.h                       <-- 【新建】组装 Join Game、出生点、Teleport 确认、心跳处理
+├── bin/                                        <-- 构建产物输出目录 (server, tests/...)
+├── lib/                                        <-- 内置第三方库 (asio, googletest, spdlog, jemalloc)
 ├── src/
+│   ├── server.cc                               <-- 服务端入口点
+│   ├── common/
+│   │   ├── ByteBuffer.h / .cc                  <-- 【已有】字节流缓冲区
+│   │   └── VarInt.h / .cc                      <-- 【已有】可变长整数编码
 │   ├── network/
-│   │   └── TcpSession.cc                       <-- 【修改】实现 KeepAlive 定时器调度与超时断开看门狗
+│   │   ├── TcpSession.h / .cc                  <-- 【修改】挂载 steady_timer 协程心跳、玩家身份字段与 TeleportID
+│   │   ├── TcpServer.h / .cc                   <-- 【已有】异步 TCP 服务端
+│   │   └── PacketFraming.h / .cc               <-- 【已有】VarInt 长度分包器
 │   └── protocol/
-│       ├── PacketRouter.cc                     <-- 【修改】分发 LOGIN(0x00) 及 PLAY(0x00, 0x0B, 白名单)
-│       ├── AuthUtils.cc                        <-- 【新建】MD5 哈希与 UUID 格式化实现
-│       ├── LoginHandler.cc                     <-- 【新建】玩家名校验、离线 UUID 绑定与切状态
-│       └── PlayHandler.cc                      <-- 【新建】进服三件套组装与 Teleport/KeepAlive 响应
+│       ├── ConnectionState.h                   <-- 【已有】会话状态枚举
+│       ├── PacketRouter.h / .cc                <-- 【修改】注册 LOGIN 与 PLAY 状态路由器分支
+│       ├── StatusHandler.h / .cc               <-- 【已有】Sprint 1 产出
+│       ├── AuthUtils.h / .cc                   <-- 【新建】离线模式 UUID 生成工具 (RFC-4122 v3 MD5)
+│       ├── LoginHandler.h / .cc                <-- 【新建】处理 Login Start 并下发 Login Success
+│       └── PlayHandler.h / .cc                 <-- 【新建】组装 Join Game、Player Position And Look、Teleport 确认、心跳处理
 ├── tests/
 │   ├── test_uuid.cc                            <-- 【新建】离线 UUID 标准向量单元测试（对齐官方原版）
 │   ├── test_bytebuffer.cc                      <-- 【已有】
@@ -171,11 +167,11 @@ sequenceDiagram
 * `"Alex"`  $\implies$ `36532b5e-c442-3dbb-a24c-c7e55d0f979a`
 
 #### 4. 在哪个目录创建什么文件
-1. 创建头文件：`include/mcpe/protocol/AuthUtils.h`
+1. 创建头文件：`src/protocol/AuthUtils.h`
 2. 创建源文件：`src/protocol/AuthUtils.cc`
 3. 创建单测：`tests/test_uuid.cc`
 
-##### ① `include/mcpe/protocol/AuthUtils.h`
+##### ① `src/protocol/AuthUtils.h`
 ```cpp
 #ifndef AUTHUTILS_H
 #define AUTHUTILS_H
@@ -211,7 +207,7 @@ class AuthUtils {
 ##### ② `src/protocol/AuthUtils.cc`
 为避免引入臃肿的三方密码库，此处提供一个自包含、高内聚的标准 MD5 算法实现：
 ```cpp
-#include "mcpe/protocol/AuthUtils.h"
+#include "protocol/AuthUtils.h"
 
 #include <array>
 #include <cstdint>
@@ -397,7 +393,7 @@ std::string AuthUtils::generateOfflineUuid(std::string_view username) {
 ##### ③ 单元测试 `tests/test_uuid.cc`
 ```cpp
 #include <gtest/gtest.h>
-#include "mcpe/protocol/AuthUtils.h"
+#include "protocol/AuthUtils.h"
 
 using namespace mcpe::protocol;
 
@@ -437,16 +433,16 @@ TEST(AuthUtilsTest, OfficialOfflineUuidVectors) {
 > ⚠️ **协议特殊性**：`Login Success` 是整个 Minecraft 协议中**唯一**将 UUID 作为 36 字符字符串传输的包！后续 `PLAY` 状态中的所有包（如 `Spawn Player`、`Player List Item`）里的 UUID 均为 16 字节原始二进制数组。
 
 #### 2. 在哪个目录创建什么文件
-1. 创建头文件：`include/mcpe/protocol/LoginHandler.h`
+1. 创建头文件：`src/protocol/LoginHandler.h`
 2. 创建源文件：`src/protocol/LoginHandler.cc`
 
-##### ① `include/mcpe/protocol/LoginHandler.h`
+##### ① `src/protocol/LoginHandler.h`
 ```cpp
 #ifndef LOGINHANDLER_H
 #define LOGINHANDLER_H
 
 #include <memory>
-#include "mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 namespace mcpe::network {
 class TcpSession;
@@ -472,12 +468,12 @@ class LoginHandler {
 
 ##### ② `src/protocol/LoginHandler.cc`
 ```cpp
-#include "mcpe/protocol/LoginHandler.h"
+#include "protocol/LoginHandler.h"
 #include <spdlog/spdlog.h>
-#include "mcpe/network/TcpSession.h"
-#include "mcpe/protocol/AuthUtils.h"
-#include "mcpe/protocol/ConnectionState.h"
-#include "mcpe/protocol/PlayHandler.h"
+#include "network/TcpSession.h"
+#include "protocol/AuthUtils.h"
+#include "protocol/ConnectionState.h"
+#include "protocol/PlayHandler.h"
 
 namespace mcpe::protocol {
 
@@ -511,20 +507,19 @@ void LoginHandler::handleLoginStart(
                username, uuid_str, session->remoteAddress());
 
   // 4. 组装并下发 Login Success (0x02) 数据包
-  ByteBuffer body;
-  body.appendVarInt(0x02);          // Packet ID = 0x02 (Login Success)
-  body.appendString(uuid_str);      // 36 字符 UUID 字符串
-  body.appendString(username);      // 玩家名称
-
   ByteBuffer packet;
-  packet.appendVarInt(static_cast<int32_t>(body.readableBytes()));
-  packet.append(body.peek(), body.readableBytes());
+  packet.appendVarInt(0x02);          // Packet ID = 0x02 (Login Success)
+  packet.appendString(uuid_str);      // 36 字符 UUID 字符串
+  packet.appendString(username);      // 玩家名称
+
+  // 利用 Cheap Prepend 原位前插包长 VarInt 前缀（零内存拷贝）
+  packet.prependVarInt(packet.readableBytes());
   session->sendPacket(std::move(packet));
 
   // 5. 立即切入 PLAY 状态
   session->setState(ConnectionState::PLAY);
 
-  // 6. 顺理成章触发进服三部曲后续世界参数与出生点下发 (TASK-2.4 & 2.5)
+  // 6. 顺理成章触发进服三件套后续世界参数与位置下发 (TASK-2.4 & 2.5)
   PlayHandler::onPlayerJoin(session);
 }
 
@@ -542,37 +537,52 @@ void LoginHandler::handleLoginStart(
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | **Entity ID** | `Int` (大端 4 字节) | `1` (或会话自增全局正整数) | 客户端玩家在世界里的唯一实体 ID，禁止填 0 |
 | 2 | **Gamemode** | `Unsigned Byte` (1 字节) | `1` (创造模式) | `0`:生存, `1`:创造, `2`:冒险, `3`:旁观；bit3 `0x08` 为极限模式 |
-| 3 | **Dimension** | **`Int` (大端 4 字节)** | `0` (主世界) | ⚠️ **头号大坑**：1.12.2 变为 4 字节大端整数！`-1`:下界, `0`:主世界, `1`:末地。**若误写为 1.8 的 int8，后续全错位！** |
+| 3 | **Dimension** | **`Int` (大端 4 字节)** | `0` (主世界) | ⚠️ **关键规范**：Protocol 340 维度字段为 **4 字节大端整数**！`-1`:下界, `0`:主世界, `1`:末地。必须为 4 字节大端整数，不可写为单字节，否则后续所有字段错位！ |
 | 4 | **Difficulty** | `Unsigned Byte` (1 字节) | `1` (简单) | `0`:和平, `1`:简单, `2`:普通, `3`:困难 |
 | 5 | **Max Players** | `Unsigned Byte` (1 字节) | `100` | 原版客户端已忽略该数值的显示 |
 | 6 | **Level Type** | `String` (VarInt 前缀) | `"flat"` | 世界生成类型（可选 `"default"`, `"flat"`, `"largeBiomes"`） |
 | 7 | **Reduced Debug Info** | `Boolean` (1 字节) | `false` (`0x00`) | 若设为 `true`，玩家按 F3 无法查看坐标和调试信息 |
 
 > [!CAUTION]
-> **1.8 迁移 1.12.2 最致命的陷阱**：
-> 1. `Join Game` 的 Packet ID 在 1.8 中是 `0x01`，而在 **1.12.2（protocol 340）中变更为 `0x23`**！
-> 2. `Dimension` 字段从 1 字节 `int8` 变更为 **4 字节 `int32`**！漏读/错写 3 个字节会直接导致客户端控制台抛出 `io.netty.handler.codec.DecoderException` 并闪退！
+> **Join Game 关键规范要点**：
+> 1. `Join Game` 在 Protocol 340（1.12.2）中的 Packet ID 为 **`0x23`**。
+> 2. `Dimension` 字段严格为 **4 字节大端整数 `int32`**！若字段长度或字节序错误，将直接导致客户端 Netty 解包抛出 `io.netty.handler.codec.DecoderException` 并闪退！
 
 ---
 
-### TASK-2.5: `Player Position And Look (0x2F)` 出生点下发与 `Teleport Confirm` 闭环
+### TASK-2.5: `Player Position And Look (0x2F)` 玩家位置下发与 `Teleport Confirm` 闭环（辨析 Spawn Position 0x46）
 
-#### 1. 为什么它是跳过 "Downloading Terrain" 的关键？
+#### 1. 概念深度辨析：`Player Position And Look (0x2F)` vs `Spawn Position (0x46)`
+
+> [!IMPORTANT]
+> **千万不要混淆 `0x2F` 与 `0x46` 这两个完全不同的数据包**：
+>
+> | 特性维度 | **`Spawn Position (0x46)`** | **`Player Position And Look (0x2F)`** |
+> | :--- | :--- | :--- |
+> | **方向** | Clientbound (S $\to$ C) | Clientbound (S $\to$ C) |
+> | **核心作用** | 指定**世界默认出生点坐标**（指南针 Compass 指向的目标点与世界复活基础点） | 指定**玩家当前的实时坐标、视角与传送落脚点**（Player Teleport / Look） |
+> | **报文载荷** | 仅含 1 个 8 字节 `Location: Position`（X/Y/Z 紧凑位域） | 包含 8 字节 Double $X, Y, Z$、4 字节 Float $Yaw, Pitch$、1 字节 $Flags$ 以及 `Teleport ID: VarInt` |
+> | **跳过等待界面** | 否（客户端收到该包不会退出地形加载界面） | **是！只有收到此包，客户端才会彻底关闭 "Downloading Terrain" 并进入世界画面** |
+> | **客户端回传确认** | 无需回复 | **必须强制回复 `Teleport Confirm (0x00)`**，原样带回 `Teleport ID` |
+>
+> 在玩家刚进服的流程中，服务端必须下发 **`Player Position And Look (0x2F)`** 把玩家投放到虚空世界的具体落脚坐标，从而激活客户端视口。
+
+#### 2. 为什么它是跳过 "Downloading Terrain" 的关键？
 客户端在收到 `Join Game` 后，界面会一直停留在 **"Downloading Terrain"（正在下载地形）**。  
-**只有当客户端收到服务端下发的 `Player Position And Look (0x2F)` 出生点包时，客户端才会彻底关闭该等待界面，初始化本地渲染世界并显示画面！**
+**只有当客户端收到服务端下发的 `Player Position And Look (0x2F)` 时，客户端才会彻底关闭该等待界面，初始化本地渲染世界并显示画面！**
 
-#### 2. 服务端下发出生点字段规范（Protocol 340: `0x2F`）
+#### 3. 服务端下发玩家位置与视线字段规范（Protocol 340: `0x2F`）
 1. $X$: `Double`（8 字节大端双精度浮点数，设为 `0.0`）
 2. $Y$: `Double`（8 字节大端双精度浮点数，设为 `64.0`）
 3. $Z$: `Double`（8 字节大端双精度浮点数，设为 `0.0`）
 4. $Yaw$: `Float`（4 字节大端单精度浮点数，设为 `0.0f`）
 5. $Pitch$: `Float`（4 字节大端单精度浮点数，设为 `0.0f`）
 6. $Flags$: `Byte`（`0x00`：标记所有分量均为**绝对坐标**。位掩码：`0x01` X相对, `0x02` Y相对, `0x04` Z相对, `0x08` Y_ROT, `0x10` X_ROT）
-7. **`Teleport ID`**: **`VarInt`（1.9+ 全新强制字段）**：
-   * 服务端每向客户端发送一次位置校准/出生点，分配一个自增的 `Teleport ID`（从 1 开始）。
+7. **`Teleport ID`**: **`VarInt`（传送确认 ID）**：
+   * 服务端每向客户端发送一次位置传送或校准，分配一个自增的 `Teleport ID`（从 1 开始）。
    * **客户端收到后，必须立刻向服务端回传 `Teleport Confirm (0x00)`**，告知该 ID 的传送已被确认。
 
-#### 3. 客户端回传 `Teleport Confirm (0x00)` 闭环
+#### 4. 客户端回传 `Teleport Confirm (0x00)` 闭环
 * **状态**：`ConnectionState::PLAY`
 * **Packet ID**：`0x00`（Serverbound）
 * **载荷**：`Teleport ID: VarInt`
@@ -592,18 +602,18 @@ void LoginHandler::handleLoginStart(
 * **客户端应答（Serverbound）**：Packet ID **`0x0B`**，载荷为 **`Long`（8 字节大端整数）**。
 
 > [!CAUTION]
-> ⚠️ **类型陷阱**：1.8（protocol 47）中心跳 ID 是 `VarInt`，但在 **1.12.2（protocol 340）中彻底改为了 8 字节定长整数 `Long`**！如果错写成 `VarInt`，客户端在解包时字节流整体错位，引发闪退，且服务端日志完全看不出报错！
+> ⚠️ **类型规范**：Protocol 340（1.12.2）中心跳 ID 是 **8 字节定长整数 `Long`（`int64_t`，大端序）**，绝不是 VarInt！如果错写成 VarInt，客户端在解包时字节流整体错位引发崩溃，且服务端日志难以察觉！
 
 #### 3. 代码实现：PlayHandler 与 TcpSession 心跳联动
 
-##### ① `include/mcpe/protocol/PlayHandler.h`
+##### ① `src/protocol/PlayHandler.h`
 ```cpp
 #ifndef PLAYHANDLER_H
 #define PLAYHANDLER_H
 
 #include <memory>
 #include <cstdint>
-#include "mcpe/common/ByteBuffer.h"
+#include "common/ByteBuffer.h"
 
 namespace mcpe::network {
 class TcpSession;
@@ -613,13 +623,13 @@ namespace mcpe::protocol {
 
 class PlayHandler {
  public:
-  /** @brief 玩家鉴权通过后调用：下发 Join Game、出生点并启动保活心跳 */
+  /** @brief 玩家鉴权通过后调用：下发 Join Game、Player Position And Look 并启动保活心跳 */
   static void onPlayerJoin(const std::shared_ptr<network::TcpSession>& session);
 
   /** @brief 下发 Join Game (0x23) 世界参数包 */
   static void sendJoinGame(const std::shared_ptr<network::TcpSession>& session, int32_t entity_id);
 
-  /** @brief 下发 Player Position And Look (0x2F) 出生点包 */
+  /** @brief 下发 Player Position And Look (0x2F) 玩家位置与视线包 */
   static void sendPlayerPositionAndLook(
       const std::shared_ptr<network::TcpSession>& session,
       double x, double y, double z,
@@ -645,12 +655,12 @@ class PlayHandler {
 #endif  // PLAYHANDLER_H
 ```
 
-##### ② `src/protocol/PlayHandler.cc`
+###### ② `src/protocol/PlayHandler.cc`
 ```cpp
-#include "mcpe/protocol/PlayHandler.h"
+#include "protocol/PlayHandler.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
-#include "mcpe/network/TcpSession.h"
+#include "network/TcpSession.h"
 
 namespace mcpe::protocol {
 
@@ -660,7 +670,7 @@ void PlayHandler::onPlayerJoin(const std::shared_ptr<network::TcpSession>& sessi
   session->setEntityId(entity_id);
   sendJoinGame(session, entity_id);
 
-  // 2. 下发初始虚空出生点 Player Position And Look (0x2F)
+  // 2. 下发初始虚空位置 Player Position And Look (0x2F)
   const int32_t teleport_id = session->nextTeleportId();
   sendPlayerPositionAndLook(
       session,
@@ -675,19 +685,18 @@ void PlayHandler::onPlayerJoin(const std::shared_ptr<network::TcpSession>& sessi
 }
 
 void PlayHandler::sendJoinGame(const std::shared_ptr<network::TcpSession>& session, int32_t entity_id) {
-  ByteBuffer body;
-  body.appendVarInt(0x23);                // Packet ID = 0x23 (Join Game in 1.12.2)
-  body.writeBe<int32_t>(entity_id);       // Entity ID (Int 4B)
-  body.writeBe<uint8_t>(1);               // Gamemode = 1 (Creative 创造模式，防虚空摔死)
-  body.writeBe<int32_t>(0);               // Dimension = 0 (主世界 Overworld，⚠️ 必须 4 字节 Int！)
-  body.writeBe<uint8_t>(1);               // Difficulty = 1 (Easy 简单)
-  body.writeBe<uint8_t>(100);             // Max Players = 100
-  body.appendString("flat");              // Level Type = "flat"
-  body.writeBe<uint8_t>(0);               // Reduced Debug Info = false (保留 F3 调试信息)
-
   ByteBuffer packet;
-  packet.appendVarInt(static_cast<int32_t>(body.readableBytes()));
-  packet.append(body.peek(), body.readableBytes());
+  packet.appendVarInt(0x23);                // Packet ID = 0x23 (Join Game in 1.12.2)
+  packet.writeBe<int32_t>(entity_id);       // Entity ID (Int 4B)
+  packet.writeBe<uint8_t>(1);               // Gamemode = 1 (Creative 创造模式，防虚空摔死)
+  packet.writeBe<int32_t>(0);               // Dimension = 0 (主世界 Overworld，⚠️ 必须 4 字节 Int！)
+  packet.writeBe<uint8_t>(1);               // Difficulty = 1 (Easy 简单)
+  packet.writeBe<uint8_t>(100);             // Max Players = 100
+  packet.appendString("flat");              // Level Type = "flat"
+  packet.writeBe<uint8_t>(0);               // Reduced Debug Info = false (保留 F3 调试信息)
+
+  // 利用 Cheap Prepend 原位前插包长 VarInt 前缀（零内存拷贝）
+  packet.prependVarInt(packet.readableBytes());
   session->sendPacket(std::move(packet));
 
   spdlog::info("[PlayHandler] Sent Join Game (0x23) to {}", session->remoteAddress());
@@ -699,22 +708,21 @@ void PlayHandler::sendPlayerPositionAndLook(
     float yaw, float pitch,
     uint8_t flags, int32_t teleport_id
 ) {
-  ByteBuffer body;
-  body.appendVarInt(0x2F);                // Packet ID = 0x2F (PPAL in 1.12.2)
-  body.writeBe<double>(x);                // Double (8 字节)
-  body.writeBe<double>(y);                // Double (8 字节)
-  body.writeBe<double>(z);                // Double (8 字节)
-  body.writeBe<float>(yaw);               // Float (4 字节)
-  body.writeBe<float>(pitch);             // Float (4 字节)
-  body.writeBe<uint8_t>(flags);           // 0x00 为绝对坐标
-  body.appendVarInt(teleport_id);         // VarInt (1.9+ 新增强制确认字段)
-
   ByteBuffer packet;
-  packet.appendVarInt(static_cast<int32_t>(body.readableBytes()));
-  packet.append(body.peek(), body.readableBytes());
+  packet.appendVarInt(0x2F);                // Packet ID = 0x2F (PPAL in 1.12.2)
+  packet.writeBe<double>(x);                // Double (8 字节)
+  packet.writeBe<double>(y);                // Double (8 字节)
+  packet.writeBe<double>(z);                // Double (8 字节)
+  packet.writeBe<float>(yaw);               // Float (4 字节)
+  packet.writeBe<float>(pitch);             // Float (4 字节)
+  packet.writeBe<uint8_t>(flags);           // 0x00 为绝对坐标
+  packet.appendVarInt(teleport_id);         // VarInt (传送确认 ID)
+
+  // 利用 Cheap Prepend 原位前插包长 VarInt 前缀（零内存拷贝）
+  packet.prependVarInt(packet.readableBytes());
   session->sendPacket(std::move(packet));
 
-  spdlog::info("[PlayHandler] Sent Spawn Position (0x2F) to {}, TeleportID: {}",
+  spdlog::info("[PlayHandler] Sent Player Position And Look (0x2F) to {}, TeleportID: {}",
                session->remoteAddress(), teleport_id);
 }
 
@@ -733,7 +741,7 @@ void PlayHandler::handleTeleportConfirm(
   if (confirmed_id == session->pendingTeleportId()) {
     session->clearPendingTeleportId();
     spdlog::info("[PlayHandler] Teleport confirmed by {} (ID: {})",
-                 session->remoteAddress(), confirmed_id);
+                  session->remoteAddress(), confirmed_id);
   } else {
     spdlog::warn("[PlayHandler] Teleport ID mismatch from {}: expected {}, got {}",
                  session->remoteAddress(), session->pendingTeleportId(), confirmed_id);
@@ -759,9 +767,9 @@ void PlayHandler::handleKeepAlive(
 }  // namespace mcpe::protocol
 ```
 
-##### ③ 修改 `include/mcpe/network/TcpSession.h` 挂载心跳与上下文
+##### ③ 修改 `src/network/TcpSession.h` 挂载心跳与上下文
 ```cpp
-// 在 include/mcpe/network/TcpSession.h 中：
+// 在 src/network/TcpSession.h 中：
 #include <asio/steady_timer.hpp>
 #include <chrono>
 
@@ -880,13 +888,12 @@ void TcpSession::sendKeepAlive() {
   last_keep_alive_id_ = now_ms;
   awaiting_keep_alive_ = true;
 
-  ByteBuffer body;
-  body.appendVarInt(0x1F);              // Packet ID = 0x1F (Keep Alive clientbound)
-  body.writeBe<int64_t>(now_ms);        // 8 字节大端整数 Long
-
   ByteBuffer packet;
-  packet.appendVarInt(static_cast<int32_t>(body.readableBytes()));
-  packet.append(body.peek(), body.readableBytes());
+  packet.appendVarInt(0x1F);              // Packet ID = 0x1F (Keep Alive clientbound)
+  packet.writeBe<int64_t>(now_ms);        // 8 字节大端整数 Long
+
+  // 利用 Cheap Prepend 原位前插包长 VarInt 前缀（零内存拷贝）
+  packet.prependVarInt(packet.readableBytes());
   sendPacket(std::move(packet));
 
   spdlog::debug("[Session] Sent Keep Alive 0x1F to {}, ID: {}", remote_address_, now_ms);
@@ -906,8 +913,8 @@ void TcpSession::onKeepAliveResponse(int64_t id) {
 
 ##### ⑤ 更新 `src/protocol/PacketRouter.cc` 路由注册
 ```cpp
-#include "mcpe/protocol/LoginHandler.h"
-#include "mcpe/protocol/PlayHandler.h"
+#include "protocol/LoginHandler.h"
+#include "protocol/PlayHandler.h"
 
 // 在 PacketRouter::dispatch 的 switch (state) 中更新：
 
@@ -1180,7 +1187,7 @@ sock.close()
 | :--- | :--- | :--- | :--- |
 | **1** | **客户端死锁卡在 "Downloading Terrain"** | 服务端在 `Join Game` 之后**漏发了 `Player Position And Look`**，或者坐标包字段缺少 1.12.2 新增的 `Teleport ID: VarInt`。客户端未能确认出生位置，渲染管线永远挂起。 | 严格下发 `Player Position And Look (0x2F)`，尾部携带自增 `Teleport ID`，并在 `PLAY` 路由中消费客户端回传的 `Teleport Confirm (0x00)`。 |
 | **2** | **进服 20 秒必掉线，客户端报 `Timed out`** | 未实现定时保活心跳，或客户端回传心跳后服务端未做时间戳刷新。 | 在 Session 中挂载 `asio::steady_timer`，每 10 秒下发 `0x1F`，收到 `0x0B` 回应刷新 `last_alive_time_`，并在 >20 秒未响应时作为看门狗踢除假死连接。 |
-| **3** | **客户端闪退，报 `DecoderException`** | **心跳包载荷类型混淆**：把 1.12.2 的 8 字节 `Long` 误写成了 1.8 的 `VarInt`；或者把 `Dimension`（主世界）误写成了 1 字节 `int8`。 | 协议铁律：1.12.2 的 `Keep Alive`（`0x1F` / `0x0B`）载荷必须是 **`Long`（`writeBe<int64_t>`）**；`Join Game` 的 `Dimension` 严格为 **4 字节 `int32`**。 |
+| **3** | **客户端闪退，报 `DecoderException`** | **心跳包或维度字段类型错误**：把 1.12.2 的 8 字节 `Long` 误写成了 `VarInt`；或者把 `Dimension`（主世界）误写成了 1 字节。 | 协议铁律：1.12.2 的 `Keep Alive`（`0x1F` / `0x0B`）载荷必须是 **`Long`（`writeBe<int64_t>`）**；`Join Game` 的 `Dimension` 严格为 **4 字节 `int32`**。 |
 | **4** | **进服一秒内莫名断连（服务端日志提示 unhandled packet）** | 原版客户端在进服第一秒内会自动发送 `Client Settings (0x04)` 与 `Plugin Message (0x09 MC\|Brand)`。若路由器遇到未知包就强制断开，属于“自伤式踢人”。 | 在 `PacketRouter` 的 `PLAY` 状态中显式登记原版客户端例行报文白名单（`0x03, 0x04, 0x05, 0x08, 0x09, 0x13, 0x1A`），仅打 Debug 日志，绝不断线。 |
 | **5** | **玩家坐标飞出世界或镜头抽搐** | 浮点数大小写混乱（如将 `Double` 误写为 `Float`），或 `Player Position And Look` 的 `Flags` 填了非零值被客户端误当相对位移。 | 严格核对：坐标 $X, Y, Z$ 必为 **8 字节 `Double`**，视角 $Yaw, Pitch$ 必为 **4 字节 `Float`**；`Flags` 必须填 `0x00`（绝对坐标）。 |
 | **6** | **Asio 定时器协程生命周期与取消** | 协程内部若未在栈帧中持有 `shared_from_this()`，挂起期间 session 被外部释放会导致恢复后产生野指针崩溃；或者在 `stop()` 时未 `cancel` 定时器导致协程无法及时退出。 | 协程入口第一行无脑执行 `auto self = shared_from_this();`；在 `stop()` 中显式调用 `keep_alive_timer_.cancel()`，促使 `co_await async_wait` 立即返回并优雅退出 `while` 循环。 |
@@ -1197,22 +1204,21 @@ sock.close()
 
 | Sprint 2 核心任务 | Cuberite 对应源文件路径 | 核心类与函数 | 对照学习精要 |
 | :--- | :--- | :--- | :--- |
-| **TASK-2.1: 登录开始与玩家名** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::HandlePacketLoginStart()` | 查看 Cuberite 如何提取玩家名称、并在离线模式下跳过正版验证直接进入进服流程。 |
+| **TASK-2.1: 登录开始与玩家名** | `src/Protocol/Protocol_1_12.cpp`（及基类实现） | `cProtocol::HandlePacketLoginStart()` | 查看 Cuberite 如何提取玩家名称、并在离线模式下跳过正版验证直接进入进服流程。 |
 | **TASK-2.2: 离线 UUID 生成** | `src/UUID.cpp` | `cUUID::GenerateOfflinePlayerUUID()`<br>`cUUID::GenerateVersion3()` | **必读标准**：查看其第 263~277 行如何对 `OfflinePlayer:玩家名` 计算 MD5，并将第 6、第 8 字节设置 Version 3 与 Variant。 |
-| **TASK-2.3: Login Success 下发** | `src/Protocol/Protocol_1_8.cpp` | `cProtocol_1_8_0::SendLoginSuccess()` | 查看其第 857~875 行如何下发 36 字符带连字符的长 UUID 字符串与 Username，并切换状态为 Game。 |
-| **TASK-2.4: Join Game 世界包** | `src/Protocol/Protocol_1_9.cpp` | `cProtocol_1_9_1::SendLogin()` | **关键历史证据**：查看第 2369 行源码注释 `Pkt.WriteBEInt32(...); // This is the change from 1.9.0 (Int8 to Int32)`，坐实维度为 4 字节大端整数！ |
-| **TASK-2.5: 出生点与 Teleport 闭环** | `src/Protocol/Protocol_1_9.cpp` | `cProtocol_1_9_0::SendPlayerMoveLook()`<br>`cProtocol_1_9_0::HandleConfirmTeleport()` | 查看其第 473~500 行自增 `m_OutstandingTeleportId`，并在第 968~977 行比对客户端回传的 TeleportID。 |
-| **TASK-2.6: Keep Alive 保活机制** | `src/Protocol/Protocol_1_12.cpp` | `cProtocol_1_12_2::HandlePacketKeepAlive()` | **类型铁证**：查看第 1315~1325 行 `HANDLE_READ(a_ByteBuffer, ReadBEInt64, Int64, KeepAliveID);`，再次证实 1.12.2 必须是 **8 字节大端整数**！ |
+| **TASK-2.3: Login Success 下发** | `src/Protocol/Protocol_1_12.cpp`（及基类实现） | `cProtocol::SendLoginSuccess()` | 查看其第 857~875 行如何下发 36 字符带连字符的长 UUID 字符串与 Username，并切换状态为 Game。 |
+| **TASK-2.4: Join Game 世界包** | `src/Protocol/Protocol_1_12.cpp`（及基类实现） | `cProtocol::SendLogin()` | **维度写入规范**：查看其源码 `Pkt.WriteBEInt32(...)`，确认维度为 4 字节大端整数！ |
+| **TASK-2.5: 玩家位置与 Teleport 闭环** | `src/Protocol/Protocol_1_12.cpp`（及基类实现） | `cProtocol::SendPlayerMoveLook()`<br>`cProtocol::HandleConfirmTeleport()` | 查看其如何自增 `m_OutstandingTeleportId`，并在比对客户端回传的 TeleportID。 |
+| **TASK-2.6: Keep Alive 保活机制** | `src/Protocol/Protocol_1_12.cpp` | `cProtocol_1_12_2::HandlePacketKeepAlive()` | **类型铁证**：查看第 1315~1325 行 `HANDLE_READ(a_ByteBuffer, ReadBEInt64, Int64, KeepAliveID);`，证实 1.12.2 必须是 **8 字节大端整数**！ |
 
 ---
 
 ### 6.2 学其精华：Cuberite 的登录与协议流转设计
 
-1. **版本继承链下的增量重载（Differential Protocol Layering）**：
-   * Cuberite 的协议层从 `Protocol_1_8` 一路继承到 `Protocol_1_12_2`。
-   * 基础数据（如 `Login Success`、字符串封装）全部在基类 `Protocol_1_8.cpp` 稳定复用；而面对 `Dimension` 变为 4 字节的修改，仅在 `Protocol_1_9_1` 的 `SendLogin` 中覆写；面对 `Keep Alive` 改为 8 字节的修改，仅在 `Protocol_1_12_2` 中覆写。这种面向对象多态设计使得协议适配极具层次感。
+1. **协议层与数据封装（Protocol Layering）**：
+   * 在 Cuberite 中，Protocol 340（1.12.2）通过 `Protocol_1_12.cpp` 及其基类多态体系组织报文逻辑，如处理 8 字节 `Keep Alive`，并在对应层组装 4 字节 `Dimension` 的 `Join Game`。
 2. **传送确认看门狗（Teleport Confirmation Guard）**：
-   * 在 Cuberite 的 `cProtocol_1_9_0` 中，下发位置后将 `m_IsTeleportIdConfirmed` 置为 `false`；在收到客户端的 `Teleport Confirm` 之前，丢弃客户端发来的一切杂乱移动包，防止位置抖动或作弊。
+   * 在 Cuberite 中，下发位置后将 `m_IsTeleportIdConfirmed` 置为 `false`；在收到客户端的 `Teleport Confirm` 之前，丢弃客户端发来的一切杂乱移动包，防止位置抖动或作弊。
 
 ---
 
@@ -1246,3 +1252,19 @@ sock.close()
     1. **顺序心智**：无需在回调末尾手动重新调度下一轮，标准的 `while` 循环即可持续泵送；
     2. **生命周期天然安全**：协程栈帧持有 `self`，在协程执行期间对象绝不会被析构；
     3. **即时响应取消**：当连接主动关闭时，`timer.cancel()` 会立即中断当前的 `co_await` 并返回错误码退出循环，资源瞬间优雅回收。
+
+---
+
+### 6.5 本地免翻墙离线资源清单（最高优先级）
+
+无需在网上到处寻找不可靠的二手博客，本项目根目录的 `doc/` 已经为你整理好了一套“离线黄金资料库”：
+
+1. **真实网络报文基准（Ground Truth）**：
+   * 📄 [`doc/protocol/packets_hex_dump.md`](../protocol/packets_hex_dump.md)：包含握手、登录、进服与心跳抓包十六进制数据，逐字节标注字段排布。
+2. **协议 340 权威速查**：
+   * 📄 [`doc/protocol/protocol_340_cheatsheet.md`](../protocol/protocol_340_cheatsheet.md)：本项目的唯一定义基准，所有包 ID（如 Login Success 0x02, Join Game 0x23, Keep Alive 0x1F/0x0B）与字段类型一应俱全。
+3. **权威协议百科全书（本地镜像）**：
+   * 📄 [`doc/reference/wiki.vg/Protocol.txt`](../reference/wiki.vg/Protocol.txt)（网页版：[Protocol.html](../reference/wiki.vg/Protocol.html)）：官方 Wiki 关于 Protocol 340 完整报文格式定义的权威离线参考。
+4. **机器可读 1.12.2 协议定义**：
+   * 📄 [`doc/reference/minecraft-data/1.12.2/protocol.json`](../reference/minecraft-data/1.12.2/protocol.json)：PrismarineJS 提取的机器可读 JSON，包含所有包名、状态机对应关系与字段类型。
+

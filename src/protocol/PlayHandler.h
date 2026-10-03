@@ -14,13 +14,13 @@ namespace mcpe::protocol {
 
 class PlayHandler {
  public:
-  /** @brief 玩家鉴权通过后调用：下发 Join Game、出生点并启动保活心跳 */
+  /** @brief 玩家鉴权通过后调用：下发 Join Game、Player Position And Look 并启动保活心跳 */
   static void onPlayerJoin(const std::shared_ptr<network::TcpSession>& session);
 
   /** @brief 下发 Join Game (0x23) 世界参数包 */
   static void sendJoinGame(const std::shared_ptr<network::TcpSession>& session, int32_t entity_id);
 
-  /** @brief 下发 Player Position And Look (0x2F) 出生点包 */
+  /** @brief 下发 Player Position And Look (0x2F) 玩家位置与视线包 */
   static void sendPlayerPositionAndLook(
       const std::shared_ptr<network::TcpSession>& session,
       double x,

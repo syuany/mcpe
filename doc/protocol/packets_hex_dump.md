@@ -280,7 +280,7 @@ Client (1.12.2)                                  Server (MCPE 25565)
 
 ## 四、 单测落地：将真实 Hex 喂入 `ByteBuffer` 验证
 
-有了上述标准 Hex 数据，我们可以直接在尚未编写 `TcpServer` 时，通过单测验证我们刚写好的 [`ByteBuffer`](file:///home/ubu/dev/my/mcpe/include/mcpe/common/ByteBuffer.h) 能否精准解析 Minecraft 真实协议数据：
+有了上述标准 Hex 数据，我们可以直接在尚未编写 `TcpServer` 时，通过单测验证我们刚写好的 [`ByteBuffer`](../../src/common/ByteBuffer.h) 能否精准解析 Minecraft 真实协议数据：
 
 ```cpp
 // 验证 Handshake 数据包解析的基准单测用例示例
