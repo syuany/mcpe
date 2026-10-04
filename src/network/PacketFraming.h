@@ -33,13 +33,40 @@ class PacketFraming {
     size_t consumed_bytes{0};
   };
 
+  struct FrameViewResult {
+    std::string_view packet_view;  ///< 包含 [Packet ID (VarInt) + Payload] 的连续内存视图（零内存分配与拷贝）
+    size_t consumed_bytes{0};      ///< 消耗的总字节数（包长 VarInt 长度 + packet_view.size()）
+  };
+
   /**
-   * @brief 从连续内存视图中尝试切出一个完整数据包（零拷贝输入，支持基于 SessionReadBuffer 切包）
+   * @brief 从连续内存视图中零拷贝切出完整数据包的只读视图（纯零拷贝，无任何堆内存分配）
+   *
+   * @param view 当前未消费的可读数据零拷贝视图
+   * @return 成功返回包含 [Packet ID + Payload] 的只读数据包视图以及消耗的总字节数，失败返回 FramingError
+   */
+  static std::expected<FrameViewResult, FramingError> slicePacketViewFromView(
+      std::string_view view
+  );
+
+  /**
+   * @brief 从连续内存视图中尝试切出一个完整数据包（支持基于 SessionReadBuffer 切包）
    *
    * @param view 当前未消费的可读数据零拷贝视图
    * @return 成功返回拆分出的数据包 ByteBuffer 以及消耗的总字节数（包长前缀 + 包体），失败返回 FramingError
    */
   static std::expected<FrameResult, FramingError> slicePacketFromView(std::string_view view);
+
+  /**
+   * @brief 从累积接收缓冲区中零拷贝切出完整数据包的只读视图
+   *
+   * 严格遵循“失败零副作用”契约：
+   * - 若返回 kIncomplete，recv_buf 的读游标绝不移动；
+   * - 若成功切出，返回包含 [Packet ID + Payload] 的只读视图，且 recv_buf 游标精准划过该整包（包括长度前缀与包体）。
+   *
+   * @param recv_buf 累积接收数据的缓冲区引用
+   * @return 成功返回包体视图（生命周期依附于 recv_buf 当前内存），失败返回 FramingError
+   */
+  static std::expected<std::string_view, FramingError> slicePacketView(ByteBuffer& recv_buf);
 
   /**
    * @brief 从累积接收缓冲区中尝试切出一个完整的数据包

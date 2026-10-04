@@ -14,11 +14,19 @@
 #include <string>
 
 #include "common/ByteBuffer.h"
-#include "protocol/ConnectionState.h"
+#include "network/SessionCallbacks.h"
 
 namespace mcpe::network {
 
-/// 单个客户端 TCP 会话，负责网络 I/O、分包粘包处理与协议状态流转
+/**
+ * @brief 纯粹的传输层单个客户端 TCP 会话（严格对齐 Cuberite cTCPLink 架构设计）
+ *
+ * 职责彻底归位：
+ * 1. 管理底层 TCP Socket 读写生命周期
+ * 2. 累积接收流并驱动 PacketFraming 完成数据包边界切分
+ * 3. 维护待发送 ByteBuffer 队列并保证 Asio async_write 串行化安全
+ * 4. 触发 SessionCallbacks 抽象事件回调（完全脱离任何 Minecraft 协议与玩家状态业务）
+ */
 class TcpSession : public std::enable_shared_from_this<TcpSession> {
  public:
   using PacketHandler = std::function<void(const std::shared_ptr<TcpSession>&, ByteBuffer)>;
@@ -45,13 +53,15 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
     return remote_address_;
   }
 
-  protocol::ConnectionState
-  state() const noexcept {
-    return state_;
-  }
+  /// 设置事件回调监听器（对齐 Cuberite cTCPLink::cCallbacks 纯虚接口架构设计）
   void
-  setState(protocol::ConnectionState new_state) noexcept {
-    state_ = new_state;
+  setCallbacks(std::shared_ptr<SessionCallbacks> callbacks) noexcept {
+    callbacks_ = std::move(callbacks);
+  }
+
+  const std::shared_ptr<SessionCallbacks>&
+  callbacks() const noexcept {
+    return callbacks_;
   }
 
   void
@@ -62,85 +72,21 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
   /// 线程安全的异步发包（内部经由队列串行化发送）
   void sendPacket(ByteBuffer buffer);
 
-  const std::string&
-  username() const noexcept {
-    return username_;
-  }
-  void
-  setUsername(std::string name) {
-    username_ = std::move(name);
-  }
-
-  const std::string&
-  uuid() const noexcept {
-    return uuid_;
-  }
-  void
-  setUuid(std::string uuid) {
-    uuid_ = std::move(uuid);
-  }
-
-  int32_t
-  entityId() const noexcept {
-    return entity_id_;
-  }
-  void
-  setEntityId(int32_t id) noexcept {
-    entity_id_ = id;
-  }
-
-  int32_t
-  nextTeleportId() noexcept {
-    pending_teleport_id_ = ++teleport_counter_;
-    return pending_teleport_id_;
-  }
-  int32_t
-  pendingTeleportId() const noexcept {
-    return pending_teleport_id_;
-  }
-  void
-  clearPendingTeleportId() noexcept {
-    pending_teleport_id_ = -1;
-  }
-
-  // 启动 10 秒周期性心跳保活协程
-  void startKeepAliveTimer();
-
-  // 收到客户端心跳回送
-  void onKeepAliveResponse(int64_t id);
-
  private:
   asio::awaitable<void> readerLoop();
   void doWrite();
-
-  asio::awaitable<void> keepAliveLoop();
-  void sendKeepAlive();
 
  private:
   asio::ip::tcp::socket socket_;
   std::string remote_address_;
 
-  protocol::ConnectionState state_{protocol::ConnectionState::HANDSHAKING};
-  ByteBuffer cumulative_buf_;  // 接收端累积缓冲区，用于解决粘包与半包
-
+  ByteBuffer cumulative_buf_;           // 接收端累积缓冲区，用于解决粘包与半包
   std::deque<ByteBuffer> write_queue_;  // 待发送数据包队列
   bool is_writing_{false};              // 是否有正在进行的 async_write，防止并发写入
   bool is_stopped_{false};
 
+  std::shared_ptr<SessionCallbacks> callbacks_;
   PacketHandler packet_handler_;
-
-  std::string username_;
-  std::string uuid_;
-  int32_t entity_id_{0};
-
-  int32_t teleport_counter_{0};
-  int32_t pending_teleport_id_{-1};
-
-  // 心跳保活组件
-  asio::steady_timer keep_alive_timer_;
-  int64_t last_keep_alive_id_{0};
-  std::chrono::steady_clock::time_point last_alive_time_;
-  bool awaiting_keep_alive_{false};
 };
 
 }  // namespace mcpe::network

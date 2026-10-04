@@ -1,17 +1,26 @@
 #include "protocol/PacketRouter.h"
 
-#include "network/TcpSession.h"
+#include <spdlog/spdlog.h>
+
+#include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
 #include "protocol/LoginHandler.h"
 #include "protocol/PlayHandler.h"
 #include "protocol/StatusHandler.h"
-#include "spdlog/spdlog.h"
 
 using namespace mcpe::protocol;
 
 void
 PacketRouter::dispatch(
-    const std::shared_ptr<network::TcpSession>& session,
+    const std::shared_ptr<ClientSession>& session,
+    ByteBuffer packet
+) {
+  dispatch(session, session->state(), std::move(packet));
+}
+
+void
+PacketRouter::dispatch(
+    const std::shared_ptr<ClientSession>& session,
     ConnectionState state,
     ByteBuffer packet
 ) {
@@ -83,6 +92,7 @@ PacketRouter::dispatch(
           case 0x18:  // Resource Pack Status
           case 0x1A:  // Held Item Change
             spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
+            packet.retrieveAll();
             break;
           default:
             spdlog::warn(
@@ -101,5 +111,17 @@ PacketRouter::dispatch(
       spdlog::warn("[Router] Invalid connection state: {}", static_cast<int>(state));
       session->stop();
       break;
+  }
+
+  // 3. 包消费完整性检查（借鉴 Cuberite 协议消费完整性断言机制）
+  //    若会话未被断开且该包依然残留未读字节，说明业务层与协议规范出现字段漂移或漏读
+  if (!session->isStopped() && packet.readableBytes() > 0) {
+    spdlog::warn(
+        "[Router] Packet 0x{:02X} in state {} had {} unconsumed bytes remaining from {}! Potential protocol mismatch.",
+        packet_id,
+        toString(state),
+        packet.readableBytes(),
+        session->remoteAddress()
+    );
   }
 }

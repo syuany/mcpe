@@ -3,8 +3,9 @@
 #include <cstdint>
 
 #include "common/ByteBuffer.h"
-#include "network/TcpSession.h"
+#include "network/PacketWriter.h"
 #include "protocol/AuthUtils.h"
+#include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
 #include "protocol/PlayHandler.h"
 #include "spdlog/spdlog.h"
@@ -13,7 +14,7 @@ namespace mcpe::protocol {
 
 void
 LoginHandler::handleLoginStart(
-    const std::shared_ptr<network::TcpSession> &session,
+    const std::shared_ptr<ClientSession> &session,
     ByteBuffer &payload
 ) {
   auto username_res = payload.readString(16);
@@ -46,13 +47,12 @@ LoginHandler::handleLoginStart(
       session->remoteAddress()
   );
 
-  ByteBuffer packet;
-  packet.appendVarInt(0x02);
-  packet.appendString(uuid_str);
-  packet.appendString(username);
-  packet.prependVarInt(packet.readableBytes());
+  // 利用 PacketWriter 下发 Login Success (0x02)
+  network::PacketWriter writer(session, 0x02);
+  writer.appendString(uuid_str);
+  writer.appendString(username);
+  writer.flush();
 
-  session->sendPacket(std::move(packet));
   session->setState(ConnectionState::PLAY);
 
   PlayHandler::onPlayerJoin(session);

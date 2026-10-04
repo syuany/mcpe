@@ -33,6 +33,7 @@
 #include "common/ByteBuffer.h"
 #include "network/PacketFraming.h"
 #include "network/TcpSession.h"
+#include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
 #include "protocol/PacketRouter.h"
 #include "protocol/StatusHandler.h"
@@ -50,7 +51,8 @@ class PacketRouterTest : public ::testing::Test {
   asio::executor_work_guard<asio::io_context::executor_type> work_guard_{
       asio::make_work_guard(io_ctx_)
   };
-  std::shared_ptr<TcpSession> session_;
+  std::shared_ptr<TcpSession> tcp_session_;
+  std::shared_ptr<ClientSession> session_;
   asio::ip::tcp::socket client_sock_{io_ctx_};
   std::jthread io_thread_;
 
@@ -68,7 +70,9 @@ class PacketRouterTest : public ::testing::Test {
     client_sock_.connect(acceptor.local_endpoint());
     asio::ip::tcp::socket peer = acceptor.accept();
 
-    session_ = std::make_shared<TcpSession>(std::move(peer));
+    tcp_session_ = std::make_shared<TcpSession>(std::move(peer));
+    session_ = std::make_shared<ClientSession>(tcp_session_);
+    tcp_session_->setCallbacks(session_);
 
     // 启动后台 IO 线程处理异步写
     io_thread_ = std::jthread([this]() { io_ctx_.run(); });
@@ -562,3 +566,95 @@ TEST_F(PacketRouterTest, FullServerListPingHandshakeFlow) {
   EXPECT_EQ(log_stream_->str().find("[error]"), std::string::npos);
   EXPECT_NE(log_stream_->str().find("Server List Ping flow completed"), std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// 优化测试：校验数据包残留未消费字节产生警告日志（未读字节完整性检测，借鉴 Cuberite）
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, UnconsumedBytesTriggersWarning) {
+  // 构造带有额外垃圾字节的 Ping 包 (ID: 0x01 + 8字节时间戳 + 4字节多余脏数据)
+  ByteBuffer pkt;
+  pkt.appendVarInt(0x01);
+  pkt.writeBe<int64_t>(123456789LL);
+  pkt.append("DIRT", 4);
+
+  PacketRouter::dispatch(session_, ConnectionState::STATUS, std::move(pkt));
+
+  // 接收并验证 Pong 回包仍能发出
+  auto pong_resp = receivePacket();
+  ASSERT_TRUE(pong_resp.has_value());
+
+  // 必须触发了未消费字节的协议告警日志
+  EXPECT_NE(
+      log_stream_->str().find("unconsumed bytes remaining"),
+      std::string::npos
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 测试集 4：ClientSession 纯虚回调与网络层事件直达分发（对标 Cuberite cClientHandle）
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, ClientSessionDirectNetworkDispatch) {
+  // 启动底层 TcpSession 异步接收循环，验证网络事件直达 ClientSession::onPacket -> PacketRouter
+  tcp_session_->start();
+
+  // 客户端构造并通过 socket 真正发送 Handshake 帧: NextState = 1 (STATUS)
+  ByteBuffer hs_frame;
+  ByteBuffer hs_body;
+  hs_body.appendVarInt(0x00);
+  hs_body.appendVarInt(340);
+  hs_body.appendString("localhost");
+  hs_body.writeBe<uint16_t>(25565);
+  hs_body.appendVarInt(1);
+
+  hs_frame.appendVarInt(hs_body.readableBytes());
+  hs_frame.append(hs_body.peek(), hs_body.readableBytes());
+
+  asio::error_code ec;
+  asio::write(client_sock_, asio::buffer(hs_frame.peek(), hs_frame.readableBytes()), ec);
+  ASSERT_FALSE(ec);
+
+  // 等待状态流转至 STATUS
+  auto start_time = std::chrono::steady_clock::now();
+  while (session_->state() != ConnectionState::STATUS &&
+         std::chrono::steady_clock::now() - start_time < std::chrono::seconds(2)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  EXPECT_EQ(session_->state(), ConnectionState::STATUS);
+
+  // 客户端接着发送 Status Request 帧 (ID 0x00)
+  ByteBuffer req_frame;
+  req_frame.appendVarInt(1);     // length
+  req_frame.appendVarInt(0x00);  // Status Request
+  asio::write(client_sock_, asio::buffer(req_frame.peek(), req_frame.readableBytes()), ec);
+  ASSERT_FALSE(ec);
+
+  // 客户端接收服务端回送的 Status Response
+  auto resp = receivePacket();
+  ASSERT_TRUE(resp.has_value());
+  auto id = resp->readVarInt();
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(*id, 0x00);
+  auto json = resp->readString();
+  ASSERT_TRUE(json.has_value());
+  EXPECT_NE(json->find("1.12.2"), std::string::npos);
+}
+
+// 验证 ClientSession 心跳应答匹配机制
+TEST_F(PacketRouterTest, ClientSessionKeepAliveMatching) {
+  session_->setState(ConnectionState::PLAY);
+
+  // 正常匹配
+  session_->onKeepAliveResponse(12345LL);
+  EXPECT_NE(log_stream_->str().find("Keep alive ID mismatch"), std::string::npos);
+
+  // 模拟发送心跳后应答
+  // session 拥有独立 entity_id 与 teleport_id 管理
+  session_->setEntityId(42);
+  EXPECT_EQ(session_->entityId(), 42);
+
+  int32_t tid1 = session_->nextTeleportId();
+  EXPECT_EQ(session_->pendingTeleportId(), tid1);
+  session_->clearPendingTeleportId();
+  EXPECT_EQ(session_->pendingTeleportId(), -1);
+}
+

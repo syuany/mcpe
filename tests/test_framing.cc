@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include "common/ByteReader.h"
 #include "network/PacketFraming.h"
 
 using namespace mcpe;
@@ -73,3 +74,63 @@ TEST(PacketFramingTest, TruncatedHalfPacket) {
   EXPECT_EQ(r3->retrieveAllAsString(), "ABCD");
   EXPECT_EQ(buf.readableBytes(), 0);
 }
+
+// 测试 4：零拷贝切包视图（slicePacketView 纯零拷贝）
+TEST(PacketFramingTest, ZeroCopySlicePacketView) {
+  ByteBuffer buf;
+  buf.appendVarInt(5);
+  buf.appendByte(0x01);
+  buf.append("TEST", 4);
+
+  auto view_res = PacketFraming::slicePacketView(buf);
+  ASSERT_TRUE(view_res.has_value());
+  EXPECT_EQ(view_res->size(), 5);
+  EXPECT_EQ(view_res->front(), '\x01');
+  EXPECT_EQ(view_res->substr(1), "TEST");
+  EXPECT_EQ(buf.readableBytes(), 0);  // 接收缓冲区游标已精准划过
+}
+
+// 测试 5：零拷贝切包粘包处理与 ByteReader 解码
+TEST(PacketFramingTest, ZeroCopyStickingPacketViewsAndByteReader) {
+  ByteBuffer buf;
+  // 包 1：Ping 0x01 + 8 字节大端整数
+  buf.appendVarInt(9);
+  buf.appendVarInt(0x01);
+  buf.writeBe<int64_t>(123456789LL);
+
+  // 包 2：TeleportConfirm 0x00 + VarInt 42
+  buf.appendVarInt(2);
+  buf.appendVarInt(0x00);
+  buf.appendVarInt(42);
+
+  // 1. 零拷贝切出包 1
+  auto v1 = PacketFraming::slicePacketView(buf);
+  ASSERT_TRUE(v1.has_value());
+  ByteReader reader1(*v1);
+  EXPECT_EQ(*reader1.readVarInt(), 0x01);
+  EXPECT_EQ(*reader1.readBe<int64_t>(), 123456789LL);
+  EXPECT_EQ(reader1.readableBytes(), 0);
+
+  // 2. 零拷贝切出包 2
+  auto v2 = PacketFraming::slicePacketView(buf);
+  ASSERT_TRUE(v2.has_value());
+  ByteReader reader2(*v2);
+  EXPECT_EQ(*reader2.readVarInt(), 0x00);
+  EXPECT_EQ(*reader2.readVarInt(), 42);
+  EXPECT_EQ(reader2.readableBytes(), 0);
+
+  EXPECT_EQ(buf.readableBytes(), 0);
+}
+
+// 测试 6：零拷贝切包视图半包无副作用
+TEST(PacketFramingTest, ZeroCopyHalfPacketNoSideEffect) {
+  ByteBuffer buf;
+  buf.appendVarInt(10);
+  buf.append("123", 3);
+
+  auto v = PacketFraming::slicePacketView(buf);
+  ASSERT_FALSE(v.has_value());
+  EXPECT_EQ(v.error(), FramingError::kIncomplete);
+  EXPECT_EQ(buf.readableBytes(), 4);  // 读游标未发生偏移
+}
+

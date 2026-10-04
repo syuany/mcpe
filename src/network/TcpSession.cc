@@ -17,8 +17,7 @@
 
 namespace mcpe::network {
 
-TcpSession::TcpSession(asio::ip::tcp::socket socket)
-    : socket_(std::move(socket)), keep_alive_timer_(socket_.get_executor()) {
+TcpSession::TcpSession(asio::ip::tcp::socket socket) : socket_(std::move(socket)) {
   asio::error_code ec;
   const auto endpoint = socket_.remote_endpoint(ec);
   if (!ec) {
@@ -27,10 +26,11 @@ TcpSession::TcpSession(asio::ip::tcp::socket socket)
     remote_address_ = "unknown";
   }
   spdlog::info("[Session] Connected from {}", remote_address_);
-  last_alive_time_ = std::chrono::steady_clock::now();
 }
 
-TcpSession::~TcpSession() { spdlog::info("[Session] Destroyed: {}", remote_address_); }
+TcpSession::~TcpSession() {
+  spdlog::info("[Session] Destroyed: {}", remote_address_);
+}
 
 void
 TcpSession::start() {
@@ -48,9 +48,11 @@ TcpSession::stop() {
   if (is_stopped_) return;
   is_stopped_ = true;
 
+  if (callbacks_) {
+    callbacks_->onDisconnected(shared_from_this());
+  }
+
   asio::error_code ec;
-  // 取消定时器，促使挂起中的 keepAliveLoop 协程立即唤醒退出
-  keep_alive_timer_.cancel(ec);
   socket_.close(ec);
   if (ec) {
     spdlog::debug("[Session] Error closing socket {}: {}", remote_address_, ec.message());
@@ -122,7 +124,9 @@ TcpSession::readerLoop() {
           remote_address_
       );
 
-      if (packet_handler_) {
+      if (callbacks_) {
+        callbacks_->onPacket(shared_from_this(), std::move(packet));
+      } else if (packet_handler_) {
         packet_handler_(shared_from_this(), std::move(packet));
       }
     }
@@ -162,86 +166,6 @@ TcpSession::doWrite() {
         }
       }
   );
-}
-
-void
-TcpSession::startKeepAliveTimer() {
-  last_alive_time_ = std::chrono::steady_clock::now();
-  // 启动独立的保活心跳协程
-  asio::co_spawn(
-      socket_.get_executor(),
-      std::bind_front(&TcpSession::keepAliveLoop, shared_from_this()),
-      asio::detached
-  );
-}
-
-asio::awaitable<void>
-TcpSession::keepAliveLoop() {
-  // 在协程帧中持有 shared_ptr，生命周期自保
-  auto self = shared_from_this();
-
-  while (!is_stopped_) {
-    keep_alive_timer_.expires_after(std::chrono::seconds(10));
-    // 异步挂起 10 秒，等待定时器到期或被 cancel 唤醒
-    auto [ec] = co_await keep_alive_timer_.async_wait(asio::as_tuple(asio::use_awaitable));
-    if (is_stopped_ || ec) {
-      break;  // 连接已断开或定时器被 cancel，优雅退出协程
-    }
-
-    // 超时看门狗：检查是否超过 20 秒未收到任何客户端心跳响应
-    const auto now = std::chrono::steady_clock::now();
-    const auto elapsed =
-        std::chrono::duration_cast<std::chrono::seconds>(now - last_alive_time_).count();
-    if (elapsed > 20) {
-      spdlog::warn(
-          "[Session] Client {} keep-alive timeout ({}s > 20s), kicking!",
-          remote_address_,
-          elapsed
-      );
-      stop();
-      break;
-    }
-
-    sendKeepAlive();
-  }
-  co_return;
-}
-
-void
-TcpSession::sendKeepAlive() {
-  // 使用当前毫秒时间戳作为心跳 ID
-  const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::system_clock::now().time_since_epoch()
-  )
-                             .count();
-  last_keep_alive_id_ = now_ms;
-  awaiting_keep_alive_ = true;
-
-  ByteBuffer packet;
-  packet.appendVarInt(0x1F);        // Packet ID = 0x1F (Keep Alive clientbound)
-  packet.writeBe<int64_t>(now_ms);  // 8 字节大端整数 Long
-
-  // 利用 Cheap Prepend 原位前插包长 VarInt 前缀（零内存拷贝）
-  packet.prependVarInt(packet.readableBytes());
-  sendPacket(std::move(packet));
-
-  spdlog::debug("[Session] Sent Keep Alive 0x1F to {}, ID: {}", remote_address_, now_ms);
-}
-
-void
-TcpSession::onKeepAliveResponse(int64_t id) {
-  if (id == last_keep_alive_id_) {
-    last_alive_time_ = std::chrono::steady_clock::now();
-    awaiting_keep_alive_ = false;
-    spdlog::debug("[Session] Received valid Keep Alive echo from {}, ID: {}", remote_address_, id);
-  } else {
-    spdlog::warn(
-        "[Session] Keep alive ID mismatch from {}: expected {}, got {}",
-        remote_address_,
-        last_keep_alive_id_,
-        id
-    );
-  }
 }
 
 }  // namespace mcpe::network

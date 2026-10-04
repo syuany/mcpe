@@ -7,14 +7,15 @@
 #include <utility>
 
 #include "common/ByteBuffer.h"
-#include "network/TcpSession.h"
+#include "network/PacketWriter.h"
+#include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
 
 using namespace mcpe::protocol;
 
 void
 StatusHandler::handleHandshake(
-    const std::shared_ptr<network::TcpSession>& session,
+    const std::shared_ptr<ClientSession>& session,
     ByteBuffer& payload
 ) {
   // 1. 按 Minecraft 协议规范顺序解包 Handshake 字段：
@@ -60,7 +61,7 @@ StatusHandler::handleHandshake(
 }
 
 void
-StatusHandler::handleStatusRequest(const std::shared_ptr<network::TcpSession>& session) {
+StatusHandler::handleStatusRequest(const std::shared_ptr<ClientSession>& session) {
   spdlog::debug("[StatusHandler] Responding to Status Request from {}", session->remoteAddress());
 
   // 1. 组装符合 Minecraft 1.12.2 官方规范的 JSON 文本
@@ -69,21 +70,14 @@ StatusHandler::handleStatusRequest(const std::shared_ptr<network::TcpSession>& s
       R"({{"version":{{"name":"1.12.2","protocol":340}},"players":{{"max":100,"online":0}},"description":{{"text":"§aA High Performance C++ Server §7[Asio/C++23]"}}}})"
   );
 
-  // 2. 构造包体：[Packet ID: 0x00 (VarInt)] + [JSON String: (VarInt len + UTF-8 文本)]
-  ByteBuffer packet;
-  packet.appendVarInt(0x00);
-  packet.appendString(std::move(json_payload));
-
-  // 3. 在最外层头部打入总包长 VarInt 前缀（利用 prependVarInt 实现零内存拷贝原位打包）
-  packet.prependVarInt(packet.readableBytes());
-
-  // 4. 将打包好的数据包交由底层 Session 的写队列并发安全下发
-  session->sendPacket(std::move(packet));
+  // 2. 利用 RAII PacketWriter 自动打入 Packet ID 0x00，析构时自动前插包长并异步发送
+  network::PacketWriter writer(session, 0x00);
+  writer.appendString(json_payload);
 }
 
 void
 StatusHandler::handlePing(
-    const std::shared_ptr<network::TcpSession>& session,
+    const std::shared_ptr<ClientSession>& session,
     ByteBuffer& payload
 ) {
   // 1. 读取原生的 8 字节大端有符号长整型（Long）时间戳
@@ -97,15 +91,9 @@ StatusHandler::handlePing(
 
   const auto client_time = *time_res;
 
-  // 2. 封装 Pong 响应报文：[Packet ID: 0x01 (VarInt)] + [8 字节大端时间戳]
-  ByteBuffer packet;
-  packet.appendVarInt(0x01);
-  packet.writeBe(client_time);
+  // 2. 利用 RAII PacketWriter 封装 Pong (0x01) 响应报文，离开作用域自动前插包长下发
+  network::PacketWriter writer(session, 0x01);
+  writer.writeBe(client_time);
 
-  // 3. 外层包裹包长 VarInt 前缀（通常长度为 9：1 字节 ID + 8 字节时间戳）
-  packet.prependVarInt(packet.readableBytes());
-
-  // 4. 下发 Pong 给客户端
-  session->sendPacket(std::move(packet));
   spdlog::info("[StatusHandler] Server List Ping flow completed for {}", session->remoteAddress());
 }

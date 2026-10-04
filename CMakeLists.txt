@@ -141,6 +141,7 @@ target_link_libraries(mcpe_network PUBLIC mcpe_common)
 # 模块3: mcpe_protocol 静态库
 # ==============================================
 add_library(mcpe_protocol STATIC
+    src/protocol/ClientSession.cc
     src/protocol/PacketRouter.cc
     src/protocol/StatusHandler.cc
     src/protocol/AuthUtils.cc
@@ -230,6 +231,17 @@ target_link_libraries(test_uuid PRIVATE
     GTest::gtest_main
 )
 
+# PacketWriter 测试（RAII 发包器）
+add_executable(test_packet_writer
+    tests/test_packet_writer.cc
+)
+
+target_link_libraries(test_packet_writer PRIVATE
+    mcpe_network
+    mcpe_common
+    GTest::gtest_main
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
@@ -238,3 +250,4 @@ gtest_discover_tests(test_tcp_session)
 gtest_discover_tests(test_framing)
 gtest_discover_tests(test_packet_router)
 gtest_discover_tests(test_uuid)
+gtest_discover_tests(test_packet_writer)

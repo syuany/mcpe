@@ -9,10 +9,10 @@
 
 #include <asio.hpp>
 #include <cstdint>
-#include <functional>
+#include <memory>
 
 #include "network/TcpServer.h"
-#include "protocol/PacketRouter.h"
+#include "protocol/ClientSession.h"
 
 namespace {
 constexpr uint16_t kServerPort = 25566;
@@ -37,9 +37,10 @@ main() {
     // 2. 使用独立端口，避免与 Cuberite 的 25565 冲突
     TcpServer server(io_context, kServerPort);
 
-    // 注入协议层路由器回调：保持网络层与业务协议层的低耦合
-    server.setPacketHandler([](const std::shared_ptr<TcpSession>& session, ByteBuffer packet) {
-      PacketRouter::dispatch(session, session->state(), std::move(packet));
+    // 对齐 Cuberite 架构设计：通过 SessionFactory 为每个连入的 TcpSession 创建独立的 ClientSession
+    // 彻底解耦网络传输层（TcpSession / cTCPLink）与 Minecraft 协议业务层（ClientSession / cClientHandle）
+    server.setSessionFactory([](const std::shared_ptr<TcpSession>& tcp) {
+      return std::make_shared<ClientSession>(tcp);
     });
 
     server.start();

@@ -2,38 +2,36 @@
 
 #include <spdlog/spdlog.h>
 
-#include "network/TcpSession.h"
+#include "network/PacketWriter.h"
+#include "protocol/ClientSession.h"
 
 namespace mcpe::protocol {
 
 void
-PlayHandler::onPlayerJoin(const std::shared_ptr<network::TcpSession>& session) {
+PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   sendJoinGame(session, 1);
-  sendPlayerPositionAndLook(session, 0.0, 64.0, 0.0, 0.0f, 0.0f, 0x00, 1);
+  const int32_t teleport_id = session->nextTeleportId();
+  sendPlayerPositionAndLook(session, 0.0, 64.0, 0.0, 0.0f, 0.0f, 0x00, teleport_id);
   session->startKeepAliveTimer();
 }
 
 void
-PlayHandler::sendJoinGame(const std::shared_ptr<network::TcpSession>& session, int32_t entity_id) {
-  ByteBuffer packet;
-  packet.appendVarInt(0x23);
-  packet.writeBe<int32_t>(entity_id);
-  packet.writeBe<uint8_t>(1);
-  packet.writeBe<int32_t>(0);
-  packet.writeBe<uint8_t>(1);
-  packet.writeBe<uint8_t>(100);
-  packet.appendString("flat");
-  packet.writeBe<uint8_t>(0);
-
-  packet.prependVarInt(packet.readableBytes());
-  session->sendPacket(std::move(packet));
+PlayHandler::sendJoinGame(const std::shared_ptr<ClientSession>& session, int32_t entity_id) {
+  network::PacketWriter writer(session, 0x23);
+  writer.writeBe<int32_t>(entity_id);
+  writer.writeBe<uint8_t>(1);
+  writer.writeBe<int32_t>(0);
+  writer.writeBe<uint8_t>(1);
+  writer.writeBe<uint8_t>(100);
+  writer.appendString("flat");
+  writer.writeBe<uint8_t>(0);
 
   spdlog::info("[PlayHandler] Sent Join Game (0x23) to {}", session->remoteAddress());
 }
 
 void
 PlayHandler::sendPlayerPositionAndLook(
-    const std::shared_ptr<network::TcpSession>& session,
+    const std::shared_ptr<ClientSession>& session,
     double x,
     double y,
     double z,
@@ -42,18 +40,14 @@ PlayHandler::sendPlayerPositionAndLook(
     uint8_t flags,
     int32_t teleport_id
 ) {
-  ByteBuffer packet;
-  packet.appendVarInt(0x2F);
-  packet.writeBe<double>(x);
-  packet.writeBe<double>(y);
-  packet.writeBe<double>(z);
-  packet.writeBe<float>(yaw);
-  packet.writeBe<float>(pitch);
-  packet.writeBe<uint8_t>(flags);
-  packet.appendVarInt(teleport_id);
-
-  packet.prependVarInt(packet.readableBytes());
-  session->sendPacket(std::move(packet));
+  network::PacketWriter writer(session, 0x2F);
+  writer.writeBe<double>(x);
+  writer.writeBe<double>(y);
+  writer.writeBe<double>(z);
+  writer.writeBe<float>(yaw);
+  writer.writeBe<float>(pitch);
+  writer.writeBe<uint8_t>(flags);
+  writer.appendVarInt(teleport_id);
 
   spdlog::info(
       "[PlayHandler] Sent Player Position And Look (0x2F) to {}, TeleportID: {}",
@@ -64,7 +58,7 @@ PlayHandler::sendPlayerPositionAndLook(
 
 void
 PlayHandler::handleTeleportConfirm(
-    const std::shared_ptr<network::TcpSession>& session,
+    const std::shared_ptr<ClientSession>& session,
     ByteBuffer& payload
 ) {
   auto id_res = payload.readVarInt();
@@ -94,7 +88,7 @@ PlayHandler::handleTeleportConfirm(
 
 void
 PlayHandler::handleKeepAlive(
-    const std::shared_ptr<network::TcpSession>& session,
+    const std::shared_ptr<ClientSession>& session,
     ByteBuffer& payload
 ) {
   // ⚠️ 1.12.2 铁律：Keep Alive 载荷必须是 8 字节大端整数 readBe<int64_t>()

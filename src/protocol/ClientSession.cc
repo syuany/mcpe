@@ -1,0 +1,166 @@
+#include "protocol/ClientSession.h"
+
+#include <spdlog/spdlog.h>
+
+#include <asio/as_tuple.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/use_awaitable.hpp>
+#include <utility>
+
+#include "network/PacketWriter.h"
+#include "network/TcpSession.h"
+#include "protocol/PacketRouter.h"
+
+namespace mcpe::protocol {
+
+ClientSession::ClientSession(std::shared_ptr<network::TcpSession> tcp_session)
+    : tcp_session_(tcp_session),
+      remote_address_(tcp_session ? tcp_session->remoteAddress() : "unknown"),
+      keep_alive_timer_(tcp_session->socket().get_executor()) {
+  last_alive_time_ = std::chrono::steady_clock::now();
+  spdlog::info("[ClientSession] Created for {}", remote_address_);
+}
+
+ClientSession::~ClientSession() {
+  cancelKeepAlive();
+  spdlog::info("[ClientSession] Destroyed for {}", remote_address_);
+}
+
+void
+ClientSession::onPacket(
+    const std::shared_ptr<network::TcpSession>& /*session*/,
+    ByteBuffer packet
+) {
+  PacketRouter::dispatch(shared_from_this(), std::move(packet));
+}
+
+void
+ClientSession::onDisconnected(const std::shared_ptr<network::TcpSession>& /*session*/) {
+  cancelKeepAlive();
+  spdlog::info("[ClientSession] Client disconnected: {}", remote_address_);
+}
+
+void
+ClientSession::sendPacket(ByteBuffer buffer) {
+  if (auto tcp = tcp_session_.lock()) {
+    tcp->sendPacket(std::move(buffer));
+  }
+}
+
+void
+ClientSession::stop() {
+  cancelKeepAlive();
+  if (auto tcp = tcp_session_.lock()) {
+    tcp->stop();
+  }
+}
+
+bool
+ClientSession::isStopped() const noexcept {
+  auto tcp = tcp_session_.lock();
+  return !tcp || tcp->isStopped();
+}
+
+const std::string&
+ClientSession::remoteAddress() const noexcept {
+  return remote_address_;
+}
+
+asio::ip::tcp::socket&
+ClientSession::socket() {
+  if (auto tcp = tcp_session_.lock()) {
+    return tcp->socket();
+  }
+  static asio::io_context dummy_ctx;
+  static asio::ip::tcp::socket dummy_socket(dummy_ctx);
+  return dummy_socket;
+}
+
+std::shared_ptr<network::TcpSession>
+ClientSession::tcpSession() const noexcept {
+  return tcp_session_.lock();
+}
+
+void
+ClientSession::cancelKeepAlive() {
+  asio::error_code ec;
+  keep_alive_timer_.cancel(ec);
+}
+
+void
+ClientSession::startKeepAliveTimer() {
+  last_alive_time_ = std::chrono::steady_clock::now();
+  asio::co_spawn(
+      keep_alive_timer_.get_executor(),
+      std::bind_front(&ClientSession::keepAliveLoop, shared_from_this()),
+      asio::detached
+  );
+}
+
+asio::awaitable<void>
+ClientSession::keepAliveLoop() {
+  auto self = shared_from_this();
+
+  while (!isStopped()) {
+    keep_alive_timer_.expires_after(std::chrono::seconds(10));
+    auto [ec] = co_await keep_alive_timer_.async_wait(asio::as_tuple(asio::use_awaitable));
+    if (isStopped() || ec) {
+      break;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::seconds>(now - last_alive_time_).count();
+    if (elapsed > 20) {
+      spdlog::warn(
+          "[ClientSession] Client {} keep-alive timeout ({}s > 20s), kicking!",
+          remoteAddress(),
+          elapsed
+      );
+      stop();
+      break;
+    }
+
+    sendKeepAlive();
+  }
+  co_return;
+}
+
+void
+ClientSession::sendKeepAlive() {
+  const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch()
+  )
+                             .count();
+  last_keep_alive_id_ = now_ms;
+  awaiting_keep_alive_ = true;
+
+  // 使用 RAII PacketWriter 自动打包并安全发送 0x1F Keep Alive
+  network::PacketWriter writer(shared_from_this(), 0x1F);
+  writer.writeBe<int64_t>(now_ms);
+
+  spdlog::debug("[ClientSession] Sent Keep Alive 0x1F to {}, ID: {}", remoteAddress(), now_ms);
+}
+
+void
+ClientSession::onKeepAliveResponse(int64_t id) {
+  if (id == last_keep_alive_id_) {
+    last_alive_time_ = std::chrono::steady_clock::now();
+    awaiting_keep_alive_ = false;
+    spdlog::debug(
+        "[ClientSession] Received valid Keep Alive echo from {}, ID: {}",
+        remoteAddress(),
+        id
+    );
+  } else {
+    spdlog::warn(
+        "[ClientSession] Keep alive ID mismatch from {}: expected {}, got {}",
+        remoteAddress(),
+        last_keep_alive_id_,
+        id
+    );
+  }
+}
+
+}  // namespace mcpe::protocol

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/ByteBuffer.h"
+#include "network/SessionCallbacks.h"
 #include "network/TcpSession.h"
 
 using mcpe::ByteBuffer;
@@ -156,4 +157,68 @@ TEST(TcpSessionTest, MultiThreadedConcurrentSendNoAssertion) {
 
   ASSERT_FALSE(ec) << "Read failed: " << ec.message();
   ASSERT_EQ(bytes_read, kTotalPackets * kPacketSize);
+}
+
+// ---------------------------------------------------------------------------
+// 验证 SessionCallbacks 纯虚接口事件调度（对齐 Cuberite cCallbacks 架构）
+// ---------------------------------------------------------------------------
+class MockSessionCallbacks : public mcpe::network::SessionCallbacks {
+ public:
+  std::atomic<int> packet_count{0};
+  std::atomic<bool> disconnected{false};
+  std::vector<int32_t> received_values;
+  std::mutex mutex;
+
+  void onPacket(const std::shared_ptr<TcpSession>&, ByteBuffer packet) override {
+    auto id = packet.readVarInt();
+    if (id) {
+      std::lock_guard<std::mutex> lock(mutex);
+      received_values.push_back(*id);
+    }
+    packet_count++;
+  }
+
+  void onDisconnected(const std::shared_ptr<TcpSession>&) override {
+    disconnected = true;
+  }
+};
+
+TEST(TcpSessionTest, SessionCallbacksDispatchAndLifecycle) {
+  TestTcpFixture fixture;
+  ASSERT_TRUE(fixture.session != nullptr);
+
+  auto callbacks = std::make_shared<MockSessionCallbacks>();
+  fixture.session->setCallbacks(callbacks);
+
+  // 客户端向服务端发送 2 个包：
+  // 包 1：Length=1, ID=0x01
+  // 包 2：Length=1, ID=0x02
+  ByteBuffer send_buf;
+  send_buf.appendVarInt(1);
+  send_buf.appendVarInt(0x01);
+  send_buf.appendVarInt(1);
+  send_buf.appendVarInt(0x02);
+
+  asio::error_code ec;
+  asio::write(fixture.client_socket, asio::buffer(send_buf.peek(), send_buf.readableBytes()), ec);
+  ASSERT_FALSE(ec);
+
+  // 等待 readerLoop 异步收包并触发 onPacket 回调
+  auto start_time = std::chrono::steady_clock::now();
+  while (callbacks->packet_count < 2 &&
+         std::chrono::steady_clock::now() - start_time < std::chrono::seconds(2)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  EXPECT_EQ(callbacks->packet_count.load(), 2);
+  {
+    std::lock_guard<std::mutex> lock(callbacks->mutex);
+    ASSERT_EQ(callbacks->received_values.size(), 2);
+    EXPECT_EQ(callbacks->received_values[0], 0x01);
+    EXPECT_EQ(callbacks->received_values[1], 0x02);
+  }
+
+  // 停止连接，验证触发 onDisconnected 回调
+  fixture.session->stop();
+  EXPECT_TRUE(callbacks->disconnected.load());
 }

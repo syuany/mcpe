@@ -5,11 +5,9 @@
 
 #include "common/ByteBuffer.h"
 
-namespace mcpe::network {
-class TcpSession;
-}
-
 namespace mcpe::protocol {
+
+class ClientSession;
 
 class LoginHandler {
  public:
@@ -17,7 +15,7 @@ class LoginHandler {
    * @brief 处理 LOGIN 阶段的 Login Start (0x00) 包
    */
   static void
-  handleLoginStart(const std::shared_ptr<network::TcpSession>& session, ByteBuffer& payload);
+  handleLoginStart(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload);
 };
 
 }  // namespace mcpe::protocol

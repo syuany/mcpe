@@ -1,5 +1,7 @@
 #include "network/TcpServer.h"
 
+#include <spdlog/spdlog.h>
+
 #include <asio/co_spawn.hpp>
 #include <asio/error.hpp>
 #include <asio/error_code.hpp>
@@ -8,7 +10,6 @@
 #include <memory>
 
 #include "network/TcpSession.h"
-#include "spdlog/spdlog.h"
 
 namespace mcpe::network {
 
@@ -51,9 +52,14 @@ TcpServer::listenLoop() {
     asio::error_code opt_ec;
     socket.set_option(asio::ip::tcp::no_delay(true), opt_ec);
 
-    // 创建客户端会话生命周期对象并启动异步读循环
+    // 创建客户端会话生命周期对象并配置事件监听接口
     auto session = std::make_shared<TcpSession>(std::move(socket));
-    if (packet_handler_) {
+    if (session_factory_) {
+      auto cb = session_factory_(session);
+      session->setCallbacks(std::move(cb));
+    } else if (callbacks_) {
+      session->setCallbacks(callbacks_);
+    } else if (packet_handler_) {
       session->setPacketHandler(packet_handler_);
     }
     session->start();

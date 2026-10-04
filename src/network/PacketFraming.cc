@@ -8,8 +8,8 @@
 using namespace mcpe;
 using namespace mcpe::network;
 
-std::expected<PacketFraming::FrameResult, FramingError>
-PacketFraming::slicePacketFromView(std::string_view view) {
+std::expected<PacketFraming::FrameViewResult, FramingError>
+PacketFraming::slicePacketViewFromView(std::string_view view) {
   // 1. 无副作用从视图解析包长 VarInt 字段
   const auto length_res = varint::decodeVarInt(view.data(), view.size());
   if (!length_res) {
@@ -32,14 +32,42 @@ PacketFraming::slicePacketFromView(std::string_view view) {
     return std::unexpected(FramingError::kIncomplete);
   }
 
-  // 4. 提取包体 [Packet ID + Payload] 封装为独立的 ByteBuffer
+  // 4. 零拷贝提取包体 [Packet ID + Payload] 视图（零堆内存分配）
+  std::string_view packet_view(view.data() + varint_len, static_cast<size_t>(packet_len));
+
+  return FrameViewResult{
+      .packet_view = packet_view,
+      .consumed_bytes = total_len,
+  };
+}
+
+std::expected<PacketFraming::FrameResult, FramingError>
+PacketFraming::slicePacketFromView(std::string_view view) {
+  auto view_res = slicePacketViewFromView(view);
+  if (!view_res) {
+    return std::unexpected(view_res.error());
+  }
+
+  // 提取包体 [Packet ID + Payload] 封装为独立的 ByteBuffer
   ByteBuffer packet;
-  packet.append(view.data() + varint_len, static_cast<size_t>(packet_len));
+  packet.append(view_res->packet_view.data(), view_res->packet_view.size());
 
   return FrameResult{
       .packet = std::move(packet),
-      .consumed_bytes = total_len,
+      .consumed_bytes = view_res->consumed_bytes,
   };
+}
+
+std::expected<std::string_view, FramingError>
+PacketFraming::slicePacketView(ByteBuffer& recv_buf) {
+  auto res = slicePacketViewFromView(recv_buf.toStringView());
+  if (!res) {
+    return std::unexpected(res.error());
+  }
+
+  std::string_view packet_view = res->packet_view;
+  recv_buf.retrieve(res->consumed_bytes);
+  return packet_view;
 }
 
 std::expected<ByteBuffer, FramingError>
