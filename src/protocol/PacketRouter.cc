@@ -57,17 +57,22 @@ PacketRouter::dispatch(
 
     case ConnectionState::STATUS:
       // 状态探测阶段：支持 0x00 (Status Request) 和 0x01 (Ping)
-      if (packet_id == 0x00) {
-        size_t online_players = 0;
-        if (auto mgr = session->clientManager()) {
-          online_players = mgr->playerCount();
+      switch (packet_id) {
+        case 0x00: {
+          size_t online_players = 0;
+          if (auto mgr = session->clientManager()) {
+            online_players = mgr->playerCount();
+          }
+          StatusHandler::handleStatusRequest(session, ServerConfig::defaultInstance(), online_players);
+          break;
         }
-        StatusHandler::handleStatusRequest(session, ServerConfig::defaultInstance(), online_players);
-      } else if (packet_id == 0x01) {
-        StatusHandler::handlePing(session, packet);
-      } else {
-        spdlog::warn("[Router] Unknown packet in STATUS: 0x{:02X}", packet_id);
-        session->stop();
+        case 0x01:
+          StatusHandler::handlePing(session, packet);
+          break;
+        default:
+          spdlog::warn("[Router] Unknown packet in STATUS: 0x{:02X}", packet_id);
+          session->stop();
+          break;
       }
       break;
 
@@ -81,38 +86,41 @@ PacketRouter::dispatch(
       break;
 
     case ConnectionState::PLAY:
-      if (packet_id == 0x00) {
-        PlayHandler::handleTeleportConfirm(session, packet);
-      } else if (packet_id == 0x0B) {
-        PlayHandler::handleKeepAlive(session, packet);
-      } else {
-        // 白名单容忍原版客户端高频例行报文（语言、视距、皮肤偏好、快捷栏切换等）
-        switch (packet_id) {
-          case 0x03:  // Client Status
-          case 0x04:  // Client Settings
-          case 0x05:  // Confirm Transaction
-          case 0x08:  // Close Window
-          case 0x09:  // Plugin Message (MC|Brand)
-          case 0x0C:  // Player (on ground)
-          case 0x0D:  // Player Position
-          case 0x0E:  // Player Position And Look
-          case 0x0F:  // Player Look
-          case 0x13:  // Player Abilities
-          case 0x15:  // Entity Action
-          case 0x18:  // Resource Pack Status
-          case 0x1A:  // Held Item Change
-            spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
-            packet.retrieveAll();
-            break;
-          default:
-            spdlog::warn(
-                "[Router] Unhandled PLAY packet 0x{:02X} from {}",
-                packet_id,
-                session->remoteAddress()
-            );
-            session->stop();
-            break;
-        }
+      switch (packet_id) {
+        case 0x00:  // Teleport Confirm
+          PlayHandler::handleTeleportConfirm(session, packet);
+          break;
+
+        case 0x0B:  // Keep Alive
+          PlayHandler::handleKeepAlive(session, packet);
+          break;
+
+        // 白名单容忍原版客户端高频例行报文（移动、语言、视距、皮肤偏好、快捷栏切换等）
+        case 0x03:  // Client Status
+        case 0x04:  // Client Settings
+        case 0x05:  // Confirm Transaction
+        case 0x08:  // Close Window
+        case 0x09:  // Plugin Message (MC|Brand)
+        case 0x0C:  // Player (on ground)
+        case 0x0D:  // Player Position
+        case 0x0E:  // Player Position And Look
+        case 0x0F:  // Player Look
+        case 0x13:  // Player Abilities
+        case 0x15:  // Entity Action
+        case 0x18:  // Resource Pack Status
+        case 0x1A:  // Held Item Change
+          spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
+          packet.retrieveAll();
+          break;
+
+        default:
+          spdlog::warn(
+              "[Router] Unhandled PLAY packet 0x{:02X} from {}",
+              packet_id,
+              session->remoteAddress()
+          );
+          session->stop();
+          break;
       }
       break;
 
