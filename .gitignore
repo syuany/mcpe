@@ -10,6 +10,8 @@ examples/
 !doc/**/*.md
 !doc/*.md
 !README.md
+!GEMINI.md
+!AGENTS.md
 
 reference/
 /sprints/
