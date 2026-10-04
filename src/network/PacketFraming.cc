@@ -8,12 +8,11 @@
 using namespace mcpe;
 using namespace mcpe::network;
 
-std::expected<PacketFraming::FrameViewResult, FramingError>
-PacketFraming::slicePacketViewFromView(std::string_view view) {
-  // 1. 无副作用从视图解析包长 VarInt 字段
-  const auto length_res = varint::decodeVarInt(view.data(), view.size());
+std::expected<ByteBuffer, FramingError>
+PacketFraming::slicePacket(ByteBuffer& recv_buf) {
+  // 1. 无副作用试探解析包长 VarInt 字段与所占字节数
+  const auto length_res = recv_buf.peekVarIntWithBytes();
   if (!length_res) {
-    // 若 VarInt 不完整则说明是半包；若超过 5 字节上限则为畸形长度
     return (length_res.error() == DecodeError::kIncomplete)
                ? std::unexpected(FramingError::kIncomplete)
                : std::unexpected(FramingError::kMalformedLength);
@@ -27,56 +26,14 @@ PacketFraming::slicePacketViewFromView(std::string_view view) {
 
   // 3. 校验整包（长度前缀 + 包体数据）是否已全量接收就绪
   const size_t total_len = static_cast<size_t>(packet_len) + varint_len;
-  if (view.size() < total_len) {
-    // 载荷数据尚未到齐，返回半包状态
+  if (recv_buf.readableBytes() < total_len) {
+    // 载荷数据尚未到齐，返回半包状态，读游标零移动
     return std::unexpected(FramingError::kIncomplete);
   }
 
-  // 4. 零拷贝提取包体 [Packet ID + Payload] 视图（零堆内存分配）
-  std::string_view packet_view(view.data() + varint_len, static_cast<size_t>(packet_len));
+  // 4. 消费跳过包长 VarInt 前缀
+  recv_buf.retrieve(varint_len);
 
-  return FrameViewResult{
-      .packet_view = packet_view,
-      .consumed_bytes = total_len,
-  };
-}
-
-std::expected<PacketFraming::FrameResult, FramingError>
-PacketFraming::slicePacketFromView(std::string_view view) {
-  auto view_res = slicePacketViewFromView(view);
-  if (!view_res) {
-    return std::unexpected(view_res.error());
-  }
-
-  // 提取包体 [Packet ID + Payload] 封装为独立的 ByteBuffer
-  ByteBuffer packet;
-  packet.append(view_res->packet_view.data(), view_res->packet_view.size());
-
-  return FrameResult{
-      .packet = std::move(packet),
-      .consumed_bytes = view_res->consumed_bytes,
-  };
-}
-
-std::expected<std::string_view, FramingError>
-PacketFraming::slicePacketView(ByteBuffer& recv_buf) {
-  auto res = slicePacketViewFromView(recv_buf.toStringView());
-  if (!res) {
-    return std::unexpected(res.error());
-  }
-
-  std::string_view packet_view = res->packet_view;
-  recv_buf.retrieve(res->consumed_bytes);
-  return packet_view;
-}
-
-std::expected<ByteBuffer, FramingError>
-PacketFraming::slicePacket(ByteBuffer& recv_buf) {
-  auto res = slicePacketFromView(recv_buf.toStringView());
-  if (!res) {
-    return std::unexpected(res.error());
-  }
-
-  recv_buf.retrieve(res->consumed_bytes);
-  return std::move(res->packet);
+  // 5. Netty 风格零拷贝切出包体数据 [Packet ID + Payload]（底层共享 Storage，零堆内存分配）
+  return recv_buf.readSlice(static_cast<size_t>(packet_len));
 }

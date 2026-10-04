@@ -13,6 +13,20 @@
 
 using namespace mcpe;
 
+ByteBuffer
+ByteBuffer::slice(size_t len) const {
+  assert(len <= readableBytes() && "Slice length exceeds readable bytes");
+  return ByteBuffer(storage_, offset_ + readerIndex_, len);
+}
+
+ByteBuffer
+ByteBuffer::readSlice(size_t len) {
+  assert(len <= readableBytes() && "Slice length exceeds readable bytes");
+  ByteBuffer sl(storage_, offset_ + readerIndex_, len);
+  retrieve(len);
+  return sl;
+}
+
 void
 ByteBuffer::append(const char* data, size_t len) {
   ensureWritableBytes(len);
@@ -178,8 +192,8 @@ ByteBuffer::retrieveAllAsString() {
 
 void
 ByteBuffer::retrieveAll() noexcept {
-  readerIndex_ = kCheapPrepend;
-  writerIndex_ = kCheapPrepend;
+  readerIndex_ = is_slice_ ? 0 : kCheapPrepend;
+  writerIndex_ = readerIndex_;
 }
 
 std::string_view
@@ -193,7 +207,23 @@ ByteBuffer::toSpan() const noexcept {
 }
 
 void
-ByteBuffer::prepend(const void* data, size_t len) noexcept {
+ByteBuffer::prepend(const void* data, size_t len) {
+  if (is_slice_ || (storage_ && storage_.use_count() > 1)) {
+    // Copy-On-Write (写时复制隔离防护)
+    size_t readable = readableBytes();
+    size_t new_prepend = std::max(kCheapPrepend, len);
+    size_t new_capacity = std::max(new_prepend + readable + writableBytes(), kCheapPrepend + kInitialSize);
+    auto new_storage = std::make_shared<Storage>(new_capacity);
+    if (readable > 0) {
+      std::copy(peek(), peek() + readable, new_storage->data.data() + new_prepend);
+    }
+    storage_ = std::move(new_storage);
+    offset_ = 0;
+    readerIndex_ = new_prepend;
+    writerIndex_ = new_prepend + readable;
+    capacity_ = storage_->data.size();
+    is_slice_ = false;
+  }
   assert(len <= prependableBytes());
   const char* des = static_cast<const char*>(data);
   readerIndex_ -= len;
@@ -210,7 +240,7 @@ ByteBuffer::shrink(size_t reserve) {
 
 void
 ByteBuffer::ensureWritableBytes(size_t len) {
-  if (writableBytes() < len) {
+  if (writableBytes() < len || (storage_ && storage_.use_count() > 1)) {
     makeSpace(len);
   }
   assert(writableBytes() >= len);
@@ -218,9 +248,31 @@ ByteBuffer::ensureWritableBytes(size_t len) {
 
 void
 ByteBuffer::makeSpace(size_t len) {
+  if (is_slice_ || (storage_ && storage_.use_count() > 1)) {
+    // Copy-On-Write (写时复制隔离防护)：
+    // 当检测到当前缓冲区为切片，或底层 Storage 正被外部切片共享时，
+    // 分配独立全新的 Storage 并迁移未读字节，彻底切断内存共享关系，保障在途切片内存绝对安全
+    size_t readable = readableBytes();
+    size_t new_capacity = std::max(kCheapPrepend + readable + len, kCheapPrepend + kInitialSize);
+    auto new_storage = std::make_shared<Storage>(new_capacity);
+    if (readable > 0) {
+      std::copy(peek(), peek() + readable, new_storage->data.data() + kCheapPrepend);
+    }
+    storage_ = std::move(new_storage);
+    offset_ = 0;
+    readerIndex_ = kCheapPrepend;
+    writerIndex_ = kCheapPrepend + readable;
+    capacity_ = storage_->data.size();
+    is_slice_ = false;
+    return;
+  }
+
+  // 独占状态：若总空闲空间不足，则直接扩容底层的 vector
   if (writableBytes() + prependableBytes() < len + kCheapPrepend) {
-    buffer_.resize(writerIndex_ + len);
+    storage_->data.resize(writerIndex_ + len);
+    capacity_ = storage_->data.size();
   } else {
+    // 空间足够（之前读过的 prependableBytes 可复用），进行内存整理（碎片紧凑）
     assert(kCheapPrepend < readerIndex_);
     size_t readable = readableBytes();
     std::copy(begin() + readerIndex_, begin() + writerIndex_, begin() + kCheapPrepend);

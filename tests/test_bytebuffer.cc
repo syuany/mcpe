@@ -549,3 +549,119 @@ TEST(ByteBufferTest, CloneCreatesExactIndependentCopy) {
   EXPECT_EQ(buf.toStringView(), "Original Data Modified");
   EXPECT_EQ(copy.toStringView(), "Original Data");
 }
+
+// ---------------------------------------------------------------------------
+// Netty 风格零拷贝切片与 Copy-On-Write 内存隔离测试
+// ---------------------------------------------------------------------------
+
+TEST(ByteBufferSliceTest, SliceSharesMemoryWithoutMovingReaderIndex) {
+  ByteBuffer buf;
+  buf.append("Hello World");
+
+  ByteBuffer sl = buf.slice(5);
+  EXPECT_TRUE(sl.isSlice());
+  EXPECT_EQ(sl.readableBytes(), 5u);
+  EXPECT_EQ(sl.toStringView(), "Hello");
+  // slice 不应推动父级读游标
+  EXPECT_EQ(buf.readableBytes(), 11u);
+  // 零拷贝：切片内存地址完全相同
+  EXPECT_EQ(sl.peek(), buf.peek());
+  EXPECT_EQ(buf.useCount(), 2);
+}
+
+TEST(ByteBufferSliceTest, ReadSliceAdvancesParentReaderIndex) {
+  ByteBuffer buf;
+  buf.append("Hello World");
+
+  ByteBuffer sl = buf.readSlice(5);
+  EXPECT_TRUE(sl.isSlice());
+  EXPECT_EQ(sl.readableBytes(), 5u);
+  EXPECT_EQ(sl.toStringView(), "Hello");
+  // readSlice 推进父级读游标
+  EXPECT_EQ(buf.readableBytes(), 6u);
+  EXPECT_EQ(buf.toStringView(), " World");
+  EXPECT_EQ(buf.useCount(), 2);
+}
+
+TEST(ByteBufferSliceTest, SliceOfSliceChainsCorrectly) {
+  ByteBuffer buf;
+  buf.append("0123456789");
+
+  ByteBuffer s1 = buf.readSlice(8);  // s1: "01234567"
+  ByteBuffer s2 = s1.readSlice(4);   // s2: "0123", s1 剩余 "4567"
+
+  EXPECT_TRUE(s2.isSlice());
+  EXPECT_EQ(s2.toStringView(), "0123");
+  EXPECT_EQ(s1.toStringView(), "4567");
+  EXPECT_EQ(buf.toStringView(), "89");
+  EXPECT_EQ(buf.useCount(), 3);
+}
+
+TEST(ByteBufferSliceTest, SlicesCanBeDecodedAsStandardByteBuffer) {
+  ByteBuffer buf;
+  buf.writeBe<int32_t>(100);
+  buf.appendString("MCPE");
+  buf.writeBe<int64_t>(99999LL);
+
+  ByteBuffer slice = buf.readSlice(buf.readableBytes());
+  EXPECT_TRUE(slice.isSlice());
+
+  // 切片可像普通 ByteBuffer 一样正常流式解码各类数据
+  EXPECT_EQ(*slice.readBe<int32_t>(), 100);
+  EXPECT_EQ(*slice.readString(), "MCPE");
+  EXPECT_EQ(*slice.readBe<int64_t>(), 99999LL);
+  EXPECT_EQ(slice.readableBytes(), 0u);
+}
+
+TEST(ByteBufferSliceTest, CopyOnWriteOnParentProtectsSlice) {
+  ByteBuffer buf;
+  buf.append("AlphaBeta");
+
+  ByteBuffer slice = buf.readSlice(5);  // "Alpha"
+  EXPECT_EQ(slice.toStringView(), "Alpha");
+  EXPECT_EQ(slice.useCount(), 2);
+
+  // 向父缓冲区追加新数据：检测到 use_count > 1，触发 COW
+  buf.append("GammaDelta");
+
+  // 验证写时复制后引用计数解耦
+  EXPECT_EQ(slice.useCount(), 1);
+  EXPECT_EQ(buf.useCount(), 1);
+
+  // 切片不受父缓冲区内存重分配或追加影响
+  EXPECT_EQ(slice.toStringView(), "Alpha");
+  EXPECT_EQ(buf.toStringView(), "BetaGammaDelta");
+}
+
+TEST(ByteBufferSliceTest, CopyOnWriteOnSliceProtectsParent) {
+  ByteBuffer buf;
+  buf.append("ParentData");
+
+  ByteBuffer slice = buf.slice(6);  // "Parent"
+  EXPECT_EQ(slice.toStringView(), "Parent");
+  EXPECT_EQ(buf.useCount(), 2);
+
+  // 向切片写入数据，切片触发 COW 独立成非切片 Buffer
+  slice.append("Appended");
+  EXPECT_FALSE(slice.isSlice());
+  EXPECT_EQ(slice.useCount(), 1);
+  EXPECT_EQ(buf.useCount(), 1);
+
+  EXPECT_EQ(slice.toStringView(), "ParentAppended");
+  EXPECT_EQ(buf.toStringView(), "ParentData");
+}
+
+TEST(ByteBufferSliceTest, PrependTriggersCopyOnWriteWhenShared) {
+  ByteBuffer buf;
+  buf.append("World");
+
+  ByteBuffer slice = buf.slice(5);
+  EXPECT_EQ(slice.useCount(), 2);
+
+  buf.prepend("Hello ", 6);
+  EXPECT_EQ(slice.useCount(), 1);
+  EXPECT_EQ(buf.useCount(), 1);
+
+  EXPECT_EQ(slice.toStringView(), "World");
+  EXPECT_EQ(buf.retrieveAllAsString(), "Hello World");
+}

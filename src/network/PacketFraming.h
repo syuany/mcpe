@@ -12,8 +12,8 @@ namespace mcpe::network {
  * @brief 拆包（Packet Framing）错误分类
  */
 enum class FramingError {
-  kIncomplete,  ///< 半包：数据未到齐（等待对端后续网络数据，游标零移动）
-  kMalformedLength,  ///< 畸形长度：包头 VarInt 长度格式错误（例如超过 5 字节上限）
+  kIncomplete,        ///< 半包：数据未到齐（等待对端后续网络数据，游标零移动）
+  kMalformedLength,   ///< 畸形长度：包头 VarInt 长度格式错误（例如超过 5 字节上限）
   kInvalidPacketSize  ///< 非法包长：包长数值非法（<= 0 或超过单包 2MB 上限）
 };
 
@@ -22,62 +22,24 @@ enum class FramingError {
  *
  * Minecraft 传输层使用 [Packet Length: VarInt] + [Packet ID: VarInt] + [Payload] 的二进制格式。
  * 本拆包器负责从 TCP 字节流缓冲区中切分出独立的数据包，解决粘包与半包问题，并防范恶意包 Dos 攻击。
+ * 结合 ByteBuffer 的 Netty 风格零拷贝切片机制（readSlice），实现绝对零堆分配与零 memcpy 拆包。
  */
 class PacketFraming {
  public:
   /// 单包最大合法上限（2MB = 2097151 字节，超出则直接拒绝，防止恶意连接发动 OOM 攻击）
   static constexpr size_t kMaxPacketSize = 2097151;
 
-  struct FrameResult {
-    ByteBuffer packet;
-    size_t consumed_bytes{0};
-  };
-
-  struct FrameViewResult {
-    std::string_view packet_view;  ///< 包含 [Packet ID (VarInt) + Payload] 的连续内存视图（零内存分配与拷贝）
-    size_t consumed_bytes{0};      ///< 消耗的总字节数（包长 VarInt 长度 + packet_view.size()）
-  };
-
   /**
-   * @brief 从连续内存视图中零拷贝切出完整数据包的只读视图（纯零拷贝，无任何堆内存分配）
-   *
-   * @param view 当前未消费的可读数据零拷贝视图
-   * @return 成功返回包含 [Packet ID + Payload] 的只读数据包视图以及消耗的总字节数，失败返回 FramingError
-   */
-  static std::expected<FrameViewResult, FramingError> slicePacketViewFromView(
-      std::string_view view
-  );
-
-  /**
-   * @brief 从连续内存视图中尝试切出一个完整数据包（支持基于 SessionReadBuffer 切包）
-   *
-   * @param view 当前未消费的可读数据零拷贝视图
-   * @return 成功返回拆分出的数据包 ByteBuffer 以及消耗的总字节数（包长前缀 + 包体），失败返回 FramingError
-   */
-  static std::expected<FrameResult, FramingError> slicePacketFromView(std::string_view view);
-
-  /**
-   * @brief 从累积接收缓冲区中零拷贝切出完整数据包的只读视图
-   *
-   * 严格遵循“失败零副作用”契约：
-   * - 若返回 kIncomplete，recv_buf 的读游标绝不移动；
-   * - 若成功切出，返回包含 [Packet ID + Payload] 的只读视图，且 recv_buf 游标精准划过该整包（包括长度前缀与包体）。
-   *
-   * @param recv_buf 累积接收数据的缓冲区引用
-   * @return 成功返回包体视图（生命周期依附于 recv_buf 当前内存），失败返回 FramingError
-   */
-  static std::expected<std::string_view, FramingError> slicePacketView(ByteBuffer& recv_buf);
-
-  /**
-   * @brief 从累积接收缓冲区中尝试切出一个完整的数据包
+   * @brief 从累积接收缓冲区中零拷贝切出一个完整的数据包（Netty 风格 readSlice 零拷贝切片）
    *
    * 严格遵循“失败零副作用”契约：
    * - 若返回 kIncomplete，recv_buf 的读游标绝不移动（字节保留等待后续读取）；
    * - 若返回错误（kMalformedLength 或 kInvalidPacketSize），由调用方切断连接；
-   * - 若成功切出，返回包含 [Packet ID + Payload] 的新 ByteBuffer，且 recv_buf 游标精准划过该整包。
+   * - 若成功切出，返回通过 recv_buf.readSlice(...) 零拷贝切出的包 ByteBuffer，
+   *   且 recv_buf 游标精准划过该整包（包括长度 VarInt 与包体）。
    *
    * @param recv_buf 累积接收数据的缓冲区引用
-   * @return 成功返回拆分出的数据包 ByteBuffer，失败返回 FramingError
+   * @return 成功返回拆分出的数据包 ByteBuffer（底层共享 Storage，零堆内存分配），失败返回 FramingError
    */
   static std::expected<ByteBuffer, FramingError> slicePacket(ByteBuffer& recv_buf);
 };
