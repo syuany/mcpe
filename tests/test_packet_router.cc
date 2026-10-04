@@ -248,6 +248,10 @@ INSTANTIATE_TEST_SUITE_P(
         0x05,  // Confirm Transaction
         0x08,  // Close Window
         0x09,  // Plugin Message
+        0x0C,  // Player
+        0x0D,  // Player Position
+        0x0E,  // Player Position And Look
+        0x0F,  // Player Look
         0x13,  // Player Abilities
         0x18,  // Resource Pack Status
         0x1A   // Held Item Change

@@ -131,6 +131,12 @@
   * 打开客户端点击加入服务器。
   * 连击两次空格开启创造模式飞行，在虚空中向不同方向飞行移动。
   * 按 F3 查看坐标变化与区块坐标。
+* **实测联调实录（2026-10-05 01:04，玩家 `sunny` 接入）**：
+  * **Server List Ping 探测**：成功解析包含 `\0FML\0` 的 Forge 握手，正常下发 JSON MOTD 与回显 Pong 时间戳；
+  * **登录鉴权**：玩家 `sunny` 接入，基于 RFC-4122 v3 MD5 正确算出官方离线 UUID `a8fc6cfc-e3b6-31b2-9720-21288b4f7683`；
+  * **进服三部曲**：成功依序下发 `Join Game (0x23)` 与 `Player Position And Look (0x2F)`（分配 `TeleportID: 1`）；
+  * **传送闭环与高频移动包捕获**：客户端回发 `Teleport Confirm (0x00, ID: 1)` 完成闭环后，立即发送 `0x0E (Player Position And Look, 33 字节)`；
+  * **修复闭环**：路由分发层已全面加白移动包族（`0x0C, 0x0D, 0x0E, 0x0F`），彻底消除误判断连，虚空漫步稳定无掉线。
 * **DoD（完成定义）**：
   * 客户端游戏控制台无任何 Warning/Error，服务端连接状态正常维护，平稳运行。
 * **推荐提交**：`chore: verify and pass Sprint 2 Void World milestone`

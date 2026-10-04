@@ -93,6 +93,10 @@ PacketRouter::dispatch(
           case 0x05:  // Confirm Transaction
           case 0x08:  // Close Window
           case 0x09:  // Plugin Message (MC|Brand)
+          case 0x0C:  // Player (on ground)
+          case 0x0D:  // Player Position
+          case 0x0E:  // Player Position And Look
+          case 0x0F:  // Player Look
           case 0x13:  // Player Abilities
           case 0x15:  // Entity Action
           case 0x18:  // Resource Pack Status

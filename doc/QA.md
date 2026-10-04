@@ -43,6 +43,7 @@
 35. [Q35: 在海量高并发（C100K/C1000K）场景下，工业级“真正极度省内存”的 Socket 接收缓冲应该怎么设计？](#q35-在海量高并发c100kc1000k场景下工业级真正极度省内存的-socket-接收缓冲应该怎么设计)
 36. [Q36: LoginHandler 调用 PlayHandler::onPlayerJoin(session) 为什么不用增加引用计数？到底什么时候应该增加计数？](#q36-loginhandler-调用-playhandleronplayerjoinsession-为什么不用增加引用计数到底什么时候应该增加计数)
 37. [Q37: mcpe 内存池性能实测：当前实现最像哪个经典实现？与 Folly、mimalloc 基准对比表现如何？存在哪些工业级差距？](#q37-mcpe-内存池性能实测当前实现最像哪个经典实现与-follymimalloc-基准对比表现如何存在哪些工业级差距)
+38. [Q38: 真实客户端联调实测复盘：为什么客户端刚确认 Teleport ID (0x00) 就瞬间掉线？Protocol 340 移动包 (0x0E) 机制与路由防御反思](#q38-真实客户端联调实测复盘为什么客户端刚确认-teleport-id-0x00-就瞬间掉线protocol-340-移动包-0x0e-机制与路由防御反思)
 
 
 ---
@@ -4268,3 +4269,92 @@ void TcpSession::startKeepAliveTimer() {
 
 
 
+
+
+---
+
+### Q38: 真实客户端联调实测复盘：为什么客户端刚确认 Teleport ID (0x00) 就瞬间掉线？Protocol 340 移动包 (0x0E) 机制与路由防御反思
+
+#### 1. 现象复现：真实客户端全链路实测日志
+在完成 Sprint 2 虚空进服与全链路解耦重构后，启动 `./bin/server`，使用真实 Minecraft 1.12.2（HMCL + Forge）客户端连接，控制台记录到了完整的入服日志：
+
+```text
+[2026-10-05 01:00:32.398] [info] [TcpServer] Listening on 0.0.0.0:25566
+[2026-10-05 01:04:01.836] [info] [Session] Connected from 115.150.122.207:44959
+[2026-10-05 01:04:01.969] [info] [Handshake] Client 115.150.122.207:44959 -> ProtoVer: 340, Host: 20.239.194.249FML:25566, NextState: 1
+[2026-10-05 01:04:01.969] [debug] [StatusHandler] Responding to Status Request from 115.150.122.207:44959
+[2026-10-05 01:04:02.097] [info] [StatusHandler] Server List Ping flow completed for 115.150.122.207:44959
+[2026-10-05 01:04:02.204] [info] [ClientSession] Client disconnected: 115.150.122.207:44959
+[2026-10-05 01:04:36.110] [info] [Session] Connected from 115.150.122.207:45036
+[2026-10-05 01:04:36.114] [info] [Handshake] Client 115.150.122.207:45036 -> ProtoVer: 340, Host: 20.239.194.249FML:25566, NextState: 2
+[2026-10-05 01:04:36.115] [info] [LoginHandler] Player logged in: sunny (UUID: a8fc6cfc-e3b6-31b2-9720-21288b4f7683) from 115.150.122.207:45036
+[2026-10-05 01:04:36.115] [info] [PlayHandler] Sent Join Game (0x23) to 115.150.122.207:45036
+[2026-10-05 01:04:36.115] [info] [PlayHandler] Sent Player Position And Look (0x2F) to 115.150.122.207:45036, TeleportID: 1
+[2026-10-05 01:04:36.315] [debug] [Router] Ignored routine PLAY packet 0x09
+[2026-10-05 01:04:37.053] [debug] [Router] Ignored routine PLAY packet 0x04
+[2026-10-05 01:04:37.053] [debug] [Router] Ignored routine PLAY packet 0x09
+[2026-10-05 01:04:37.158] [info] [PlayHandler] Teleport confirmed by 115.150.122.207:45036 (ID: 1)
+[2026-10-05 01:04:37.158] [debug] [Session] Sliced complete packet with 34 bytes from 115.150.122.207:45036
+[2026-10-05 01:04:37.158] [debug] [Router] State: PLAY, PacketID: 0x0E, PayloadBytes: 33
+[2026-10-05 01:04:37.158] [warning] [Router] Unhandled PLAY packet 0x0E from 115.150.122.207:45036
+[2026-10-05 01:04:37.158] [debug] [ClientManager] Session removed. Total sessions: 0
+[2026-10-05 01:04:37.158] [info] [ClientSession] Client disconnected: 115.150.122.207:45036
+```
+
+#### 2. 日志链路深度逆向逐段解析
+
+1. **Server List Ping 阶段（44959 端口）**：
+   - 客户端携带 `20.239.194.249\0FML\0:25566` 探测服务器，表明使用了 Forge/FML 模组客户端；
+   - 服务端正确提取 `NextState: 1`，响应 JSON MOTD，并对客户端的 `Ping (0x01)` 时间戳精准回发 `Pong (0x01)`；
+   - 探测完毕后客户端正常优雅断开，会话顺利析构无内存泄漏。
+2. **正式登录鉴权阶段（45036 端口）**：
+   - 收到 `Handshake`（`NextState: 2` 进入 `LOGIN`）；
+   - 收到 `Login Start (0x00)`，玩家名 `"sunny"`；
+   - 成功生成官方离线 UUID `a8fc6cfc-e3b6-31b2-9720-21288b4f7683`（基于 RFC-4122 v3 MD5）；
+   - 顺利切入 `PLAY` 状态，下发 `Join Game (0x23)` 与 `Player Position And Look (0x2F)`（分配 `TeleportID: 1`）。
+3. **例行握手配置与传送确认**：
+   - 客户端主动上报插件通道消息 `0x09`（`MC|Brand`）、配置信息 `0x04`（`Client Settings`）；
+   - 随后客户端向服务端回发 `Teleport Confirm (0x00)`，携带确认 ID `1`，服务端日志确认匹配并清除 `pendingTeleportId`。
+4. **致命断联事故：Unhandled PLAY packet 0x0E**：
+   - 紧接着传送确认后的一瞬间，客户端发来一个总长 34 字节、PacketID 为 `0x0E`、Payload 为 33 字节的数据包；
+   - 服务端日志打印：`[warning] [Router] Unhandled PLAY packet 0x0E from ...`；
+   - 紧接着连接立即被切断（`Session removed. Total sessions: 0`）。
+
+#### 3. 根本原因定位：0x0E 到底是什么包？为什么会断开？
+
+##### (1) Protocol 340 (1.12.2) 规约中的 0x0E：
+在 1.12.2 的 `PLAY` 状态下，客户端上行（Serverbound）的移动数据包族由 4 个核心包构成：
+* `0x0C`: **Player**（仅上报 `On Ground: Boolean`，1 字节）
+* `0x0D`: **Player Position**（`X: Double` + `Feet Y: Double` + `Z: Double` + `On Ground: Boolean`，共 25 字节）
+* **`0x0E`**: **Player Position And Look**（`X: Double` + `Feet Y: Double` + `Z: Double` + `Yaw: Float` + `Pitch: Float` + `On Ground: Boolean`）
+* `0x0F`: **Player Look**（`Yaw: Float` + `Pitch: Float` + `On Ground: Boolean`，共 9 字节）
+
+计算 `0x0E` 的净载荷大小：
+`Payload = 8 (Double X) + 8 (Double Y) + 8 (Double Z) + 4 (Float Yaw) + 4 (Float Pitch) + 1 (Boolean OnGround) = 33 字节`
+**与日志中记录的 `PayloadBytes: 33` 逐字节完美匹配！**
+
+##### (2) 为什么服务端会断开？
+查看 `src/protocol/PacketRouter.cc` 的路由分发实现：
+```cpp
+switch (packet_id) {
+  case 0x03: case 0x04: case 0x05: case 0x08: case 0x09:
+  case 0x13: case 0x15: case 0x18: case 0x1A:
+    spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
+    packet.retrieveAll();
+    break;
+  default:
+    spdlog::warn("[Router] Unhandled PLAY packet 0x{:02X} from {}", packet_id, session->remoteAddress());
+    session->stop(); // ⚠️ 这里执行了强制断开连接！
+    break;
+}
+```
+* **设计初衷**：基于安全防护规约（BR-01），对未注册的未知/非法 Packet ID 采取“Fail-Closed”（严格断开）策略，防止恶意畸形包渗透。
+* **致命疏漏**：官方 Notchian 客户端在收到 `Teleport Confirm` 确认生效后，本地物理引擎立即解锁，**首帧就会立刻上报当前的精确位置与朝向包 `0x0E`（即使玩家一动不动，静止状态每 20 tick 也会定时上报一次）**！
+* **事故结论**：因为路由白名单中遗漏了移动包族（`0x0C ~ 0x0F`），导致正常游玩的玩家被服务端当成恶意非法包当场踢下线。
+
+#### 4. 工业级最佳实践与修复方案
+
+在 Sprint 2~3（尚未实现 Sprint 4 移动同步与 AOI 广播）期间：
+1. **完善路由白名单**：将 `0x0C` (Player), `0x0D` (Player Position), `0x0E` (Player Position And Look), `0x0F` (Player Look) 加入 PLAY 状态下的常规例行包容忍列表；
+2. **单元测试回归**：在 `tests/test_packet_router.cc` 的 `WhitelistRoutinePackets` 参数化测试中补充 `0x0C, 0x0D, 0x0E, 0x0F` 测试用例，确保 100% 覆盖。
+3. **架构演进**：为 Sprint 4 的 `PlayerMovementHandler`、MPSC 逻辑队列与防瞬移反作弊校验预留契约接口。
