@@ -1,26 +1,45 @@
 #ifndef PACKETROUTER_H
 #define PACKETROUTER_H
 
+#include <cstdint>
 #include <memory>
 
 #include "common/ByteBuffer.h"
 #include "protocol/ConnectionState.h"
+#include "protocol/ProtocolHandler.h"
 
 namespace mcpe::protocol {
 
 class ClientSession;
 
 /**
- * @brief 协议数据包全局路由器与分发中心（对齐 Cuberite 协议派发机制）
+ * @brief Minecraft 1.12.2 (Protocol 340) 数据包路由分发器（对标 Cuberite cProtocol_1_12_2 架构设计）
  *
- * 充当网络业务层核心分发路由：
+ * 继承 ProtocolHandler 多态接口，负责 Protocol 340 的数据包边界解析与路由：
  * 1. 自动从 session->state() 获取当前状态并派发到对应业务处理器
  * 2. 校验非法数据包、畸形包与未授权包，并执行断网与安全防御
  * 3. 维护 PLAY 阶段的原版客户端例行包白名单（静默忽略不中断连接）
  * 4. 借鉴 Cuberite 检查数据包完整消费（Under-read 告警）
  */
-class PacketRouter {
+class PacketRouter : public ProtocolHandler {
  public:
+  int32_t protocolVersion() const noexcept override { return 340; }
+
+  void handlePacket(
+      const std::shared_ptr<ClientSession>& session,
+      ByteBuffer packet
+  ) override {
+    dispatch(session, std::move(packet));
+  }
+
+  void handlePacket(
+      const std::shared_ptr<ClientSession>& session,
+      ConnectionState state,
+      ByteBuffer packet
+  ) override {
+    dispatch(session, state, std::move(packet));
+  }
+
   /**
    * @brief 数据包路由分发主入口（直接内聚从 session->state() 获取当前状态）
    *

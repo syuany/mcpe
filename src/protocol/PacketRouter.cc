@@ -2,8 +2,10 @@
 
 #include <spdlog/spdlog.h>
 
+#include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
+#include "protocol/HandshakeHandler.h"
 #include "protocol/LoginHandler.h"
 #include "protocol/PlayHandler.h"
 #include "protocol/StatusHandler.h"
@@ -46,7 +48,7 @@ PacketRouter::dispatch(
     case ConnectionState::HANDSHAKING:
       // 握手状态：仅允许 0x00 Handshake 包
       if (packet_id == 0x00) {
-        StatusHandler::handleHandshake(session, packet);
+        HandshakeHandler::handleHandshake(session, packet);
       } else {
         spdlog::warn("[Router] Unknown packet in HANDSHAKING: 0x{:02X}", packet_id);
         session->stop();
@@ -56,7 +58,11 @@ PacketRouter::dispatch(
     case ConnectionState::STATUS:
       // 状态探测阶段：支持 0x00 (Status Request) 和 0x01 (Ping)
       if (packet_id == 0x00) {
-        StatusHandler::handleStatusRequest(session);
+        size_t online_players = 0;
+        if (auto mgr = session->clientManager()) {
+          online_players = mgr->playerCount();
+        }
+        StatusHandler::handleStatusRequest(session, ServerConfig::defaultInstance(), online_players);
       } else if (packet_id == 0x01) {
         StatusHandler::handlePing(session, packet);
       } else {

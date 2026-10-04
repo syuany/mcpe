@@ -7,7 +7,6 @@
 #include "protocol/AuthUtils.h"
 #include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
-#include "protocol/PlayHandler.h"
 #include "spdlog/spdlog.h"
 
 namespace mcpe::protocol {
@@ -53,9 +52,8 @@ LoginHandler::handleLoginStart(
   writer.appendString(username);
   writer.flush();
 
-  session->setState(ConnectionState::PLAY);
-
-  PlayHandler::onPlayerJoin(session);
+  // 移交 ClientSession 自行驱动 PLAY 阶段世界准入（彻底解耦 LoginHandler 与 PlayHandler）
+  session->startPlay();
 }
 
 }  // namespace mcpe::protocol

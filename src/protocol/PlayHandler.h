@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "common/ByteBuffer.h"
+#include "protocol/GameTypes.h"
 
 namespace mcpe::protocol {
 
@@ -15,8 +16,12 @@ class PlayHandler {
   /** @brief 玩家鉴权通过后调用：下发 Join Game、Player Position And Look 并启动保活心跳 */
   static void onPlayerJoin(const std::shared_ptr<ClientSession>& session);
 
-  /** @brief 下发 Join Game (0x23) 世界参数包 */
-  static void sendJoinGame(const std::shared_ptr<ClientSession>& session, int32_t entity_id);
+  /** @brief 下发 Join Game (0x23) 世界参数包（使用领域配置消除硬编码魔数） */
+  static void sendJoinGame(
+      const std::shared_ptr<ClientSession>& session,
+      int32_t entity_id,
+      const ServerConfig& config = ServerConfig::defaultInstance()
+  );
 
   /** @brief 下发 Player Position And Look (0x2F) 玩家位置与视线包 */
   static void sendPlayerPositionAndLook(

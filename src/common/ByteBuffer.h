@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/ByteReader.h"
 #include "common/VarInt.h"
 
 namespace mcpe {
@@ -141,57 +142,19 @@ class ByteBuffer {
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
   [[nodiscard]] std::expected<T, DecodeError> readBe() noexcept {
-    if (!hasBytes(sizeof(T))) {
-      return std::unexpected(DecodeError::kIncomplete);
-    }
-    if constexpr (sizeof(T) == 1) {
-      T val = static_cast<T>(*peek());
-      retrieve(1);
-      return val;
-    } else if constexpr (std::integral<T>) {
-      T val;
-      std::memcpy(&val, peek(), sizeof(T));
+    ByteReader reader(std::string_view(peek(), readableBytes()));
+    auto res = reader.readBe<T>();
+    if (res) {
       retrieve(sizeof(T));
-      if constexpr (std::endian::native == std::endian::little) {
-        val = std::byteswap(val);
-      }
-      return val;
-    } else if constexpr (std::floating_point<T>) {
-      using UInt = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
-      UInt bits;
-      std::memcpy(&bits, peek(), sizeof(UInt));
-      retrieve(sizeof(T));
-      if constexpr (std::endian::native == std::endian::little) {
-        bits = std::byteswap(bits);
-      }
-      return std::bit_cast<T>(bits);
     }
+    return res;
   }
 
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
   [[nodiscard]] std::expected<T, DecodeError> peekBe() const noexcept {
-    if (!hasBytes(sizeof(T))) {
-      return std::unexpected(DecodeError::kIncomplete);
-    }
-    if constexpr (sizeof(T) == 1) {
-      return static_cast<T>(*peek());
-    } else if constexpr (std::integral<T>) {
-      T val;
-      std::memcpy(&val, peek(), sizeof(T));
-      if constexpr (std::endian::native == std::endian::little) {
-        val = std::byteswap(val);
-      }
-      return val;
-    } else if constexpr (std::floating_point<T>) {
-      using UInt = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
-      UInt bits;
-      std::memcpy(&bits, peek(), sizeof(UInt));
-      if constexpr (std::endian::native == std::endian::little) {
-        bits = std::byteswap(bits);
-      }
-      return std::bit_cast<T>(bits);
-    }
+    ByteReader reader(std::string_view(peek(), readableBytes()));
+    return reader.peekBe<T>();
   }
 
   // ---------------------------------------------------------------------------

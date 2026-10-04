@@ -9,65 +9,25 @@
 #include "common/ByteBuffer.h"
 #include "network/PacketWriter.h"
 #include "protocol/ClientSession.h"
-#include "protocol/ConnectionState.h"
 
-using namespace mcpe::protocol;
+namespace mcpe::protocol {
 
 void
-StatusHandler::handleHandshake(
+StatusHandler::handleStatusRequest(
     const std::shared_ptr<ClientSession>& session,
-    ByteBuffer& payload
+    const ServerConfig& config,
+    size_t online_players
 ) {
-  // 1. 按 Minecraft 协议规范顺序解包 Handshake 字段：
-  //    - Protocol Version: VarInt (如 1.12.2 为 340)
-  //    - Server Address: String (客户端连接的主机名或 IP)
-  //    - Server Port: uint16_t (大端端口号，通常 25565)
-  //    - Next State: VarInt (1: STATUS, 2: LOGIN)
-  auto version_res = payload.readVarInt();
-  auto host_res = payload.readString();
-  auto port_res = payload.readBe<uint16_t>();
-  auto next_state_res = payload.readVarInt();
-
-  // 若任一字段读取失败，视为畸形握手包，记录警告并切断连接
-  if (!version_res || !host_res || !port_res || !next_state_res) {
-    spdlog::warn("[StatusHandler] Malformed handshake packet from {}", session->remoteAddress());
-    session->stop();
-    return;
-  }
-
-  const auto protocol_version = *version_res;
-  const auto& host = *host_res;
-  const auto port = *port_res;
-  const auto next_state = *next_state_res;
-
-  spdlog::info(
-      "[Hanshake] Client {} -> ProtoVer: {}, Host: {}:{}, NextState: {}", session->remoteAddress(),
-      protocol_version, host, port, next_state
-  );
-
-  // 2. 根据 Next State 流转状态机
-  if (next_state == 1) {
-    // 客户端意图进行状态查询（Server List Ping / MOTD）
-    session->setState(ConnectionState::STATUS);
-  } else if (next_state == 2) {
-    // 客户端意图登录进入游戏
-    session->setState(ConnectionState::LOGIN);
-    spdlog::info("[Hanshake] Client wants to LOGIN, ProtocolVersion: {}", protocol_version);
-  } else {
-    // 非法意图（非 1 非 2），切断连接防御未知攻击
-    spdlog::warn("[Hanshake] Invalid next state {} from {}", next_state, session->remoteAddress());
-    session->stop();
-  }
-}
-
-void
-StatusHandler::handleStatusRequest(const std::shared_ptr<ClientSession>& session) {
   spdlog::debug("[StatusHandler] Responding to Status Request from {}", session->remoteAddress());
 
-  // 1. 组装符合 Minecraft 1.12.2 官方规范的 JSON 文本
-  //    包含版本协议号 340、版本名称 1.12.2、最大/当前在线人数以及带颜色代码的 MOTD
+  // 1. 根据 ServerConfig 动态组装符合 Minecraft 1.12.2 规范的 JSON 描述文本（消灭硬编码）
   const std::string json_payload = std::format(
-      R"({{"version":{{"name":"1.12.2","protocol":340}},"players":{{"max":100,"online":0}},"description":{{"text":"§aA High Performance C++ Server §7[Asio/C++23]"}}}})"
+      R"({{"version":{{"name":"{}","protocol":{}}},"players":{{"max":{},"online":{}}},"description":{{"text":"{}"}}}})",
+      config.version_name,
+      config.protocol_version,
+      config.max_players,
+      online_players,
+      config.motd
   );
 
   // 2. 利用 RAII PacketWriter 自动打入 Packet ID 0x00，析构时自动前插包长并异步发送
@@ -81,7 +41,6 @@ StatusHandler::handlePing(
     ByteBuffer& payload
 ) {
   // 1. 读取原生的 8 字节大端有符号长整型（Long）时间戳
-  //    注意：此处必须是 8 字节大端整数，绝不是 VarInt！
   auto time_res = payload.readBe<int64_t>();
   if (!time_res) {
     spdlog::warn("[StatusHandler] Malformed Ping packet from {}", session->remoteAddress());
@@ -97,3 +56,5 @@ StatusHandler::handlePing(
 
   spdlog::info("[StatusHandler] Server List Ping flow completed for {}", session->remoteAddress());
 }
+
+}  // namespace mcpe::protocol

@@ -10,14 +10,23 @@
 
 #include "network/PacketWriter.h"
 #include "network/TcpSession.h"
+#include "protocol/ClientManager.h"
 #include "protocol/PacketRouter.h"
+#include "protocol/PlayHandler.h"
 
 namespace mcpe::protocol {
+
+void
+ClientSession::startPlay() {
+  setState(ConnectionState::PLAY);
+  PlayHandler::onPlayerJoin(shared_from_this());
+}
 
 ClientSession::ClientSession(std::shared_ptr<network::TcpSession> tcp_session)
     : tcp_session_(tcp_session),
       remote_address_(tcp_session ? tcp_session->remoteAddress() : "unknown"),
-      keep_alive_timer_(tcp_session->socket().get_executor()) {
+      keep_alive_timer_(tcp_session->socket().get_executor()),
+      protocol_handler_(std::make_shared<PacketRouter>()) {
   last_alive_time_ = std::chrono::steady_clock::now();
   spdlog::info("[ClientSession] Created for {}", remote_address_);
 }
@@ -32,12 +41,19 @@ ClientSession::onPacket(
     const std::shared_ptr<network::TcpSession>& /*session*/,
     ByteBuffer packet
 ) {
-  PacketRouter::dispatch(shared_from_this(), std::move(packet));
+  if (protocol_handler_) {
+    protocol_handler_->handlePacket(shared_from_this(), std::move(packet));
+  } else {
+    PacketRouter::dispatch(shared_from_this(), std::move(packet));
+  }
 }
 
 void
 ClientSession::onDisconnected(const std::shared_ptr<network::TcpSession>& /*session*/) {
   cancelKeepAlive();
+  if (auto mgr = client_manager_.lock()) {
+    mgr->removeSession(shared_from_this());
+  }
   spdlog::info("[ClientSession] Client disconnected: {}", remote_address_);
 }
 
@@ -80,6 +96,11 @@ ClientSession::socket() {
 std::shared_ptr<network::TcpSession>
 ClientSession::tcpSession() const noexcept {
   return tcp_session_.lock();
+}
+
+std::shared_ptr<ClientManager>
+ClientSession::clientManager() const noexcept {
+  return client_manager_.lock();
 }
 
 void

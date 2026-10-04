@@ -4,6 +4,7 @@
 
 #include "network/PacketWriter.h"
 #include "protocol/ClientSession.h"
+#include "protocol/GameTypes.h"
 
 namespace mcpe::protocol {
 
@@ -16,15 +17,19 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
 }
 
 void
-PlayHandler::sendJoinGame(const std::shared_ptr<ClientSession>& session, int32_t entity_id) {
+PlayHandler::sendJoinGame(
+    const std::shared_ptr<ClientSession>& session,
+    int32_t entity_id,
+    const ServerConfig& config
+) {
   network::PacketWriter writer(session, 0x23);
   writer.writeBe<int32_t>(entity_id);
-  writer.writeBe<uint8_t>(1);
-  writer.writeBe<int32_t>(0);
-  writer.writeBe<uint8_t>(1);
-  writer.writeBe<uint8_t>(100);
-  writer.appendString("flat");
-  writer.writeBe<uint8_t>(0);
+  writer.writeBe<uint8_t>(static_cast<uint8_t>(config.default_gamemode));
+  writer.writeBe<int32_t>(static_cast<int32_t>(config.default_dimension));
+  writer.writeBe<uint8_t>(static_cast<uint8_t>(config.default_difficulty));
+  writer.writeBe<uint8_t>(static_cast<uint8_t>(config.max_players));
+  writer.appendString(config.level_type);
+  writer.writeBe<uint8_t>(config.reduced_debug_info ? 1 : 0);
 
   spdlog::info("[PlayHandler] Sent Join Game (0x23) to {}", session->remoteAddress());
 }

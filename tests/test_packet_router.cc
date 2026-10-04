@@ -33,8 +33,10 @@
 #include "common/ByteBuffer.h"
 #include "network/PacketFraming.h"
 #include "network/TcpSession.h"
+#include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
+#include "protocol/HandshakeHandler.h"
 #include "protocol/PacketRouter.h"
 #include "protocol/StatusHandler.h"
 
@@ -657,4 +659,69 @@ TEST_F(PacketRouterTest, ClientSessionKeepAliveMatching) {
   session_->clearPendingTeleportId();
   EXPECT_EQ(session_->pendingTeleportId(), -1);
 }
+
+// ---------------------------------------------------------------------------
+// 测试集 5：HandshakeHandler 独立握手状态机测试（解耦验证）
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, HandshakeHandlerDirectTransitions) {
+  // 1. Handshake NextState = 1 -> STATUS
+  ByteBuffer payload1;
+  payload1.appendVarInt(340);
+  payload1.appendString("mc.example.com");
+  payload1.writeBe<uint16_t>(25565);
+  payload1.appendVarInt(1);
+
+  HandshakeHandler::handleHandshake(session_, payload1);
+  EXPECT_EQ(session_->state(), ConnectionState::STATUS);
+
+  // 2. Handshake NextState = 2 -> LOGIN
+  ByteBuffer payload2;
+  payload2.appendVarInt(340);
+  payload2.appendString("mc.example.com");
+  payload2.writeBe<uint16_t>(25565);
+  payload2.appendVarInt(2);
+
+  HandshakeHandler::handleHandshake(session_, payload2);
+  EXPECT_EQ(session_->state(), ConnectionState::LOGIN);
+
+  // 3. Handshake NextState = 99 -> 非法状态，切断连接
+  ByteBuffer payload3;
+  payload3.appendVarInt(340);
+  payload3.appendString("mc.example.com");
+  payload3.writeBe<uint16_t>(25565);
+  payload3.appendVarInt(99);
+
+  HandshakeHandler::handleHandshake(session_, payload3);
+  EXPECT_TRUE(session_->isStopped());
+}
+
+// ---------------------------------------------------------------------------
+// 测试集 6：ClientManager 全局连接管理、计数与广播测试（对标 Cuberite cServer）
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, ClientManagerLifecycleAndBroadcast) {
+  ClientManager mgr;
+  EXPECT_EQ(mgr.sessionCount(), 0);
+  EXPECT_EQ(mgr.playerCount(), 0);
+
+  // 添加会话
+  mgr.addSession(session_);
+  EXPECT_EQ(mgr.sessionCount(), 1);
+  EXPECT_EQ(mgr.playerCount(), 0);  // 初始为 HANDSHAKING，不在玩
+
+  // 模拟流转至 PLAY 阶段
+  session_->setState(ConnectionState::PLAY);
+  EXPECT_EQ(mgr.playerCount(), 1);
+
+  // 广播测试
+  ByteBuffer test_pkt;
+  test_pkt.appendVarInt(1);
+  test_pkt.appendVarInt(0x00);
+  mgr.broadcast(std::move(test_pkt));
+
+  // 移除会话
+  mgr.removeSession(session_);
+  EXPECT_EQ(mgr.sessionCount(), 0);
+  EXPECT_EQ(mgr.playerCount(), 0);
+}
+
 

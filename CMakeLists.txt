@@ -142,6 +142,8 @@ target_link_libraries(mcpe_network PUBLIC mcpe_common)
 # ==============================================
 add_library(mcpe_protocol STATIC
     src/protocol/ClientSession.cc
+    src/protocol/ClientManager.cc
+    src/protocol/HandshakeHandler.cc
     src/protocol/PacketRouter.cc
     src/protocol/StatusHandler.cc
     src/protocol/AuthUtils.cc

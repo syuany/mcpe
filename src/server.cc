@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "network/TcpServer.h"
+#include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
 
 namespace {
@@ -34,13 +35,19 @@ main() {
     // 1. 初始化核心 Asio IO 上下文
     asio::io_context io_context;
 
-    // 2. 使用独立端口，避免与 Cuberite 的 25565 冲突
+    // 2. 初始化全局客户端会话管理器（对齐 Cuberite cServer::m_Clients 架构设计）
+    auto client_manager = std::make_shared<ClientManager>();
+
+    // 3. 使用独立端口，避免与 Cuberite 的 25565 冲突
     TcpServer server(io_context, kServerPort);
 
     // 对齐 Cuberite 架构设计：通过 SessionFactory 为每个连入的 TcpSession 创建独立的 ClientSession
     // 彻底解耦网络传输层（TcpSession / cTCPLink）与 Minecraft 协议业务层（ClientSession / cClientHandle）
-    server.setSessionFactory([](const std::shared_ptr<TcpSession>& tcp) {
-      return std::make_shared<ClientSession>(tcp);
+    server.setSessionFactory([client_manager](const std::shared_ptr<TcpSession>& tcp) {
+      auto session = std::make_shared<ClientSession>(tcp);
+      session->setClientManager(client_manager);
+      client_manager->addSession(session);
+      return session;
     });
 
     server.start();

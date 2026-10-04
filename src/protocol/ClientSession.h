@@ -23,6 +23,9 @@ class TcpSession;
 
 namespace mcpe::protocol {
 
+class ClientManager;
+class ProtocolHandler;
+
 /**
  * @brief Minecraft 客户端业务会话（严格对标 Cuberite cClientHandle 架构设计）
  *
@@ -57,6 +60,9 @@ class ClientSession : public network::SessionCallbacks,
   ConnectionState state() const noexcept { return state_; }
   void setState(ConnectionState new_state) noexcept { state_ = new_state; }
 
+  /// 鉴权成功后流转至 PLAY 阶段并触发玩家进服生命周期（彻底解耦 LoginHandler 与 PlayHandler）
+  void startPlay();
+
   // --- 玩家身份与实体元数据 ---
   const std::string& username() const noexcept { return username_; }
   void setUsername(std::string name) { username_ = std::move(name); }
@@ -76,6 +82,20 @@ class ClientSession : public network::SessionCallbacks,
   void clearPendingTeleportId() noexcept { pending_teleport_id_ = -1; }
   void setPendingTeleportId(int32_t id) noexcept { pending_teleport_id_ = id; }
 
+  // --- 全局会话管理器关联 ---
+  void setClientManager(std::weak_ptr<ClientManager> mgr) noexcept {
+    client_manager_ = std::move(mgr);
+  }
+  std::shared_ptr<ClientManager> clientManager() const noexcept;
+
+  // --- 协议多态解析器（对标 Cuberite cProtocol）---
+  void setProtocolHandler(std::shared_ptr<ProtocolHandler> handler) noexcept {
+    protocol_handler_ = std::move(handler);
+  }
+  const std::shared_ptr<ProtocolHandler>& protocolHandler() const noexcept {
+    return protocol_handler_;
+  }
+
   // --- PLAY 阶段心跳保活组件（对齐 Cuberite cClientHandle 心跳机制）---
   void startKeepAliveTimer();
   void onKeepAliveResponse(int64_t id);
@@ -87,7 +107,10 @@ class ClientSession : public network::SessionCallbacks,
 
  private:
   std::weak_ptr<network::TcpSession> tcp_session_;
+  std::weak_ptr<ClientManager> client_manager_;
   std::string remote_address_;
+  asio::steady_timer keep_alive_timer_;
+  std::shared_ptr<ProtocolHandler> protocol_handler_;
 
   ConnectionState state_{ConnectionState::HANDSHAKING};
   std::string username_;
@@ -97,7 +120,6 @@ class ClientSession : public network::SessionCallbacks,
   int32_t teleport_counter_{0};
   int32_t pending_teleport_id_{-1};
 
-  asio::steady_timer keep_alive_timer_;
   int64_t last_keep_alive_id_{0};
   std::chrono::steady_clock::time_point last_alive_time_;
   bool awaiting_keep_alive_{false};
