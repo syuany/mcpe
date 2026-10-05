@@ -46,7 +46,9 @@ struct TestTcpFixture {
       EXPECT_FALSE(ec) << "Connect failed: " << ec.message();
     });
 
-    io_thread = std::jthread([this]() { io_context.run(); });
+    io_thread = std::jthread([this]() {
+      io_context.run();
+    });
 
     // 等待连接建立完成
     auto start_time = std::chrono::steady_clock::now();
@@ -169,7 +171,8 @@ class MockSessionCallbacks : public mcpe::network::SessionCallbacks {
   std::vector<int32_t> received_values;
   std::mutex mutex;
 
-  void onPacket(const std::shared_ptr<TcpSession>&, ByteBuffer packet) override {
+  void
+  onPacket(const std::shared_ptr<TcpSession>&, ByteBuffer packet) override {
     auto id = packet.readVarInt();
     if (id) {
       std::lock_guard<std::mutex> lock(mutex);
@@ -178,7 +181,8 @@ class MockSessionCallbacks : public mcpe::network::SessionCallbacks {
     packet_count++;
   }
 
-  void onDisconnected(const std::shared_ptr<TcpSession>&) override {
+  void
+  onDisconnected(const std::shared_ptr<TcpSession>&) override {
     disconnected = true;
   }
 };

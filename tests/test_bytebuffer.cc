@@ -11,14 +11,21 @@
 using mcpe::ByteBuffer;
 using mcpe::DecodeError;
 
-void PrintTo(DecodeError e, std::ostream* os) { *os << mcpe::toString(e); }
+void
+PrintTo(DecodeError e, std::ostream* os) {
+  *os << mcpe::toString(e);
+}
 
 namespace {
 
 // 解析失败：错误分类必须精确匹配
 template <typename T>
-void expectDecodeError(const std::expected<T, DecodeError>& result, DecodeError expected,
-                       const char* what) {
+void
+expectDecodeError(
+    const std::expected<T, DecodeError>& result,
+    DecodeError expected,
+    const char* what
+) {
   if (result.has_value()) {
     ADD_FAILURE() << what << " 期望失败，却解析成功了: " << *result;
     return;
@@ -28,7 +35,8 @@ void expectDecodeError(const std::expected<T, DecodeError>& result, DecodeError 
 
 // 解析成功：返回值必须相等
 template <typename T, typename U>
-void expectDecodeValue(const std::expected<T, DecodeError>& result, U expected, const char* what) {
+void
+expectDecodeValue(const std::expected<T, DecodeError>& result, U expected, const char* what) {
   if (!result.has_value()) {
     ADD_FAILURE() << what << " 期望成功，实际失败: " << mcpe::toString(result.error());
     return;
@@ -161,8 +169,8 @@ TEST(ByteBufferTest, FloatRoundTrip) {
 
 TEST(ByteBufferTest, DoubleRoundTrip) {
   ByteBuffer buf;
-  const double values[] = {0.0, 1.0, -1.5, 3.141592653589793,
-                           std::numeric_limits<double>::infinity()};
+  const double values[] =
+      {0.0, 1.0, -1.5, 3.141592653589793, std::numeric_limits<double>::infinity()};
   for (double v : values) buf.writeBe<double>(v);
   for (double v : values) EXPECT_EQ(*buf.readBe<double>(), v);
 }

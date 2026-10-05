@@ -64,10 +64,7 @@ ClientManager::broadcast(ByteBuffer packet) {
 }
 
 void
-ClientManager::broadcastExcept(
-    ByteBuffer packet,
-    const std::shared_ptr<ClientSession>& except
-) {
+ClientManager::broadcastExcept(ByteBuffer packet, const std::shared_ptr<ClientSession>& except) {
   std::vector<std::shared_ptr<ClientSession>> targets;
   {
     std::lock_guard<std::mutex> lock(mutex_);

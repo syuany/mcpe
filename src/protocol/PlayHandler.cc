@@ -92,10 +92,7 @@ PlayHandler::handleTeleportConfirm(
 }
 
 void
-PlayHandler::handleKeepAlive(
-    const std::shared_ptr<ClientSession>& session,
-    ByteBuffer& payload
-) {
+PlayHandler::handleKeepAlive(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload) {
   // ⚠️ 1.12.2 铁律：Keep Alive 载荷必须是 8 字节大端整数 readBe<int64_t>()
   auto id_res = payload.readBe<int64_t>();
   if (!id_res) {

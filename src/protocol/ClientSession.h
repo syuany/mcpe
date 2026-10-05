@@ -57,42 +57,79 @@ class ClientSession : public network::SessionCallbacks,
   std::shared_ptr<network::TcpSession> tcpSession() const noexcept;
 
   // --- Minecraft 协议连接状态机 ---
-  ConnectionState state() const noexcept { return state_; }
-  void setState(ConnectionState new_state) noexcept { state_ = new_state; }
+  ConnectionState
+  state() const noexcept {
+    return state_;
+  }
+  void
+  setState(ConnectionState new_state) noexcept {
+    state_ = new_state;
+  }
 
   /// 鉴权成功后流转至 PLAY 阶段并触发玩家进服生命周期（彻底解耦 LoginHandler 与 PlayHandler）
   void startPlay();
 
   // --- 玩家身份与实体元数据 ---
-  const std::string& username() const noexcept { return username_; }
-  void setUsername(std::string name) { username_ = std::move(name); }
+  const std::string&
+  username() const noexcept {
+    return username_;
+  }
+  void
+  setUsername(std::string name) {
+    username_ = std::move(name);
+  }
 
-  const std::string& uuid() const noexcept { return uuid_; }
-  void setUuid(std::string uuid) { uuid_ = std::move(uuid); }
+  const std::string&
+  uuid() const noexcept {
+    return uuid_;
+  }
+  void
+  setUuid(std::string uuid) {
+    uuid_ = std::move(uuid);
+  }
 
-  int32_t entityId() const noexcept { return entity_id_; }
-  void setEntityId(int32_t id) noexcept { entity_id_ = id; }
+  int32_t
+  entityId() const noexcept {
+    return entity_id_;
+  }
+  void
+  setEntityId(int32_t id) noexcept {
+    entity_id_ = id;
+  }
 
   // --- 世界传送位置确认机制 ---
-  int32_t nextTeleportId() noexcept {
+  int32_t
+  nextTeleportId() noexcept {
     pending_teleport_id_ = ++teleport_counter_;
     return pending_teleport_id_;
   }
-  int32_t pendingTeleportId() const noexcept { return pending_teleport_id_; }
-  void clearPendingTeleportId() noexcept { pending_teleport_id_ = -1; }
-  void setPendingTeleportId(int32_t id) noexcept { pending_teleport_id_ = id; }
+  int32_t
+  pendingTeleportId() const noexcept {
+    return pending_teleport_id_;
+  }
+  void
+  clearPendingTeleportId() noexcept {
+    pending_teleport_id_ = -1;
+  }
+  void
+  setPendingTeleportId(int32_t id) noexcept {
+    pending_teleport_id_ = id;
+  }
 
   // --- 全局会话管理器关联 ---
-  void setClientManager(std::weak_ptr<ClientManager> mgr) noexcept {
+  void
+  setClientManager(std::weak_ptr<ClientManager> mgr) noexcept {
     client_manager_ = std::move(mgr);
   }
   std::shared_ptr<ClientManager> clientManager() const noexcept;
 
   // --- 协议多态解析器（对标 Cuberite cProtocol）---
-  void setProtocolHandler(std::shared_ptr<ProtocolHandler> handler) noexcept {
+  void
+  setProtocolHandler(std::shared_ptr<ProtocolHandler> handler) noexcept {
     protocol_handler_ = std::move(handler);
   }
-  const std::shared_ptr<ProtocolHandler>& protocolHandler() const noexcept {
+  const std::shared_ptr<ProtocolHandler>&
+  protocolHandler() const noexcept {
     return protocol_handler_;
   }
 

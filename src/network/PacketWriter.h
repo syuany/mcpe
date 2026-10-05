@@ -35,9 +35,7 @@ class PacketWriter {
     init();
   }
 
-  ~PacketWriter() {
-    flush();
-  }
+  ~PacketWriter() { flush(); }
 
   // Move-only 语义
   PacketWriter(const PacketWriter&) = delete;
@@ -53,7 +51,8 @@ class PacketWriter {
     other.session_ = nullptr;
   }
 
-  PacketWriter& operator=(PacketWriter&& other) noexcept {
+  PacketWriter&
+  operator=(PacketWriter&& other) noexcept {
     if (this != &other) {
       flush();
       session_ = other.session_;
@@ -68,35 +67,70 @@ class PacketWriter {
   }
 
   /// 显式放弃当前数据包发送（析构时不再触发 sendPacket）
-  void cancel() noexcept {
+  void
+  cancel() noexcept {
     is_active_ = false;
   }
 
   /// 是否仍处于待发送激活状态
-  bool isActive() const noexcept {
+  bool
+  isActive() const noexcept {
     return is_active_;
   }
 
   /// 获取底层 ByteBuffer 引用
-  ByteBuffer& buffer() noexcept { return buffer_; }
-  const ByteBuffer& buffer() const noexcept { return buffer_; }
+  ByteBuffer&
+  buffer() noexcept {
+    return buffer_;
+  }
+  const ByteBuffer&
+  buffer() const noexcept {
+    return buffer_;
+  }
 
   template <typename T>
-  void writeBe(T value) {
+  void
+  writeBe(T value) {
     buffer_.writeBe<T>(value);
   }
 
-  void appendVarInt(int32_t value) { buffer_.appendVarInt(value); }
-  void appendVarLong(int64_t value) { buffer_.appendVarLong(value); }
-  void appendString(std::string_view str) { buffer_.appendString(str); }
-  void appendByte(uint8_t byte) { buffer_.appendByte(byte); }
-  void append(const void* data, size_t len) { buffer_.append(data, len); }
-  void append(std::string_view str) { buffer_.append(str); }
+  void
+  appendVarInt(int32_t value) {
+    buffer_.appendVarInt(value);
+  }
 
-  int32_t packetId() const noexcept { return packet_id_; }
+  void
+  appendVarLong(int64_t value) {
+    buffer_.appendVarLong(value);
+  }
+
+  void
+  appendString(std::string_view str) {
+    buffer_.appendString(str);
+  }
+
+  void
+  appendByte(uint8_t byte) {
+    buffer_.appendByte(byte);
+  }
+
+  void
+  append(const void* data, size_t len) {
+    buffer_.append(data, len);
+  }
+  void
+  append(std::string_view str) {
+    buffer_.append(str);
+  }
+
+  int32_t
+  packetId() const noexcept {
+    return packet_id_;
+  }
 
   /// 手动提前完成封包下发
-  void flush() {
+  void
+  flush() {
     if (is_active_ && session_ != nullptr && buffer_.readableBytes() > 0) {
       is_active_ = false;
       buffer_.prependVarInt(buffer_.readableBytes());
@@ -105,11 +139,13 @@ class PacketWriter {
   }
 
  private:
-  void init() {
+  void
+  init() {
     buffer_.appendVarInt(packet_id_);
     is_active_ = true;
   }
 
+ private:
   SessionType* session_{nullptr};
   std::shared_ptr<SessionType> session_shared_{nullptr};
   int32_t packet_id_{0};

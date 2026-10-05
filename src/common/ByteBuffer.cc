@@ -212,7 +212,8 @@ ByteBuffer::prepend(const void* data, size_t len) {
     // Copy-On-Write (写时复制隔离防护)
     size_t readable = readableBytes();
     size_t new_prepend = std::max(kCheapPrepend, len);
-    size_t new_capacity = std::max(new_prepend + readable + writableBytes(), kCheapPrepend + kInitialSize);
+    size_t new_capacity =
+        std::max(new_prepend + readable + writableBytes(), kCheapPrepend + kInitialSize);
     auto new_storage = std::make_shared<Storage>(new_capacity);
     if (readable > 0) {
       std::copy(peek(), peek() + readable, new_storage->data.data() + new_prepend);

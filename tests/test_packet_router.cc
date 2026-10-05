@@ -67,7 +67,8 @@ class PacketRouterTest : public ::testing::Test {
   SetUp() override {
     // 1. 同步建立一对本地相连的 TCP Socket
     asio::ip::tcp::acceptor acceptor(
-        io_ctx_, asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0)
+        io_ctx_,
+        asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0)
     );
     client_sock_.connect(acceptor.local_endpoint());
     asio::ip::tcp::socket peer = acceptor.accept();
@@ -77,7 +78,9 @@ class PacketRouterTest : public ::testing::Test {
     tcp_session_->setCallbacks(session_);
 
     // 启动后台 IO 线程处理异步写
-    io_thread_ = std::jthread([this]() { io_ctx_.run(); });
+    io_thread_ = std::jthread([this]() {
+      io_ctx_.run();
+    });
 
     client_recv_buf_.retrieveAll();
 
@@ -590,10 +593,7 @@ TEST_F(PacketRouterTest, UnconsumedBytesTriggersWarning) {
   ASSERT_TRUE(pong_resp.has_value());
 
   // 必须触发了未消费字节的协议告警日志
-  EXPECT_NE(
-      log_stream_->str().find("unconsumed bytes remaining"),
-      std::string::npos
-  );
+  EXPECT_NE(log_stream_->str().find("unconsumed bytes remaining"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -727,5 +727,3 @@ TEST_F(PacketRouterTest, ClientManagerLifecycleAndBroadcast) {
   EXPECT_EQ(mgr.sessionCount(), 0);
   EXPECT_EQ(mgr.playerCount(), 0);
 }
-
-

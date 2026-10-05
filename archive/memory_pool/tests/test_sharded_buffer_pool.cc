@@ -37,7 +37,7 @@ TEST(ShardedBufferPoolTest, BasicAllocateAndDeallocate) {
 // 单个线程借出的块数超过单一分片的物理容量，验证是否自动从其他空闲分片“窃取”内存块而未触发系统堆分配
 TEST(ShardedBufferPoolTest, CrossShardWorkStealing) {
   constexpr size_t kShards = 4;
-  constexpr size_t kCapPerShard = 5; // 每分片仅 5 块，全池共 20 块
+  constexpr size_t kCapPerShard = 5;  // 每分片仅 5 块，全池共 20 块
   ShardedBufferPool pool(kShards, kCapPerShard);
 
   // 单一线程借出 12 块（已大幅突破该线程对应分片的 5 块上限）
@@ -88,7 +88,7 @@ TEST(ShardedBufferPoolTest, CrossThreadDeallocation) {
 
     std::thread consumer([block = std::move(block_from_thread_a)]() mutable {
       EXPECT_EQ(block[0], 'X');
-      block.reset(); // 在另一个线程中执行归还
+      block.reset();  // 在另一个线程中执行归还
     });
     consumer.join();
 

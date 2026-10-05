@@ -36,10 +36,7 @@ StatusHandler::handleStatusRequest(
 }
 
 void
-StatusHandler::handlePing(
-    const std::shared_ptr<ClientSession>& session,
-    ByteBuffer& payload
-) {
+StatusHandler::handlePing(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload) {
   // 1. 读取原生的 8 字节大端有符号长整型（Long）时间戳
   auto time_res = payload.readBe<int64_t>();
   if (!time_res) {

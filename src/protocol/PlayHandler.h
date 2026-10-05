@@ -40,8 +40,7 @@ class PlayHandler {
   handleTeleportConfirm(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload);
 
   /** @brief 处理客户端应答的 Keep Alive (0x0B) */
-  static void
-  handleKeepAlive(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload);
+  static void handleKeepAlive(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload);
 };
 
 }  // namespace mcpe::protocol

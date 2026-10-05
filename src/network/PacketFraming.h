@@ -12,8 +12,8 @@ namespace mcpe::network {
  * @brief 拆包（Packet Framing）错误分类
  */
 enum class FramingError {
-  kIncomplete,        ///< 半包：数据未到齐（等待对端后续网络数据，游标零移动）
-  kMalformedLength,   ///< 畸形长度：包头 VarInt 长度格式错误（例如超过 5 字节上限）
+  kIncomplete,  ///< 半包：数据未到齐（等待对端后续网络数据，游标零移动）
+  kMalformedLength,  ///< 畸形长度：包头 VarInt 长度格式错误（例如超过 5 字节上限）
   kInvalidPacketSize  ///< 非法包长：包长数值非法（<= 0 或超过单包 2MB 上限）
 };
 
@@ -39,7 +39,8 @@ class PacketFraming {
    *   且 recv_buf 游标精准划过该整包（包括长度 VarInt 与包体）。
    *
    * @param recv_buf 累积接收数据的缓冲区引用
-   * @return 成功返回拆分出的数据包 ByteBuffer（底层共享 Storage，零堆内存分配），失败返回 FramingError
+   * @return 成功返回拆分出的数据包 ByteBuffer（底层共享 Storage，零堆内存分配），失败返回
+   * FramingError
    */
   static std::expected<ByteBuffer, FramingError> slicePacket(ByteBuffer& recv_buf);
 };

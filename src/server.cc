@@ -42,7 +42,8 @@ main() {
     TcpServer server(io_context, kServerPort);
 
     // 对齐 Cuberite 架构设计：通过 SessionFactory 为每个连入的 TcpSession 创建独立的 ClientSession
-    // 彻底解耦网络传输层（TcpSession / cTCPLink）与 Minecraft 协议业务层（ClientSession / cClientHandle）
+    // 彻底解耦网络传输层（TcpSession / cTCPLink）与 Minecraft 协议业务层（ClientSession /
+    // cClientHandle）
     server.setSessionFactory([client_manager](const std::shared_ptr<TcpSession>& tcp) {
       auto session = std::make_shared<ClientSession>(tcp);
       session->setClientManager(client_manager);

@@ -32,7 +32,8 @@ class SessionCallbacks {
    * @brief 当客户端连接断开时触发
    * @param session 断开连接的客户端 TCP 会话实例
    */
-  virtual void onDisconnected(const std::shared_ptr<TcpSession>& session) {
+  virtual void
+  onDisconnected(const std::shared_ptr<TcpSession>& session) {
     (void)session;
   }
 };

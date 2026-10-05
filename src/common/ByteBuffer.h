@@ -23,12 +23,16 @@ namespace mcpe {
  * @brief 现代 C++ 高性能非阻塞网络字节缓冲区（支持 Netty 风格零拷贝切片与 Copy-On-Write 防护）
  *
  * 核心架构特性：
- * 1. Cheap Prepend（头部预留 8 字节）：允许在不重新分配和挪动内存的情况下，O(1) 原地前插协议包长 VarInt 前缀。
- * 2. Netty 风格零拷贝切片（slice / readSlice）：支持从大缓冲区中切分出共享底层内存的独立 ByteBuffer，
- *    通过 std::shared_ptr 引用计数保证生命周期，彻底消灭二次堆内存分配与 memcpy 拷贝开销。
- * 3. Copy-On-Write（写时复制安全隔离）：当父缓冲区需要扩容或移动内存时，若检测到底层 Storage 正被活跃切片共享
- *    （use_count > 1），自动断开共享并重新分配独立存储，彻底消灭野指针与悬挂引用（Use-After-Free）。
- * 4. 泛型大端数值读写：原生支持 int8_t~int64_t, uint8_t~uint64_t, float, double 大端序列化与反序列化。
+ * 1. Cheap Prepend（头部预留 8 字节）：允许在不重新分配和挪动内存的情况下，O(1) 原地前插协议包长
+ * VarInt 前缀。
+ * 2. Netty 风格零拷贝切片（slice / readSlice）：支持从大缓冲区中切分出共享底层内存的独立
+ * ByteBuffer， 通过 std::shared_ptr 引用计数保证生命周期，彻底消灭二次堆内存分配与 memcpy
+ * 拷贝开销。
+ * 3. Copy-On-Write（写时复制安全隔离）：当父缓冲区需要扩容或移动内存时，若检测到底层 Storage
+ * 正被活跃切片共享 （use_count >
+ * 1），自动断开共享并重新分配独立存储，彻底消灭野指针与悬挂引用（Use-After-Free）。
+ * 4. 泛型大端数值读写：原生支持 int8_t~int64_t, uint8_t~uint64_t, float, double
+ * 大端序列化与反序列化。
  * 5. 原生支持 Minecraft 协议类型：VarInt, VarLong, String。
  * 6. RAII 事务快照（Mark）：支撑多字段原子试探解析与失败回滚。
  */
@@ -72,7 +76,8 @@ class ByteBuffer {
   /**
    * @brief 显式深拷贝：克隆出一个内容完全一致、拥有独立内存空间的 ByteBuffer
    */
-  [[nodiscard]] ByteBuffer clone() const {
+  [[nodiscard]] ByteBuffer
+  clone() const {
     ByteBuffer copy(readableBytes());
     copy.append(peek(), readableBytes());
     return copy;
@@ -81,7 +86,8 @@ class ByteBuffer {
   /**
    * @brief 与另一个 ByteBuffer 高效交换底层内容
    */
-  void swap(ByteBuffer& rhs) noexcept {
+  void
+  swap(ByteBuffer& rhs) noexcept {
     storage_.swap(rhs.storage_);
     std::swap(offset_, rhs.offset_);
     std::swap(readerIndex_, rhs.readerIndex_);
@@ -101,31 +107,54 @@ class ByteBuffer {
   [[nodiscard]] ByteBuffer slice(size_t len) const;
 
   /**
-   * @brief 从当前读游标位置切出一个长度为 len 的共享切片，并同步推进父级读游标（对标 Netty readRetainedSlice）
+   * @brief 从当前读游标位置切出一个长度为 len 的共享切片，并同步推进父级读游标（对标 Netty
+   * readRetainedSlice）
    * @param len 切片长度
    */
   ByteBuffer readSlice(size_t len);
 
   /// 当前缓冲区是否为切片视图
-  bool isSlice() const noexcept { return is_slice_; }
+  bool
+  isSlice() const noexcept {
+    return is_slice_;
+  }
 
   /// 底层 Storage 当前的引用计数（等于 1 代表独占，大于 1 代表正被切片共享）
-  long useCount() const noexcept { return storage_ ? storage_.use_count() : 0; }
+  long
+  useCount() const noexcept {
+    return storage_ ? storage_.use_count() : 0;
+  }
 
   // ---------------------------------------------------------------------------
   // 基础游标与容量查询接口
   // ---------------------------------------------------------------------------
 
-  size_t readableBytes() const noexcept { return writerIndex_ - readerIndex_; }
-  size_t writableBytes() const noexcept { return capacity_ - writerIndex_; }
-  size_t prependableBytes() const noexcept { return readerIndex_; }
+  size_t
+  readableBytes() const noexcept {
+    return writerIndex_ - readerIndex_;
+  }
+  size_t
+  writableBytes() const noexcept {
+    return capacity_ - writerIndex_;
+  }
+  size_t
+  prependableBytes() const noexcept {
+    return readerIndex_;
+  }
 
-  const char* peek() const noexcept { return begin() + readerIndex_; }
-  char* beginWrite() noexcept { return begin() + writerIndex_; }
+  const char*
+  peek() const noexcept {
+    return begin() + readerIndex_;
+  }
+  char*
+  beginWrite() noexcept {
+    return begin() + writerIndex_;
+  }
 
   void ensureWritableBytes(size_t len);
 
-  void hasWritten(size_t len) noexcept {
+  void
+  hasWritten(size_t len) noexcept {
     assert(len <= writableBytes());
     writerIndex_ += len;
   }
@@ -135,9 +164,13 @@ class ByteBuffer {
   void append(const void* data, size_t len);
   void append(std::string_view str);
 
-  void appendByte(uint8_t byte) { append(&byte, 1); }
+  void
+  appendByte(uint8_t byte) {
+    append(&byte, 1);
+  }
 
-  [[nodiscard]] bool hasBytes(size_t count) const noexcept {
+  [[nodiscard]] bool
+  hasBytes(size_t count) const noexcept {
     return readableBytes() >= count;
   }
 
@@ -148,7 +181,8 @@ class ByteBuffer {
 
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  void writeBe(T value) {
+  void
+  writeBe(T value) {
     if constexpr (sizeof(T) == 1) {
       append(&value, 1);
     } else if constexpr (std::integral<T>) {
@@ -168,7 +202,8 @@ class ByteBuffer {
 
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  [[nodiscard]] std::expected<T, DecodeError> readBe() noexcept {
+  [[nodiscard]] std::expected<T, DecodeError>
+  readBe() noexcept {
     if (!hasBytes(sizeof(T))) {
       return std::unexpected(DecodeError::kIncomplete);
     }
@@ -198,7 +233,8 @@ class ByteBuffer {
 
   template <typename T>
     requires(std::integral<T> || std::floating_point<T>)
-  [[nodiscard]] std::expected<T, DecodeError> peekBe() const noexcept {
+  [[nodiscard]] std::expected<T, DecodeError>
+  peekBe() const noexcept {
     if (!hasBytes(sizeof(T))) {
       return std::unexpected(DecodeError::kIncomplete);
     }
@@ -228,8 +264,12 @@ class ByteBuffer {
   void appendVarInt(int32_t value);
   void appendVarLong(int64_t value);
   void prependVarInt(int32_t value);
-  void prependVarInt(size_t value) {
-    assert(value <= static_cast<size_t>(std::numeric_limits<int32_t>::max()) && "Packet size exceeds int32_t");
+  void
+  prependVarInt(size_t value) {
+    assert(
+        value <= static_cast<size_t>(std::numeric_limits<int32_t>::max()) &&
+        "Packet size exceeds int32_t"
+    );
     prependVarInt(static_cast<int32_t>(value));
   }
 
@@ -241,7 +281,8 @@ class ByteBuffer {
   [[nodiscard]] std::expected<VarIntResult, DecodeError> readVarIntWithBytes() noexcept;
   [[nodiscard]] std::expected<VarLongResult, DecodeError> readVarLongWithBytes() noexcept;
 
-  [[nodiscard]] std::expected<std::string, DecodeError> readString(size_t maxBytes = 32767) noexcept;
+  [[nodiscard]] std::expected<std::string, DecodeError>
+  readString(size_t maxBytes = 32767) noexcept;
 
   [[nodiscard]] std::expected<int32_t, DecodeError> peekVarInt() const noexcept;
   [[nodiscard]] std::expected<int64_t, DecodeError> peekVarLong() const noexcept;
@@ -270,8 +311,12 @@ class ByteBuffer {
     Mark& operator=(Mark&&) = delete;
     ~Mark() { rollback(); }
 
-    void commit() noexcept { buf_ = nullptr; }
-    void rollback() noexcept {
+    void
+    commit() noexcept {
+      buf_ = nullptr;
+    }
+    void
+    rollback() noexcept {
       if (buf_ != nullptr) {
         buf_->readerIndex_ = pos_;
         buf_ = nullptr;
@@ -293,17 +338,24 @@ class ByteBuffer {
         capacity_(len),
         is_slice_(true) {}
 
-  char* begin() noexcept { return storage_->data.data() + offset_; }
-  const char* begin() const noexcept { return storage_->data.data() + offset_; }
+  char*
+  begin() noexcept {
+    return storage_->data.data() + offset_;
+  }
+  const char*
+  begin() const noexcept {
+    return storage_->data.data() + offset_;
+  }
 
   void makeSpace(size_t len);
 
-  std::shared_ptr<Storage> storage_;  ///< 底层连续内存管理块
-  size_t offset_{0};                  ///< 切片在 storage_ 内部的起始偏移
-  size_t readerIndex_{kCheapPrepend}; ///< 读游标（相对于 offset_）
-  size_t writerIndex_{kCheapPrepend}; ///< 写游标（相对于 offset_）
-  size_t capacity_{0};                ///< 当前 Buffer 允许访问的最大容量（相对于 offset_）
-  bool is_slice_{false};              ///< 是否为共享切片标识
+ private:
+  std::shared_ptr<Storage> storage_;   ///< 底层连续内存管理块
+  size_t offset_{0};                   ///< 切片在 storage_ 内部的起始偏移
+  size_t readerIndex_{kCheapPrepend};  ///< 读游标（相对于 offset_）
+  size_t writerIndex_{kCheapPrepend};  ///< 写游标（相对于 offset_）
+  size_t capacity_{0};    ///< 当前 Buffer 允许访问的最大容量（相对于 offset_）
+  bool is_slice_{false};  ///< 是否为共享切片标识
 };
 
 }  // namespace mcpe

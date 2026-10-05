@@ -22,7 +22,7 @@ BufferPool::BufferPool(size_t capacity, bool allow_dynamic_expansion)
   assert(initial_capacity_ > 0 && "Capacity must be greater than zero");
 
   // 1. 初始化预留指针数组，用于 O(1) 块索引寻址
-  dynamic_chunks_ = new std::atomic<Chunk*>[kMaxChunks]{};
+  dynamic_chunks_ = new std::atomic<Chunk*>[kMaxChunks] {};
 
   // 2. 预分配初始连续 Arena 物理内存
   arena_ = static_cast<char*>(::operator new(initial_capacity_ * kBlockSize, std::align_val_t{64}));
@@ -153,19 +153,15 @@ BufferPool::mountNewChunk() {
   }
 
   // 批量申请 4MB 物理连续且 64 字节对齐的 Arena
-  char* chunk_arena = static_cast<char*>(::operator new(kChunkSize, std::align_val_t{64}, std::nothrow));
+  char* chunk_arena =
+      static_cast<char*>(::operator new(kChunkSize, std::align_val_t{64}, std::nothrow));
   if (!chunk_arena) {
     return PooledBlock(nullptr, BufferBlockDeleter{this});
   }
 
   uint32_t base_index = static_cast<uint32_t>(initial_capacity_ + (chunk_id - 1) * kBlocksPerChunk);
 
-  auto* chunk = new Chunk{
-    chunk_arena,
-    kBlocksPerChunk,
-    base_index,
-    nullptr
-  };
+  auto* chunk = new Chunk{chunk_arena, kBlocksPerChunk, base_index, nullptr};
 
   // 1. 发布到 dynamic_chunks_ 数组供 indexToPtr 快速寻址
   dynamic_chunks_[chunk_id].store(chunk, std::memory_order_release);
@@ -175,7 +171,11 @@ BufferPool::mountNewChunk() {
   do {
     chunk->next.store(old_chain_head, std::memory_order_relaxed);
   } while (!chunk_chain_head_.compare_exchange_weak(
-      old_chain_head, chunk, std::memory_order_release, std::memory_order_relaxed));
+      old_chain_head,
+      chunk,
+      std::memory_order_release,
+      std::memory_order_relaxed
+  ));
 
   // 3. 统计容量递增
   capacity_.fetch_add(kBlocksPerChunk, std::memory_order_relaxed);

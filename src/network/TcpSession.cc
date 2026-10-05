@@ -28,9 +28,7 @@ TcpSession::TcpSession(asio::ip::tcp::socket socket) : socket_(std::move(socket)
   spdlog::info("[Session] Connected from {}", remote_address_);
 }
 
-TcpSession::~TcpSession() {
-  spdlog::info("[Session] Destroyed: {}", remote_address_);
-}
+TcpSession::~TcpSession() { spdlog::info("[Session] Destroyed: {}", remote_address_); }
 
 void
 TcpSession::start() {

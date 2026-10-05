@@ -59,7 +59,9 @@ struct TcpPairFixture {
       EXPECT_FALSE(ec) << "Connect failed: " << ec.message();
     });
 
-    io_thread = std::jthread([this]() { io_context.run(); });
+    io_thread = std::jthread([this]() {
+      io_context.run();
+    });
 
     auto start_time = std::chrono::steady_clock::now();
     while (!connected && std::chrono::steady_clock::now() - start_time < std::chrono::seconds(2)) {
@@ -80,7 +82,8 @@ struct TcpPairFixture {
     }
   }
 
-  ByteBuffer readBytes(size_t count) {
+  ByteBuffer
+  readBytes(size_t count) {
     std::vector<char> raw(count);
     asio::error_code ec;
     asio::read(client_socket, asio::buffer(raw), ec);

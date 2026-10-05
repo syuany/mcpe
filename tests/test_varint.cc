@@ -29,7 +29,10 @@ using mcpe::ByteBuffer;
 using mcpe::DecodeError;
 
 // 让 gtest 的失败信息直接打印 kIncomplete / kMalformed，而不是数字
-void PrintTo(DecodeError e, std::ostream* os) { *os << mcpe::toString(e); }
+void
+PrintTo(DecodeError e, std::ostream* os) {
+  *os << mcpe::toString(e);
+}
 
 namespace {
 
@@ -38,7 +41,8 @@ namespace {
 // ---------------------------------------------------------------------------
 
 // 把可读区域渲染成 "80 01"，失败信息一眼可读
-std::string hexOf(const ByteBuffer& buf) {
+std::string
+hexOf(const ByteBuffer& buf) {
   static const char* kDigits = "0123456789abcdef";
   std::string out;
   for (unsigned char c : buf.toStringView()) {
@@ -50,7 +54,8 @@ std::string hexOf(const ByteBuffer& buf) {
 }
 
 // 把 "80 01" 形式的期望值解析成真实字节
-std::vector<uint8_t> parseHex(std::string_view text) {
+std::vector<uint8_t>
+parseHex(std::string_view text) {
   std::vector<uint8_t> raw;
   for (size_t i = 0; i < text.size();) {
     while (i < text.size() && text[i] == ' ') ++i;
@@ -61,13 +66,15 @@ std::vector<uint8_t> parseHex(std::string_view text) {
   return raw;
 }
 
-ByteBuffer bufferOf(std::initializer_list<uint8_t> bytes) {
+ByteBuffer
+bufferOf(std::initializer_list<uint8_t> bytes) {
   ByteBuffer buf;
   for (uint8_t b : bytes) buf.appendByte(b);
   return buf;
 }
 
-ByteBuffer bufferOfHex(std::string_view hex) {
+ByteBuffer
+bufferOfHex(std::string_view hex) {
   ByteBuffer buf;
   const std::vector<uint8_t> raw = parseHex(hex);
   buf.append(raw.data(), raw.size());
@@ -76,7 +83,8 @@ ByteBuffer bufferOfHex(std::string_view hex) {
 
 // 解析成功：返回值必须相等（第二个模板参数允许直接传整型字面量）
 template <typename T, typename U>
-void expectOk(const std::expected<T, DecodeError>& result, U expected, const char* what) {
+void
+expectOk(const std::expected<T, DecodeError>& result, U expected, const char* what) {
   if (!result.has_value()) {
     ADD_FAILURE() << what << " 期望成功，实际失败: " << mcpe::toString(result.error());
     return;
@@ -86,8 +94,8 @@ void expectOk(const std::expected<T, DecodeError>& result, U expected, const cha
 
 // 解析失败：错误分类必须精确匹配（kIncomplete 与 kMalformed 不可混）
 template <typename T>
-void expectErr(const std::expected<T, DecodeError>& result, DecodeError expected,
-               const char* what) {
+void
+expectErr(const std::expected<T, DecodeError>& result, DecodeError expected, const char* what) {
   if (result.has_value()) {
     ADD_FAILURE() << what << " 期望失败，却解析成功了: " << *result;
     return;
@@ -96,7 +104,8 @@ void expectErr(const std::expected<T, DecodeError>& result, DecodeError expected
 }
 
 // 断言编码结果与官方向量逐字节一致
-void expectVarIntEncoding(int32_t value, std::string_view expected_hex) {
+void
+expectVarIntEncoding(int32_t value, std::string_view expected_hex) {
   ByteBuffer buf;
   buf.appendVarInt(value);
   EXPECT_EQ(hexOf(buf), expected_hex) << "appendVarInt(" << value << ")";
@@ -104,7 +113,8 @@ void expectVarIntEncoding(int32_t value, std::string_view expected_hex) {
       << "appendVarInt(" << value << ") 超过 5 字节";
 }
 
-void expectVarLongEncoding(int64_t value, std::string_view expected_hex) {
+void
+expectVarLongEncoding(int64_t value, std::string_view expected_hex) {
   ByteBuffer buf;
   buf.appendVarLong(value);
   EXPECT_EQ(hexOf(buf), expected_hex) << "appendVarLong(" << value << ")";
@@ -113,13 +123,15 @@ void expectVarLongEncoding(int64_t value, std::string_view expected_hex) {
 }
 
 // 断言解码结果与官方向量一致，且"恰好消费完"
-void expectVarIntDecoding(std::string_view hex, int32_t expected) {
+void
+expectVarIntDecoding(std::string_view hex, int32_t expected) {
   ByteBuffer buf = bufferOfHex(hex);
   expectOk(buf.readVarInt(), expected, "readVarInt");
   EXPECT_EQ(buf.readableBytes(), 0u) << "解码后应恰好消费完 " << hex;
 }
 
-void expectVarLongDecoding(std::string_view hex, int64_t expected) {
+void
+expectVarLongDecoding(std::string_view hex, int64_t expected) {
   ByteBuffer buf = bufferOfHex(hex);
   expectOk(buf.readVarLong(), expected, "readVarLong");
   EXPECT_EQ(buf.readableBytes(), 0u) << "解码后应恰好消费完 " << hex;
@@ -149,17 +161,23 @@ TEST_P(OfficialVarIntVector, Decode) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Official, OfficialVarIntVector,
-    ::testing::Values(VarIntVector{"zero", 0, "00"}, VarIntVector{"one", 1, "01"},
-                      VarIntVector{"two", 2, "02"}, VarIntVector{"127", 127, "7f"},
-                      VarIntVector{"128", 128, "80 01"}, VarIntVector{"255", 255, "ff 01"},
-                      VarIntVector{"int32_max", 2147483647, "ff ff ff ff 07"},
-                      VarIntVector{"minus_one", -1, "ff ff ff ff 0f"},
-                      VarIntVector{"int32_min", std::numeric_limits<int32_t>::min(),
-                                   "80 80 80 80 08"}),
+    Official,
+    OfficialVarIntVector,
+    ::testing::Values(
+        VarIntVector{"zero", 0, "00"},
+        VarIntVector{"one", 1, "01"},
+        VarIntVector{"two", 2, "02"},
+        VarIntVector{"127", 127, "7f"},
+        VarIntVector{"128", 128, "80 01"},
+        VarIntVector{"255", 255, "ff 01"},
+        VarIntVector{"int32_max", 2147483647, "ff ff ff ff 07"},
+        VarIntVector{"minus_one", -1, "ff ff ff ff 0f"},
+        VarIntVector{"int32_min", std::numeric_limits<int32_t>::min(), "80 80 80 80 08"}
+    ),
     [](const ::testing::TestParamInfo<VarIntVector>& info) {
       return std::string(info.param.name);
-    });
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 官方 Sample VarLongs（Data_types.txt 第 208~241 行）
@@ -183,21 +201,33 @@ TEST_P(OfficialVarLongVector, Decode) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Official, OfficialVarLongVector,
-    ::testing::Values(VarLongVector{"zero", 0, "00"}, VarLongVector{"one", 1, "01"},
-                      VarLongVector{"two", 2, "02"}, VarLongVector{"127", 127, "7f"},
-                      VarLongVector{"128", 128, "80 01"}, VarLongVector{"255", 255, "ff 01"},
-                      VarLongVector{"int32_max", 2147483647, "ff ff ff ff 07"},
-                      VarLongVector{"int64_max", std::numeric_limits<int64_t>::max(),
-                                    "ff ff ff ff ff ff ff ff 7f"},
-                      VarLongVector{"minus_one", -1, "ff ff ff ff ff ff ff ff ff 01"},
-                      VarLongVector{"int32_min_as_varlong", -2147483648LL,
-                                    "80 80 80 80 f8 ff ff ff ff 01"},
-                      VarLongVector{"int64_min", std::numeric_limits<int64_t>::min(),
-                                    "80 80 80 80 80 80 80 80 80 01"}),
+    Official,
+    OfficialVarLongVector,
+    ::testing::Values(
+        VarLongVector{"zero", 0, "00"},
+        VarLongVector{"one", 1, "01"},
+        VarLongVector{"two", 2, "02"},
+        VarLongVector{"127", 127, "7f"},
+        VarLongVector{"128", 128, "80 01"},
+        VarLongVector{"255", 255, "ff 01"},
+        VarLongVector{"int32_max", 2147483647, "ff ff ff ff 07"},
+        VarLongVector{
+            "int64_max",
+            std::numeric_limits<int64_t>::max(),
+            "ff ff ff ff ff ff ff ff 7f"
+        },
+        VarLongVector{"minus_one", -1, "ff ff ff ff ff ff ff ff ff 01"},
+        VarLongVector{"int32_min_as_varlong", -2147483648LL, "80 80 80 80 f8 ff ff ff ff 01"},
+        VarLongVector{
+            "int64_min",
+            std::numeric_limits<int64_t>::min(),
+            "80 80 80 80 80 80 80 80 80 01"
+        }
+    ),
     [](const ::testing::TestParamInfo<VarLongVector>& info) {
       return std::string(info.param.name);
-    });
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 零值：协议明文规定 "0 -> 0x00"，绝不能编成空字节流
@@ -222,12 +252,18 @@ TEST(VarIntTest, ByteLengthClassBoundaries) {
     int32_t value;
     size_t bytes;
   } cases[] = {
-      {0, 1},         {127, 1},
-      {128, 2},       {16383, 2},
-      {16384, 3},     {2097151, 3},
-      {2097152, 4},   {268435455, 4},
-      {268435456, 5}, {std::numeric_limits<int32_t>::max(), 5},
-      {-1, 5},        {std::numeric_limits<int32_t>::min(), 5},
+      {0, 1},
+      {127, 1},
+      {128, 2},
+      {16383, 2},
+      {16384, 3},
+      {2097151, 3},
+      {2097152, 4},
+      {268435455, 4},
+      {268435456, 5},
+      {std::numeric_limits<int32_t>::max(), 5},
+      {-1, 5},
+      {std::numeric_limits<int32_t>::min(), 5},
   };
   for (const auto& c : cases) {
     ByteBuffer buf;
@@ -633,4 +669,3 @@ TEST(ByteBufferWithBytesTest, PrependVarInt) {
   EXPECT_EQ(*len, 4);
   EXPECT_EQ(buf.retrieveAllAsString(), "DATA");
 }
-

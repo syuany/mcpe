@@ -55,7 +55,7 @@ TEST(SessionReadBufferTest, LazyAllocationAndInstantRecycle) {
   buf.consume(6);
   EXPECT_EQ(buf.readableBytes(), 0);
   EXPECT_FALSE(buf.isHoldingBlock());
-  EXPECT_EQ(pool.allocatedCount(), 0); // 内存池已满血复原！
+  EXPECT_EQ(pool.allocatedCount(), 0);  // 内存池已满血复原！
 }
 
 // 3. 结合 PacketFraming 流式切包联动与自动归还
@@ -109,11 +109,15 @@ TEST(SessionReadBufferTest, HalfPacketCompaction) {
 
   ByteBuffer p2_half;
   p2_half.appendVarInt(6);
-  p2_half.append("AB"); // 应该还要 4 字节才完整
+  p2_half.append("AB");  // 应该还要 4 字节才完整
 
   auto m_buf = buf.prepareWriteBuffer();
   std::memcpy(m_buf.data(), p1.peek(), p1.readableBytes());
-  std::memcpy(static_cast<char*>(m_buf.data()) + p1.readableBytes(), p2_half.peek(), p2_half.readableBytes());
+  std::memcpy(
+      static_cast<char*>(m_buf.data()) + p1.readableBytes(),
+      p2_half.peek(),
+      p2_half.readableBytes()
+  );
   buf.commit(p1.readableBytes() + p2_half.readableBytes());
 
   // 切出包 1

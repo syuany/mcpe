@@ -13,10 +13,7 @@
 using namespace mcpe::protocol;
 
 void
-PacketRouter::dispatch(
-    const std::shared_ptr<ClientSession>& session,
-    ByteBuffer packet
-) {
+PacketRouter::dispatch(const std::shared_ptr<ClientSession>& session, ByteBuffer packet) {
   dispatch(session, session->state(), std::move(packet));
 }
 
@@ -63,7 +60,11 @@ PacketRouter::dispatch(
           if (auto mgr = session->clientManager()) {
             online_players = mgr->playerCount();
           }
-          StatusHandler::handleStatusRequest(session, ServerConfig::defaultInstance(), online_players);
+          StatusHandler::handleStatusRequest(
+              session,
+              ServerConfig::defaultInstance(),
+              online_players
+          );
           break;
         }
         case 0x01:
@@ -135,7 +136,8 @@ PacketRouter::dispatch(
   //    若会话未被断开且该包依然残留未读字节，说明业务层与协议规范出现字段漂移或漏读
   if (!session->isStopped() && packet.readableBytes() > 0) {
     spdlog::warn(
-        "[Router] Packet 0x{:02X} in state {} had {} unconsumed bytes remaining from {}! Potential protocol mismatch.",
+        "[Router] Packet 0x{:02X} in state {} had {} unconsumed bytes remaining from {}! Potential "
+        "protocol mismatch.",
         packet_id,
         toString(state),
         packet.readableBytes(),

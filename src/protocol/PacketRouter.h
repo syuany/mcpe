@@ -13,7 +13,8 @@ namespace mcpe::protocol {
 class ClientSession;
 
 /**
- * @brief Minecraft 1.12.2 (Protocol 340) 数据包路由分发器（对标 Cuberite cProtocol_1_12_2 架构设计）
+ * @brief Minecraft 1.12.2 (Protocol 340) 数据包路由分发器（对标 Cuberite cProtocol_1_12_2
+ * 架构设计）
  *
  * 继承 ProtocolHandler 多态接口，负责 Protocol 340 的数据包边界解析与路由：
  * 1. 自动从 session->state() 获取当前状态并派发到对应业务处理器
@@ -23,16 +24,18 @@ class ClientSession;
  */
 class PacketRouter : public ProtocolHandler {
  public:
-  int32_t protocolVersion() const noexcept override { return 340; }
+  int32_t
+  protocolVersion() const noexcept override {
+    return 340;
+  }
 
-  void handlePacket(
-      const std::shared_ptr<ClientSession>& session,
-      ByteBuffer packet
-  ) override {
+  void
+  handlePacket(const std::shared_ptr<ClientSession>& session, ByteBuffer packet) override {
     dispatch(session, std::move(packet));
   }
 
-  void handlePacket(
+  void
+  handlePacket(
       const std::shared_ptr<ClientSession>& session,
       ConnectionState state,
       ByteBuffer packet
@@ -46,10 +49,7 @@ class PacketRouter : public ProtocolHandler {
    * @param session 当前触发数据包的客户端会话
    * @param packet 已剔除外层总长度前缀的完整包体（格式为：[Packet ID (VarInt)] + [Payload]）
    */
-  static void dispatch(
-      const std::shared_ptr<ClientSession>& session,
-      ByteBuffer packet
-  );
+  static void dispatch(const std::shared_ptr<ClientSession>& session, ByteBuffer packet);
 
   /**
    * @brief 重载：显式指定状态的分发入口（兼容单元测试特定状态隔离注入）
@@ -58,11 +58,8 @@ class PacketRouter : public ProtocolHandler {
    * @param state 会话当前所处的协议连接状态
    * @param packet 已剔除外层总长度前缀的完整包体
    */
-  static void dispatch(
-      const std::shared_ptr<ClientSession>& session,
-      ConnectionState state,
-      ByteBuffer packet
-  );
+  static void
+  dispatch(const std::shared_ptr<ClientSession>& session, ConnectionState state, ByteBuffer packet);
 };
 
 }  // namespace mcpe::protocol

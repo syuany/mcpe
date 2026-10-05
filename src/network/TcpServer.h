@@ -40,7 +40,8 @@ class TcpServer {
 
   /**
    * @brief 设置连接会话工厂（对齐 Cuberite cServer::OnIncomingConnection 架构设计）
-   * @param factory 每当新 TCP 连接到来时被调用，用于创建并绑定专属的业务会话实例（如 ClientSession）
+   * @param factory 每当新 TCP 连接到来时被调用，用于创建并绑定专属的业务会话实例（如
+   * ClientSession）
    */
   void
   setSessionFactory(SessionFactory factory) noexcept {
@@ -94,12 +95,13 @@ class TcpServer {
    */
   asio::awaitable<void> listenLoop();
 
-  asio::io_context& io_context_;      ///< 关联的 Asio IO 上下文
-  asio::ip::tcp::acceptor acceptor_;  ///< 底层 TCP 接受器
-  bool is_running_{false};            ///< 服务器运行状态标志
-  SessionFactory session_factory_;    ///< 连接会话工厂
+ private:
+  asio::io_context& io_context_;                 ///< 关联的 Asio IO 上下文
+  asio::ip::tcp::acceptor acceptor_;             ///< 底层 TCP 接受器
+  bool is_running_{false};                       ///< 服务器运行状态标志
+  SessionFactory session_factory_;               ///< 连接会话工厂
   std::shared_ptr<SessionCallbacks> callbacks_;  ///< 会话抽象事件监听器
-  PacketHandler packet_handler_;      ///< 业务层数据包处理回调
+  PacketHandler packet_handler_;                 ///< 业务层数据包处理回调
 };
 
 }  // namespace mcpe::network

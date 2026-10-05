@@ -131,12 +131,12 @@ TEST(BufferPoolTest, AbaImmunityAndMemoryIsolation) {
 //   方案 C (本次重构方案): 突破预分配容量时按 4MB 批量动态无锁挂载新 Chunk (二级连续 Arena 链)
 TEST(BufferPoolTest, FallbackPerformanceCliff) {
 #if defined(__GLIBC__)
-  malloc_trim(0); // 清理前序用例释放的空闲堆缓存，模拟真实突发高负载
+  malloc_trim(0);  // 清理前序用例释放的空闲堆缓存，模拟真实突发高负载
 #endif
 
   constexpr int kThreads = 8;
-  constexpr int kBatch = 500;   // 突破 glibc 默认 tcache 缓存上限与 2MB 阈值，直击系统堆锁
-  constexpr int kRounds = 300;   // 300 轮突发，共 120 万次借还
+  constexpr int kBatch = 500;  // 突破 glibc 默认 tcache 缓存上限与 2MB 阈值，直击系统堆锁
+  constexpr int kRounds = 300;  // 300 轮突发，共 120 万次借还
 
   // 方案 B (理想基准方案): 启动前全量预分配充足容量，走单池连续 Arena 快路径
   BufferPool in_pool(kThreads * kBatch + 100);
@@ -161,11 +161,14 @@ TEST(BufferPoolTest, FallbackPerformanceCliff) {
     for (auto& w : workers) w.join();
   }
   auto elapsed_pool = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start_pool).count();
+                          std::chrono::steady_clock::now() - start_pool
+  )
+                          .count();
 
-  // 方案 A (传统降级方案): 内存池预分配容量被彻底借光，全部请求走 Fallback (::operator new/delete 散碎分配)
+  // 方案 A (传统降级方案): 内存池预分配容量被彻底借光，全部请求走 Fallback (::operator new/delete
+  // 散碎分配)
   BufferPool exhausted_pool(1, /*allow_dynamic_expansion=*/false);
-  auto permanent_holder = exhausted_pool.allocate(); // 借出唯一一块，使池子彻底空栈
+  auto permanent_holder = exhausted_pool.allocate();  // 借出唯一一块，使池子彻底空栈
   auto start_fallback = std::chrono::steady_clock::now();
   {
     std::vector<std::thread> workers;
@@ -187,11 +190,13 @@ TEST(BufferPoolTest, FallbackPerformanceCliff) {
     for (auto& w : workers) w.join();
   }
   auto elapsed_fallback = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start_fallback).count();
+                              std::chrono::steady_clock::now() - start_fallback
+  )
+                              .count();
 
   // 方案 C (本次重构方案): 突破预分配容量时按 4MB 批量动态无锁挂载新 Chunk (二级连续 Arena 链)
   BufferPool dynamic_pool(1, /*allow_dynamic_expansion=*/true);
-  auto permanent_dynamic = dynamic_pool.allocate(); // 借空初始 1 块
+  auto permanent_dynamic = dynamic_pool.allocate();  // 借空初始 1 块
   auto start_dynamic = std::chrono::steady_clock::now();
   {
     std::vector<std::thread> workers;
@@ -213,25 +218,31 @@ TEST(BufferPoolTest, FallbackPerformanceCliff) {
     for (auto& w : workers) w.join();
   }
   auto elapsed_dynamic = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start_dynamic).count();
+                             std::chrono::steady_clock::now() - start_dynamic
+  )
+                             .count();
 
   double speedup_dynamic = (double)elapsed_fallback / std::max<long long>(elapsed_dynamic, 1);
   double ratio_prealloc = (double)elapsed_dynamic / std::max<long long>(elapsed_pool, 1);
 
-  std::cout << "\n================ [ PERF 基准实验: 洪峰超额借还 同一场景下三种方案对比 ] ================\n"
-            << "  同一压测场景: 8 线程并发突发 x 每线程 500 块 x 300 轮 (共 1,200,000 次 4KB 页面借还)\n"
-            << "  ------------------------------------------------------------------------------------\n"
-            << "  方案 A (传统降级方案: 散碎系统堆分配)  : " << elapsed_fallback << " ms ("
-            << (double)elapsed_fallback / std::max<long long>(elapsed_pool, 1) << "x 暴跌性能悬崖)\n"
-            << "  方案 B (理想基准方案: 静态全量预分配)  : " << elapsed_pool << " ms\n"
-            << "  方案 C (本次重构方案: 动态 4MB Chunk 扩容): " << elapsed_dynamic << " ms ("
-            << speedup_dynamic << "x 消除性能悬崖加速, 较静态预分配开销比率仅 " << ratio_prealloc << "x)\n"
-            << "  动态挂载 4MB Chunk 数量                   : " << dynamic_pool.chunkCount() << " 个\n"
-            << "======================================================================================\n\n";
+  std::cout
+      << "\n================ [ PERF 基准实验: 洪峰超额借还 同一场景下三种方案对比 ] "
+         "================\n"
+      << "  同一压测场景: 8 线程并发突发 x 每线程 500 块 x 300 轮 (共 1,200,000 次 4KB 页面借还)\n"
+      << "  ------------------------------------------------------------------------------------\n"
+      << "  方案 A (传统降级方案: 散碎系统堆分配)  : " << elapsed_fallback << " ms ("
+      << (double)elapsed_fallback / std::max<long long>(elapsed_pool, 1) << "x 暴跌性能悬崖)\n"
+      << "  方案 B (理想基准方案: 静态全量预分配)  : " << elapsed_pool << " ms\n"
+      << "  方案 C (本次重构方案: 动态 4MB Chunk 扩容): " << elapsed_dynamic << " ms ("
+      << speedup_dynamic << "x 消除性能悬崖加速, 较静态预分配开销比率仅 " << ratio_prealloc
+      << "x)\n"
+      << "  动态挂载 4MB Chunk 数量                   : " << dynamic_pool.chunkCount() << " 个\n"
+      << "======================================================================================"
+         "\n\n";
 
   EXPECT_EQ(in_pool.allocatedCount(), 0);
-  EXPECT_EQ(exhausted_pool.allocatedCount(), 1); // 仅剩 permanent_holder
-  EXPECT_EQ(dynamic_pool.allocatedCount(), 1);   // 仅剩 permanent_dynamic
+  EXPECT_EQ(exhausted_pool.allocatedCount(), 1);  // 仅剩 permanent_holder
+  EXPECT_EQ(dynamic_pool.allocatedCount(), 1);    // 仅剩 permanent_dynamic
   EXPECT_GT(dynamic_pool.chunkCount(), 1);
   EXPECT_LT(elapsed_dynamic, elapsed_fallback);
 }
@@ -240,7 +251,7 @@ TEST(BufferPoolTest, FallbackPerformanceCliff) {
 // 对比 8 个并发线程争抢同一个全局 head_，与 8 个并发线程各自分片 (Sharded) 访问独立 pool 的性能差异
 TEST(BufferPoolTest, GlobalHeadContentionBottleneck) {
   constexpr int kThreads = 8;
-  constexpr int kIterations = 100000; // 8 线程共计 80 万次借还
+  constexpr int kIterations = 100000;  // 8 线程共计 80 万次借还
 
   // 场景 A: 8 个并发线程高频狂争同一个全局 head_
   BufferPool single_contended_pool(1024);
@@ -260,9 +271,12 @@ TEST(BufferPoolTest, GlobalHeadContentionBottleneck) {
     for (auto& w : workers) w.join();
   }
   auto elapsed_contended = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start_contended).count();
+                               std::chrono::steady_clock::now() - start_contended
+  )
+                               .count();
 
-  // 场景 B: 8 个并发线程分别访问 8 个独立的分片 pool (模拟 Sharded / Thread-Local Pool，消除单点争用)
+  // 场景 B: 8 个并发线程分别访问 8 个独立的分片 pool (模拟 Sharded / Thread-Local
+  // Pool，消除单点争用)
   std::vector<std::unique_ptr<BufferPool>> sharded_pools;
   for (int i = 0; i < kThreads; ++i) {
     sharded_pools.push_back(std::make_unique<BufferPool>(128));
@@ -283,7 +297,9 @@ TEST(BufferPoolTest, GlobalHeadContentionBottleneck) {
     for (auto& w : workers) w.join();
   }
   auto elapsed_sharded = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - start_sharded).count();
+                             std::chrono::steady_clock::now() - start_sharded
+  )
+                             .count();
 
   std::cout << "\n================ [ PERF 瓶颈实验 ①: 单 Head 争用瓶颈 ] ================\n"
             << "  8 线程争抢单 Head 耗时 : " << elapsed_contended << " ms\n"
@@ -320,7 +336,7 @@ TEST(BufferPoolTest, DynamicChunkExpansionBasic) {
   // 验证容量与 Chunk 链表状态
   EXPECT_EQ(pool.allocatedCount(), 10);
   EXPECT_EQ(pool.chunkCount(), 2);
-  EXPECT_EQ(pool.capacity(), 4 + BufferPool::kBlocksPerChunk); // 4 + 1024 = 1028
+  EXPECT_EQ(pool.capacity(), 4 + BufferPool::kBlocksPerChunk);  // 4 + 1024 = 1028
 
   // 验证所有 10 块的血统均在 Arena 中（前 4 块在初始 Arena，后 6 块在二级动态 Chunk 中）
   for (int i = 0; i < 10; ++i) {
@@ -339,7 +355,7 @@ TEST(BufferPoolTest, DynamicChunkExpansionBasic) {
 // 8. 跨多个 4MB Chunk 连续动态扩容与数据完整性校验
 TEST(BufferPoolTest, DynamicChunkExpansionMultiChunk) {
   BufferPool pool(4);
-  constexpr size_t kTotalBlocks = 2500; // 需要至少 1 (初始) + 3 个动态 4MB Chunk (1024 * 3 = 3072)
+  constexpr size_t kTotalBlocks = 2500;  // 需要至少 1 (初始) + 3 个动态 4MB Chunk (1024 * 3 = 3072)
   std::vector<PooledBlock> blocks;
   blocks.reserve(kTotalBlocks);
 
@@ -352,7 +368,7 @@ TEST(BufferPoolTest, DynamicChunkExpansionMultiChunk) {
   }
 
   EXPECT_EQ(pool.allocatedCount(), kTotalBlocks);
-  EXPECT_GE(pool.chunkCount(), 4); // 初始 1 个 + 至少 3 个动态 Chunk
+  EXPECT_GE(pool.chunkCount(), 4);  // 初始 1 个 + 至少 3 个动态 Chunk
   EXPECT_GE(pool.capacity(), 4 + 3 * BufferPool::kBlocksPerChunk);
 
   // 校验每个块的数据完整性与 isInArena 属性
@@ -367,9 +383,9 @@ TEST(BufferPoolTest, DynamicChunkExpansionMultiChunk) {
 
 // 9. 多线程高并发并发触发 Chunk 扩容与无锁挂载稳定性压测
 TEST(BufferPoolTest, DynamicChunkExpansionConcurrentMountStress) {
-  BufferPool pool(2); // 仅 2 块初始容量，迫使 16 线程在启动瞬间发生重度并发扩容竞争
+  BufferPool pool(2);  // 仅 2 块初始容量，迫使 16 线程在启动瞬间发生重度并发扩容竞争
   constexpr int kThreads = 16;
-  constexpr int kBlocksPerThread = 150; // 共计 2400 块，需要挂载多个 4MB Chunk
+  constexpr int kBlocksPerThread = 150;  // 共计 2400 块，需要挂载多个 4MB Chunk
 
   std::vector<std::thread> workers;
   workers.reserve(kThreads);
@@ -407,4 +423,3 @@ TEST(BufferPoolTest, DynamicChunkExpansionConcurrentMountStress) {
   EXPECT_EQ(pool.allocatedCount(), 0);
   EXPECT_GT(pool.chunkCount(), 1);
 }
-

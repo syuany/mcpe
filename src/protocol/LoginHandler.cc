@@ -12,10 +12,7 @@
 namespace mcpe::protocol {
 
 void
-LoginHandler::handleLoginStart(
-    const std::shared_ptr<ClientSession> &session,
-    ByteBuffer &payload
-) {
+LoginHandler::handleLoginStart(const std::shared_ptr<ClientSession> &session, ByteBuffer &payload) {
   auto username_res = payload.readString(16);
   if (!username_res) {
     spdlog::warn("[LoginHandler] Failed to read username from {}", session->remoteAddress());

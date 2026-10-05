@@ -14,11 +14,14 @@ namespace mcpe {
  * @brief 分片并发定长内存池 (Sharded Lock-Free Buffer Pool)
  *
  * 核心设计目标：
- * 1. 消除全局单 Head 争用热点：将大池切分为多个基于 64 字节缓存行对齐 (alignas(64)) 的独立 BufferPool 分片。
- * 2. 线程分片亲和映射 (Thread Affinity)：根据当前线程 TLS ID 映射至默认分片，高并发借还命中本地分片，消除 CPU 总线仲裁。
- * 3. 跨分片工作窃取 (Work Stealing)：当本线程分片被借空时，无锁尝试从其他分片“窃取”空闲块，最大限度避免过早退化到系统堆锁。
- * 4. 自动化透明跨分片归还：由于 PooledBlock 的 BufferBlockDeleter 自带出借分片的 pool_ 指针，借出块无论在哪个线程或分片被释放，
- *    均能精准归还到它原本的所属分片，全过程完全无锁。
+ * 1. 消除全局单 Head 争用热点：将大池切分为多个基于 64 字节缓存行对齐 (alignas(64)) 的独立
+ * BufferPool 分片。
+ * 2. 线程分片亲和映射 (Thread Affinity)：根据当前线程 TLS ID
+ * 映射至默认分片，高并发借还命中本地分片，消除 CPU 总线仲裁。
+ * 3. 跨分片工作窃取 (Work
+ * Stealing)：当本线程分片被借空时，无锁尝试从其他分片“窃取”空闲块，最大限度避免过早退化到系统堆锁。
+ * 4. 自动化透明跨分片归还：由于 PooledBlock 的 BufferBlockDeleter 自带出借分片的 pool_
+ * 指针，借出块无论在哪个线程或分片被释放， 均能精准归还到它原本的所属分片，全过程完全无锁。
  */
 class ShardedBufferPool {
  public:
@@ -28,7 +31,8 @@ class ShardedBufferPool {
 
   /**
    * @brief 构造分片内存池
-   * @param shard_count 分片数。若为 0，则自动探测系统的硬件并发核心数 (hardware_concurrency)，保底至少为 4
+   * @param shard_count 分片数。若为 0，则自动探测系统的硬件并发核心数
+   * (hardware_concurrency)，保底至少为 4
    * @param capacity_per_shard 每个分片初始容量（默认 256 块，即 1MB/分片）
    */
   explicit ShardedBufferPool(
@@ -65,15 +69,18 @@ class ShardedBufferPool {
   /**
    * @brief 获取指定索引的分片
    */
-  BufferPool& getShard(size_t index) noexcept {
+  BufferPool&
+  getShard(size_t index) noexcept {
     return shards_[index % shards_.size()]->pool;
   }
 
-  size_t shardCount() const noexcept {
+  size_t
+  shardCount() const noexcept {
     return shards_.size();
   }
 
-  size_t totalCapacity() const noexcept {
+  size_t
+  totalCapacity() const noexcept {
     size_t total = 0;
     for (const auto& s : shards_) {
       total += s->pool.capacity();
@@ -81,7 +88,8 @@ class ShardedBufferPool {
     return total;
   }
 
-  size_t totalAllocatedCount() const noexcept {
+  size_t
+  totalAllocatedCount() const noexcept {
     size_t total = 0;
     for (const auto& s : shards_) {
       total += s->pool.allocatedCount();

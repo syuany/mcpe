@@ -38,8 +38,12 @@ HandshakeHandler::handleHandshake(
   const auto next_state = *next_state_res;
 
   spdlog::info(
-      "[Handshake] Client {} -> ProtoVer: {}, Host: {}:{}, NextState: {}", session->remoteAddress(),
-      protocol_version, host, port, next_state
+      "[Handshake] Client {} -> ProtoVer: {}, Host: {}:{}, NextState: {}",
+      session->remoteAddress(),
+      protocol_version,
+      host,
+      port,
+      next_state
   );
 
   // 2. 根据 Next State 流转状态机
