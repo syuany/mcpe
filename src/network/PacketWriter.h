@@ -22,28 +22,28 @@ class TcpSession;
  * 3. 杜绝遗漏与错发：消除开发者手动计算包长、前插 VarInt 以及显式调用 sendPacket 的心智负担
  * 4. 异常安全与取消支持：支持 cancel() 在逻辑分支中止时不发送残包
  */
-template <typename SessionType>
-class BasicPacketWriter {
+template <typename SessionType = TcpSession>
+class PacketWriter {
  public:
-  explicit BasicPacketWriter(std::shared_ptr<SessionType> session, int32_t packet_id)
+  explicit PacketWriter(std::shared_ptr<SessionType> session, int32_t packet_id)
       : session_(session.get()), session_shared_(std::move(session)), packet_id_(packet_id) {
     init();
   }
 
-  explicit BasicPacketWriter(SessionType& session, int32_t packet_id)
+  explicit PacketWriter(SessionType& session, int32_t packet_id)
       : session_(&session), packet_id_(packet_id) {
     init();
   }
 
-  ~BasicPacketWriter() {
+  ~PacketWriter() {
     flush();
   }
 
   // Move-only 语义
-  BasicPacketWriter(const BasicPacketWriter&) = delete;
-  BasicPacketWriter& operator=(const BasicPacketWriter&) = delete;
+  PacketWriter(const PacketWriter&) = delete;
+  PacketWriter& operator=(const PacketWriter&) = delete;
 
-  BasicPacketWriter(BasicPacketWriter&& other) noexcept
+  PacketWriter(PacketWriter&& other) noexcept
       : session_(other.session_),
         session_shared_(std::move(other.session_shared_)),
         packet_id_(other.packet_id_),
@@ -53,7 +53,7 @@ class BasicPacketWriter {
     other.session_ = nullptr;
   }
 
-  BasicPacketWriter& operator=(BasicPacketWriter&& other) noexcept {
+  PacketWriter& operator=(PacketWriter&& other) noexcept {
     if (this != &other) {
       flush();
       session_ = other.session_;
@@ -118,13 +118,13 @@ class BasicPacketWriter {
 };
 
 template <typename SessionType>
-BasicPacketWriter(std::shared_ptr<SessionType>, int32_t) -> BasicPacketWriter<SessionType>;
+PacketWriter(std::shared_ptr<SessionType>, int32_t) -> PacketWriter<SessionType>;
 
 template <typename SessionType>
-BasicPacketWriter(SessionType&, int32_t) -> BasicPacketWriter<SessionType>;
+PacketWriter(SessionType&, int32_t) -> PacketWriter<SessionType>;
 
-template <typename SessionType = TcpSession>
-using PacketWriter = BasicPacketWriter<SessionType>;
+template <typename SessionType>
+using BasicPacketWriter = PacketWriter<SessionType>;
 
 }  // namespace mcpe::network
 
