@@ -138,7 +138,22 @@ target_include_directories(mcpe_network PUBLIC
 target_link_libraries(mcpe_network PUBLIC mcpe_common)
 
 # ==============================================
-# 模块3: mcpe_protocol 静态库
+# 模块3: mcpe_world 静态库
+# ==============================================
+add_library(mcpe_world STATIC
+    src/world/ChunkSection.cc
+    src/world/Chunk.cc
+    src/world/FlatWorldGenerator.cc
+)
+
+target_include_directories(mcpe_world PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+)
+
+target_link_libraries(mcpe_world PUBLIC mcpe_common)
+
+# ==============================================
+# 模块4: mcpe_protocol 静态库
 # ==============================================
 add_library(mcpe_protocol STATIC
     src/protocol/ClientSession.cc
@@ -149,20 +164,21 @@ add_library(mcpe_protocol STATIC
     src/protocol/AuthUtils.cc
     src/protocol/LoginHandler.cc
     src/protocol/PlayHandler.cc
+    src/protocol/ChunkSerializer.cc
 )
 
 target_include_directories(mcpe_protocol PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
-target_link_libraries(mcpe_protocol PUBLIC mcpe_network mcpe_common)
+target_link_libraries(mcpe_protocol PUBLIC mcpe_world mcpe_network mcpe_common)
 
 # ==============================================
 # 可执行文件 server
 # ==============================================
 add_executable(server src/server.cc)
 
-target_link_libraries(server PRIVATE mcpe_protocol mcpe_network mcpe_common)
+target_link_libraries(server PRIVATE mcpe_protocol mcpe_world mcpe_network mcpe_common)
 
 # ==============================================
 # 单元测试（归档输出至 bin/tests 保持顶层 bin 清洁）
@@ -244,6 +260,19 @@ target_link_libraries(test_packet_writer PRIVATE
     GTest::gtest_main
 )
 
+# Chunk 世界与序列化测试（TASK-3.6）
+add_executable(test_chunk
+    tests/test_chunk.cc
+)
+
+target_link_libraries(test_chunk PRIVATE
+    mcpe_protocol
+    mcpe_world
+    mcpe_network
+    mcpe_common
+    GTest::gtest_main
+)
+
 # 让 CTest 自动发现每个 TEST 用例
 include(GoogleTest)
 gtest_discover_tests(test_bytebuffer)
@@ -253,3 +282,4 @@ gtest_discover_tests(test_framing)
 gtest_discover_tests(test_packet_router)
 gtest_discover_tests(test_uuid)
 gtest_discover_tests(test_packet_writer)
+gtest_discover_tests(test_chunk)
