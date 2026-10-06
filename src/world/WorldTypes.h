@@ -1,6 +1,7 @@
 #ifndef MCPE_WORLD_WORLD_TYPES_H
 #define MCPE_WORLD_WORLD_TYPES_H
 
+#include <cmath>
 #include <compare>
 #include <cstdint>
 #include <functional>
@@ -143,6 +144,122 @@ constexpr BlockPos
 ChunkPos::minBlockPos() const noexcept {
   return BlockPos{x << 4, 0, z << 4};
 }
+
+/**
+ * @brief 三维连续空间几何向量 (X, Y, Z) - 用于实体连续物理坐标、位移计算与碰撞
+ */
+struct Vector3d {
+  double x{0.0};
+  double y{0.0};
+  double z{0.0};
+
+  constexpr auto operator<=>(const Vector3d&) const = default;
+
+  constexpr Vector3d
+  operator+(const Vector3d& other) const noexcept {
+    return {x + other.x, y + other.y, z + other.z};
+  }
+
+  constexpr Vector3d
+  operator-(const Vector3d& other) const noexcept {
+    return {x - other.x, y - other.y, z - other.z};
+  }
+
+  [[nodiscard]] double
+  distanceSquared(const Vector3d& other) const noexcept {
+    const double dx = x - other.x;
+    const double dy = y - other.y;
+    const double dz = z - other.z;
+    return dx * dx + dy * dy + dz * dz;
+  }
+
+  [[nodiscard]] double
+  distance(const Vector3d& other) const noexcept {
+    return std::sqrt(distanceSquared(other));
+  }
+
+  [[nodiscard]] double
+  distanceSquared(const BlockPos& block) const noexcept {
+    const double dx = x - (static_cast<double>(block.x) + 0.5);
+    const double dy = y - (static_cast<double>(block.y) + 0.5);
+    const double dz = z - (static_cast<double>(block.z) + 0.5);
+    return dx * dx + dy * dy + dz * dz;
+  }
+
+  [[nodiscard]] BlockPos
+  toBlockPos() const noexcept {
+    return BlockPos{
+        static_cast<int32_t>(std::floor(x)),
+        static_cast<int32_t>(std::floor(y)),
+        static_cast<int32_t>(std::floor(z))};
+  }
+};
+
+/**
+ * @brief 实体视角朝向原语 (Yaw, Pitch)
+ */
+struct Rotation {
+  float yaw{0.0f};
+  float pitch{0.0f};
+
+  constexpr auto operator<=>(const Rotation&) const = default;
+
+  /** @brief 转换为 Minecraft 协议 1 字节定步长 Angle (0~255) */
+  [[nodiscard]] uint8_t
+  toByteYaw() const noexcept {
+    return static_cast<uint8_t>((yaw / 360.0f) * 256.0f);
+  }
+
+  [[nodiscard]] uint8_t
+  toBytePitch() const noexcept {
+    return static_cast<uint8_t>((pitch / 360.0f) * 256.0f);
+  }
+};
+
+/**
+ * @brief 方块接触表面强类型枚举（对标 Minecraft 0x14/0x1F Face 字段）
+ */
+enum class BlockFace : uint8_t {
+  Bottom = 0,  // -Y (下)
+  Top = 1,     // +Y (上)
+  North = 2,   // -Z (北)
+  South = 3,   // +Z (南)
+  West = 4,    // -X (西)
+  East = 5     // +X (东)
+};
+
+/** @brief 获取指定面沿法向的坐标偏移单位量 */
+[[nodiscard]] constexpr BlockPos
+toFaceOffset(BlockFace face) noexcept {
+  switch (face) {
+    case BlockFace::Bottom:
+      return BlockPos{0, -1, 0};
+    case BlockFace::Top:
+      return BlockPos{0, 1, 0};
+    case BlockFace::North:
+      return BlockPos{0, 0, -1};
+    case BlockFace::South:
+      return BlockPos{0, 0, 1};
+    case BlockFace::West:
+      return BlockPos{-1, 0, 0};
+    case BlockFace::East:
+      return BlockPos{1, 0, 0};
+  }
+  return BlockPos{0, 0, 0};
+}
+
+/**
+ * @brief 客户端方块挖掘状态机枚举（对标 0x14 Player Digging 状态）
+ */
+enum class DigStatus : uint8_t {
+  Started = 0,        // 开始破坏方块
+  Cancelled = 1,      // 放弃破坏方块
+  Finished = 2,       // 成功破坏方块
+  DropItemStack = 3,  // 丢弃整组物品
+  DropItem = 4,       // 丢弃单个物品
+  ShootOrFinish = 5,  // 射箭 / 吃完食物
+  SwapHands = 6       // 切换主副手物品
+};
 
 /** @brief 方块状态转换工具：消除裸数字魔数 */
 constexpr uint16_t

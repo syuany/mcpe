@@ -283,3 +283,16 @@ gtest_discover_tests(test_packet_router)
 gtest_discover_tests(test_uuid)
 gtest_discover_tests(test_packet_writer)
 gtest_discover_tests(test_chunk)
+
+# EventQueue 并发队列与 std::variant 事件测试（TASK-4.1）
+add_executable(test_event_queue
+    tests/test_event_queue.cc
+)
+
+target_link_libraries(test_event_queue PRIVATE
+    mcpe_world
+    mcpe_common
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_event_queue)
