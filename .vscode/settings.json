@@ -15,7 +15,7 @@
     },
 
     // 3. 避免 Git 插件扫描大型构建产物
-    "git.autorefresh": false,
+    // "git.autorefresh": false,
     "git.status.submodules": false,
 
     "clangd.path": "clangd",
