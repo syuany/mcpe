@@ -3,16 +3,28 @@
 #include <spdlog/spdlog.h>
 
 #include "network/PacketWriter.h"
+#include "protocol/ChunkSerializer.h"
 #include "protocol/ClientSession.h"
 #include "protocol/GameTypes.h"
+#include "world/Chunk.h"
+#include "world/FlatWorldGenerator.h"
 
 namespace mcpe::protocol {
 
 void
 PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   sendJoinGame(session, 1);
+
+  world::FlatWorldGenerator generator;
+  for (int cx = -2; cx <= 2; ++cx) {
+    for (int cz = -2; cz <= 2; ++cz) {
+      world::Chunk chunk(world::ChunkPos{cx, cz});
+      generator.generate(chunk);
+      ChunkSerializer::sendChunkData(session, chunk, true);
+    }
+  }
   const int32_t teleport_id = session->nextTeleportId();
-  sendPlayerPositionAndLook(session, 0.0, 64.0, 0.0, 0.0f, 0.0f, 0x00, teleport_id);
+  sendPlayerPositionAndLook(session, 0.5, 4.0, 0.5, 0.0f, 0.0f, 0x00, teleport_id);
   session->startKeepAliveTimer();
 }
 
