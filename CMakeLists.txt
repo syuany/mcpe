@@ -25,87 +25,56 @@ include_directories(
 )
 
 # ==============================================
-# 第三方依赖库（本地内嵌 lib/ 目录，零网络依赖）
+# 第三方依赖库（基于 CMake FetchContent 管理）
 # ==============================================
+include(FetchContent)
 
-# 1. Asio (纯头文件接口库)
-add_library(asio INTERFACE)
-target_include_directories(asio SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/lib/asio/include)
-target_compile_definitions(asio INTERFACE ASIO_STANDALONE)
+# 1. Asio (纯头文件接口库，版本 1.30.2)
+FetchContent_Declare(
+    asio
+    GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+    GIT_TAG        asio-1-30-2
+    GIT_SHALLOW    TRUE
+)
+FetchContent_GetProperties(asio)
+if(NOT asio_POPULATED)
+    FetchContent_Populate(asio)
+    add_library(asio INTERFACE)
+    target_include_directories(asio SYSTEM INTERFACE ${asio_SOURCE_DIR}/asio/include)
+    target_compile_definitions(asio INTERFACE ASIO_STANDALONE)
 
-find_package(Threads REQUIRED)
-target_link_libraries(asio INTERFACE Threads::Threads)
+    find_package(Threads REQUIRED)
+    target_link_libraries(asio INTERFACE Threads::Threads)
 
-if(WIN32)
-    target_link_libraries(asio INTERFACE ws2_32 wsock32)
-    target_compile_definitions(asio INTERFACE _WIN32_WINNT=0x0A00)
-endif()
-
-# 2. spdlog (纯头文件接口库，零编译开销)
-add_library(spdlog INTERFACE)
-target_include_directories(spdlog SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/lib/spdlog/include)
-target_link_libraries(spdlog INTERFACE Threads::Threads)
-add_library(spdlog::spdlog ALIAS spdlog)
-
-# 3. GoogleTest (单元测试框架)
-# Windows 上避免 gtest 强制替换 CRT 设置
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-add_subdirectory(lib/googletest EXCLUDE_FROM_ALL)
-
-# 4. jemalloc 高性能多线程内存分配器（预编译静态库，强制依赖）
-set(JEMALLOC_PREBUILT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/jemalloc")
-
-if(EXISTS "${JEMALLOC_PREBUILT_DIR}/lib/libjemalloc.a" AND EXISTS "${JEMALLOC_PREBUILT_DIR}/include/jemalloc/jemalloc.h")
-    set(JEMALLOC_LIB "${JEMALLOC_PREBUILT_DIR}/lib/libjemalloc.a")
-    set(JEMALLOC_INCLUDE_DIR "${JEMALLOC_PREBUILT_DIR}/include")
-    message(STATUS "Using embedded prebuilt jemalloc: ${JEMALLOC_LIB}")
-else()
-    # 兜底查找系统已安装的 jemalloc
-    find_path(JEMALLOC_INCLUDE_DIR
-        NAMES jemalloc/jemalloc.h
-        PATHS /usr/include /usr/local/include
-    )
-    find_library(JEMALLOC_LIB
-        NAMES jemalloc
-        PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib
-    )
-    if(NOT JEMALLOC_LIB)
-        find_package(PkgConfig QUIET)
-        if(PKG_CONFIG_FOUND)
-            pkg_check_modules(JEMALLOC QUIET jemalloc)
-            if(JEMALLOC_FOUND)
-                set(JEMALLOC_LIB ${JEMALLOC_LIBRARIES})
-                set(JEMALLOC_INCLUDE_DIR ${JEMALLOC_INCLUDE_DIRS})
-            endif()
-        endif()
+    if(WIN32)
+        target_link_libraries(asio INTERFACE ws2_32 wsock32)
+        target_compile_definitions(asio INTERFACE _WIN32_WINNT=0x0A00)
     endif()
 endif()
 
-if(NOT JEMALLOC_LIB)
-    message(FATAL_ERROR 
-        "jemalloc is strictly REQUIRED but was not found in lib/jemalloc or system!\n"
-        "Please provide prebuilt lib/jemalloc or install development package:\n"
-        "  Debian/Ubuntu: sudo apt-get install -y libjemalloc-dev\n"
-        "  RHEL/CentOS:   sudo yum install -y jemalloc-devel\n"
-        "  macOS:         brew install jemalloc\n"
-    )
-endif()
-
-message(STATUS "Found jemalloc library: ${JEMALLOC_LIB}")
-if(JEMALLOC_INCLUDE_DIR)
-    message(STATUS "Found jemalloc include: ${JEMALLOC_INCLUDE_DIR}")
-endif()
-
-# 创建全局静态导入目标 jemalloc::jemalloc
-add_library(jemalloc::jemalloc STATIC IMPORTED GLOBAL)
-set_target_properties(jemalloc::jemalloc PROPERTIES
-    IMPORTED_LOCATION "${JEMALLOC_LIB}"
+# 2. spdlog (高效日志库，v1.13.0)
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG        v1.13.0
+    GIT_SHALLOW    TRUE
 )
-if(JEMALLOC_INCLUDE_DIR)
-    set_target_properties(jemalloc::jemalloc PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${JEMALLOC_INCLUDE_DIR}"
-    )
-endif()
+FetchContent_MakeAvailable(spdlog)
+
+# 3. GoogleTest (单元测试框架，v1.14.0)
+# Windows 上避免 gtest 强制替换 CRT 设置
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(googletest)
 
 # ==============================================
 # 模块1: mcpe_common 静态库
@@ -120,7 +89,7 @@ target_include_directories(mcpe_common PUBLIC
 )
 
 target_compile_options(mcpe_common PRIVATE -O3)
-target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio jemalloc::jemalloc ${CMAKE_DL_LIBS})
+target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio)
 
 # ==============================================
 # 模块2: mcpe_network 静态库
@@ -176,7 +145,7 @@ target_link_libraries(mcpe_protocol PUBLIC mcpe_world mcpe_network mcpe_common)
 # ==============================================
 # 可执行文件 server
 # ==============================================
-add_executable(server src/server.cc)
+add_executable(server src/main.cc)
 
 target_link_libraries(server PRIVATE mcpe_protocol mcpe_world mcpe_network mcpe_common)
 
