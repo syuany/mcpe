@@ -195,20 +195,27 @@ AuthUtils::isValidUsername(std::string_view name) noexcept {
   return true;
 }
 
-std::string
-AuthUtils::generateOfflineUuid(std::string_view username) {
+std::array<uint8_t, 16>
+AuthUtils::generateOfflineUuidBytes(std::string_view username) {
   const std::string source = std::format("OfflinePlayer:{}", username);
 
   MD5Context ctx;
   md5Update(&ctx, reinterpret_cast<const uint8_t*>(source.data()), source.size());
-  std::array<uint8_t, 16> digest;
+  std::array<uint8_t, 16> digest{};
   md5Final(&ctx, digest.data());
 
   // RFC-4122 v3 规范位调整:
   // 1. 设置 Version 为 3 (MD5 based) -> digest[6] 的高 4 位设为 0011 (0x3)
-  digest[6] = (digest[6] & 0x0F) | 0x30;
+  digest[6] = static_cast<uint8_t>((digest[6] & 0x0F) | 0x30);
   // 2. 设置 Variant 为 IETF (10xx) -> digest[8] 的高 2 位设为 10 (0x80)
-  digest[8] = (digest[8] & 0x3F) | 0x80;
+  digest[8] = static_cast<uint8_t>((digest[8] & 0x3F) | 0x80);
+
+  return digest;
+}
+
+std::string
+AuthUtils::generateOfflineUuid(std::string_view username) {
+  const auto digest = generateOfflineUuidBytes(username);
 
   // 格式化为 8-4-4-4-12 带连字符的 36 字符标准小写字符串
   return std::format(
@@ -231,6 +238,35 @@ AuthUtils::generateOfflineUuid(std::string_view username) {
       digest[14],
       digest[15]
   );
+}
+
+std::array<uint8_t, 16>
+AuthUtils::parseUuidStringToBytes(std::string_view uuid_str) {
+  std::array<uint8_t, 16> bytes{};
+  size_t byte_idx = 0;
+  int high_nibble = -1;
+
+  auto hexValue = [](char ch) -> int {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+  };
+
+  for (char ch : uuid_str) {
+    if (ch == '-') continue;
+    int val = hexValue(ch);
+    if (val < 0) continue;
+    if (high_nibble < 0) {
+      high_nibble = val;
+    } else {
+      if (byte_idx < 16) {
+        bytes[byte_idx++] = static_cast<uint8_t>((high_nibble << 4) | val);
+      }
+      high_nibble = -1;
+    }
+  }
+  return bytes;
 }
 
 }  // namespace mcpe::protocol

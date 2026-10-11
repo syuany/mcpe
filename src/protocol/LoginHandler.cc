@@ -33,8 +33,10 @@ LoginHandler::handleLoginStart(const std::shared_ptr<ClientSession> &session, By
   }
 
   const std::string uuid_str = AuthUtils::generateOfflineUuid(username);
+  const auto uuid_bytes = AuthUtils::generateOfflineUuidBytes(username);
   session->setUsername(username);
   session->setUuid(uuid_str);
+  session->setUuidBytes(uuid_bytes);
 
   spdlog::info(
       "[LoginHandler] Player logged in: {} (UUID: {}) from {}",

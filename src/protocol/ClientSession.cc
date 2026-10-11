@@ -12,13 +12,23 @@
 #include "network/TcpSession.h"
 #include "protocol/ClientManager.h"
 #include "protocol/PacketRouter.h"
+#include <atomic>
 #include "protocol/PlayHandler.h"
+#include "world/EventQueue.h"
 
 namespace mcpe::protocol {
+
+namespace {
+std::atomic<uint64_t> g_next_session_id{1};
+std::atomic<int32_t> g_next_entity_id{1};
+}  // namespace
 
 void
 ClientSession::startPlay() {
   setState(ConnectionState::PLAY);
+  if (entity_id_ == 0) {
+    entity_id_ = g_next_entity_id.fetch_add(1, std::memory_order_relaxed);
+  }
   PlayHandler::onPlayerJoin(shared_from_this());
 }
 
@@ -26,9 +36,10 @@ ClientSession::ClientSession(std::shared_ptr<network::TcpSession> tcp_session)
     : tcp_session_(tcp_session),
       remote_address_(tcp_session ? tcp_session->remoteAddress() : "unknown"),
       keep_alive_timer_(tcp_session->socket().get_executor()),
-      protocol_handler_(std::make_shared<PacketRouter>()) {
+      protocol_handler_(std::make_shared<PacketRouter>()),
+      session_id_(g_next_session_id.fetch_add(1, std::memory_order_relaxed)) {
   last_alive_time_ = std::chrono::steady_clock::now();
-  spdlog::info("[ClientSession] Created for {}", remote_address_);
+  spdlog::info("[ClientSession] Created for {} (SID: {})", remote_address_, session_id_);
 }
 
 ClientSession::~ClientSession() {
@@ -49,10 +60,22 @@ ClientSession::onPacket(
 void
 ClientSession::onDisconnected(const std::shared_ptr<network::TcpSession>& /*session*/) {
   cancelKeepAlive();
+  if (auto q = event_queue_.lock()) {
+    world::WorldEvent ev;
+    ev.session_id = session_id_;
+    ev.entity_id = entity_id_;
+    ev.payload = world::PlayerLeaveEvent{};
+    q->push(std::move(ev));
+  }
   if (auto mgr = client_manager_.lock()) {
     mgr->removeSession(shared_from_this());
   }
   spdlog::info("[ClientSession] Client disconnected: {}", remote_address_);
+}
+
+std::shared_ptr<world::EventQueue>
+ClientSession::eventQueue() const noexcept {
+  return event_queue_.lock();
 }
 
 void

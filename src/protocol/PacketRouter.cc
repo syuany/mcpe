@@ -7,6 +7,7 @@
 #include "protocol/ConnectionState.h"
 #include "protocol/HandshakeHandler.h"
 #include "protocol/LoginHandler.h"
+#include "protocol/PacketTypes.h"
 #include "protocol/PlayHandler.h"
 #include "protocol/StatusHandler.h"
 
@@ -88,28 +89,35 @@ PacketRouter::dispatch(
 
     case ConnectionState::PLAY:
       switch (packet_id) {
-        case 0x00:  // Teleport Confirm
+        case ServerboundPacket::TeleportConfirm:
           PlayHandler::handleTeleportConfirm(session, packet);
           break;
 
-        case 0x0B:  // Keep Alive
+        case ServerboundPacket::ChatMessage:
+          PlayHandler::handleChatMessage(session, packet);
+          break;
+
+        case ServerboundPacket::KeepAlive:
           PlayHandler::handleKeepAlive(session, packet);
           break;
 
-        // 白名单容忍原版客户端高频例行报文（移动、语言、视距、皮肤偏好、快捷栏切换等）
-        case 0x03:  // Client Status
-        case 0x04:  // Client Settings
-        case 0x05:  // Confirm Transaction
-        case 0x08:  // Close Window
-        case 0x09:  // Plugin Message (MC|Brand)
-        case 0x0C:  // Player (on ground)
-        case 0x0D:  // Player Position
-        case 0x0E:  // Player Position And Look
-        case 0x0F:  // Player Look
-        case 0x13:  // Player Abilities
-        case 0x15:  // Entity Action
-        case 0x18:  // Resource Pack Status
-        case 0x1A:  // Held Item Change
+        case ServerboundPacket::Player:
+        case ServerboundPacket::PlayerPosition:
+        case ServerboundPacket::PlayerPositionAndLook:
+        case ServerboundPacket::PlayerLook:
+          PlayHandler::handlePlayerMovement(session, packet_id, packet);
+          break;
+
+        // 白名单容忍原版客户端高频例行报文（语言、视距、皮肤偏好、快捷栏切换等）
+        case ServerboundPacket::ClientStatus:
+        case ServerboundPacket::ClientSettings:
+        case ServerboundPacket::ConfirmTransaction:
+        case ServerboundPacket::CloseWindow:
+        case ServerboundPacket::PluginMessage:
+        case ServerboundPacket::PlayerAbilities:
+        case ServerboundPacket::EntityAction:
+        case ServerboundPacket::ResourcePackStatus:
+        case ServerboundPacket::HeldItemChange:
           spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
           packet.retrieveAll();
           break;

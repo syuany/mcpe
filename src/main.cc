@@ -12,8 +12,12 @@
 #include <memory>
 
 #include "network/TcpServer.h"
+#include "protocol/ChatHandler.h"
 #include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
+#include "world/EntityManager.h"
+#include "world/EventQueue.h"
+#include "world/WorldTicker.h"
 
 namespace {
 constexpr uint16_t kServerPort = 25566;
@@ -22,6 +26,7 @@ constexpr uint16_t kServerPort = 25566;
 using namespace mcpe;
 using namespace mcpe::network;
 using namespace mcpe::protocol;
+using namespace mcpe::world;
 
 int
 main() {
@@ -35,26 +40,66 @@ main() {
     // 1. 初始化核心 Asio IO 上下文
     asio::io_context io_context;
 
-    // 2. 初始化全局客户端会话管理器（对齐 Cuberite cServer::m_Clients 架构设计）
+    // 2. 初始化全局客户端会话管理器
     auto client_manager = std::make_shared<ClientManager>();
 
-    // 3. 使用独立端口，避免与 Cuberite 的 25565 冲突
+    // 3. 初始化跨线程 MPSC 事件队列
+    auto event_queue = std::make_shared<EventQueue>();
+
+    // 4. 初始化聊天多播与快捷指令路由系统
+    auto chat_handler = std::make_shared<ChatHandler>();
+    chat_handler->setSenders(
+        [client_manager](uint64_t session_id, ByteBuffer packet) {
+          client_manager->sendPacketTo(session_id, std::move(packet));
+        },
+        [client_manager](ByteBuffer packet) {
+          client_manager->broadcast(std::move(packet));
+        }
+    );
+
+    // 5. 初始化实体管理器与空间增量广播系统
+    auto entity_manager = std::make_shared<EntityManager>();
+    entity_manager->setSenders(
+        [client_manager](uint64_t session_id, ByteBuffer packet) {
+          client_manager->sendPacketTo(session_id, std::move(packet));
+        },
+        [client_manager](uint64_t except_session_id, ByteBuffer packet) {
+          client_manager->broadcastExceptSessionId(std::move(packet), except_session_id);
+        },
+        [client_manager](ByteBuffer packet) {
+          client_manager->broadcast(std::move(packet));
+        }
+    );
+
+    // 6. 初始化并启动 20 TPS 物理主循环节拍器
+    auto world_ticker = std::make_shared<WorldTicker>(
+        *event_queue,
+        *entity_manager,
+        [chat_handler](uint64_t sid, std::string_view name, const std::string& msg) {
+          chat_handler->handleMessage(sid, name, msg);
+        }
+    );
+    world_ticker->start();
+
+    // 7. 使用独立端口监听
     TcpServer server(io_context, kServerPort);
 
-    // 对齐 Cuberite 架构设计：通过 SessionFactory 为每个连入的 TcpSession 创建独立的 ClientSession
-    // 彻底解耦网络传输层（TcpSession / cTCPLink）与 Minecraft 协议业务层（ClientSession /
-    // cClientHandle）
-    server.setSessionFactory([client_manager](const std::shared_ptr<TcpSession>& tcp) {
+    // 会话工厂：挂接 ClientManager 与 EventQueue
+    server.setSessionFactory([client_manager, event_queue](const std::shared_ptr<TcpSession>& tcp) {
       auto session = std::make_shared<ClientSession>(tcp);
       session->setClientManager(client_manager);
+      session->setEventQueue(event_queue);
       client_manager->addSession(session);
       return session;
     });
 
     server.start();
 
-    // 3. 阻塞主线程，运行异步网络事件循环
+    // 8. 阻塞主线程运行异步网络事件循环
     io_context.run();
+
+    // 9. 停机清理
+    world_ticker->stop();
   } catch (const std::exception& e) {
     spdlog::critical("Server fatal error: {}", e.what());
     return 1;

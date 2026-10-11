@@ -41,6 +41,19 @@ class PlayHandler {
 
   /** @brief 处理客户端应答的 Keep Alive (0x0B) */
   static void handleKeepAlive(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload);
+
+  /** @brief 处理客户端发来的移动包族 (0x0C, 0x0D, 0x0E, 0x0F) 并投递至 EventQueue */
+  static void handlePlayerMovement(
+      const std::shared_ptr<ClientSession>& session,
+      int32_t packet_id,
+      ByteBuffer& payload
+  );
+
+  /** @brief 处理客户端发来的聊天信息 (0x02) 并投递至 EventQueue */
+  static void handleChatMessage(
+      const std::shared_ptr<ClientSession>& session,
+      ByteBuffer& payload
+  );
 };
 
 }  // namespace mcpe::protocol

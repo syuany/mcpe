@@ -113,6 +113,8 @@ add_library(mcpe_world STATIC
     src/world/ChunkSection.cc
     src/world/Chunk.cc
     src/world/FlatWorldGenerator.cc
+    src/world/EntityManager.cc
+    src/world/WorldTicker.cc
 )
 
 target_include_directories(mcpe_world PUBLIC
@@ -134,6 +136,7 @@ add_library(mcpe_protocol STATIC
     src/protocol/LoginHandler.cc
     src/protocol/PlayHandler.cc
     src/protocol/ChunkSerializer.cc
+    src/protocol/ChatHandler.cc
 )
 
 target_include_directories(mcpe_protocol PUBLIC
@@ -265,3 +268,18 @@ target_link_libraries(test_event_queue PRIVATE
 )
 
 gtest_discover_tests(test_event_queue)
+
+# Sprint 3: 移动差分同步、同屏广播、聊天与指令测试
+add_executable(test_sprint3
+    tests/test_sprint3.cc
+)
+
+target_link_libraries(test_sprint3 PRIVATE
+    mcpe_protocol
+    mcpe_world
+    mcpe_network
+    mcpe_common
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_sprint3)

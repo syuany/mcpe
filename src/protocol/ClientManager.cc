@@ -80,8 +80,58 @@ ClientManager::broadcastExcept(ByteBuffer packet, const std::shared_ptr<ClientSe
       targets[i]->sendPacket(std::move(packet));
     } else {
       targets[i]->sendPacket(packet.clone());
+  }
+}
+
+void
+ClientManager::broadcastExceptSessionId(ByteBuffer packet, uint64_t except_session_id) {
+  std::vector<std::shared_ptr<ClientSession>> targets;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& session : sessions_) {
+      if (session && session->sessionId() != except_session_id &&
+          session->state() == ConnectionState::PLAY) {
+        targets.push_back(session);
+      }
     }
   }
+
+  for (size_t i = 0; i < targets.size(); ++i) {
+    if (i + 1 == targets.size()) {
+      targets[i]->sendPacket(std::move(packet));
+    } else {
+      targets[i]->sendPacket(packet.clone());
+    }
+  }
+}
+
+void
+ClientManager::sendPacketTo(uint64_t session_id, ByteBuffer packet) {
+  std::shared_ptr<ClientSession> target;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& session : sessions_) {
+      if (session && session->sessionId() == session_id) {
+        target = session;
+        break;
+      }
+    }
+  }
+
+  if (target) {
+    target->sendPacket(std::move(packet));
+  }
+}
+
+std::shared_ptr<ClientSession>
+ClientManager::findSession(uint64_t session_id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (const auto& session : sessions_) {
+    if (session && session->sessionId() == session_id) {
+      return session;
+    }
+  }
+  return nullptr;
 }
 
 void

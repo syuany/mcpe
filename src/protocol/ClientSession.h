@@ -8,6 +8,7 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/use_awaitable.hpp>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -16,6 +17,10 @@
 #include "common/ByteBuffer.h"
 #include "network/SessionCallbacks.h"
 #include "protocol/ConnectionState.h"
+
+namespace mcpe::world {
+class EventQueue;
+}
 
 namespace mcpe::network {
 class TcpSession;
@@ -70,6 +75,11 @@ class ClientSession : public network::SessionCallbacks,
   void startPlay();
 
   // --- 玩家身份与实体元数据 ---
+  uint64_t
+  sessionId() const noexcept {
+    return session_id_;
+  }
+
   const std::string&
   username() const noexcept {
     return username_;
@@ -88,6 +98,15 @@ class ClientSession : public network::SessionCallbacks,
     uuid_ = std::move(uuid);
   }
 
+  const std::array<uint8_t, 16>&
+  uuidBytes() const noexcept {
+    return uuid_bytes_;
+  }
+  void
+  setUuidBytes(const std::array<uint8_t, 16>& bytes) noexcept {
+    uuid_bytes_ = bytes;
+  }
+
   int32_t
   entityId() const noexcept {
     return entity_id_;
@@ -96,6 +115,13 @@ class ClientSession : public network::SessionCallbacks,
   setEntityId(int32_t id) noexcept {
     entity_id_ = id;
   }
+
+  // --- 世界任务队列关联 ---
+  void
+  setEventQueue(std::weak_ptr<world::EventQueue> queue) noexcept {
+    event_queue_ = std::move(queue);
+  }
+  std::shared_ptr<world::EventQueue> eventQueue() const noexcept;
 
   // --- 世界传送位置确认机制 ---
   int32_t
@@ -145,13 +171,16 @@ class ClientSession : public network::SessionCallbacks,
  private:
   std::weak_ptr<network::TcpSession> tcp_session_;
   std::weak_ptr<ClientManager> client_manager_;
+  std::weak_ptr<world::EventQueue> event_queue_;
   std::string remote_address_;
   asio::steady_timer keep_alive_timer_;
   std::shared_ptr<ProtocolHandler> protocol_handler_;
 
   ConnectionState state_{ConnectionState::HANDSHAKING};
+  uint64_t session_id_{0};
   std::string username_;
   std::string uuid_;
+  std::array<uint8_t, 16> uuid_bytes_{};
   int32_t entity_id_{0};
 
   int32_t teleport_counter_{0};

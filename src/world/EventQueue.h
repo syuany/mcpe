@@ -1,9 +1,12 @@
 #ifndef MCPE_WORLD_EVENT_QUEUE_H
 #define MCPE_WORLD_EVENT_QUEUE_H
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -20,6 +23,13 @@ struct PlayerMoveEvent {
   bool on_ground{true};
   bool has_position{false};
   bool has_rotation{false};
+};
+
+/**
+ * @brief 玩家聊天发言事件 (对应 0x02 Chat Message)
+ */
+struct PlayerChatEvent {
+  std::string message{};
 };
 
 /**
@@ -41,10 +51,25 @@ struct BlockPlacementEvent {
 };
 
 /**
- * @brief 玩家进服通知事件
+ * @brief 玩家进服通知事件 (紧凑结构，零额外堆分配，保障 WorldEvent <= 64 字节)
  */
 struct PlayerJoinEvent {
-  std::string player_name{};
+  std::array<char, 16> player_name{};
+  uint8_t name_len{0};
+  std::array<uint8_t, 16> uuid{};
+
+  [[nodiscard]] std::string_view
+  nameView() const noexcept {
+    return std::string_view(player_name.data(), name_len);
+  }
+
+  void
+  setName(std::string_view name) noexcept {
+    name_len = static_cast<uint8_t>(std::min(name.size(), size_t{16}));
+    for (size_t i = 0; i < name_len; ++i) {
+      player_name[i] = name[i];
+    }
+  }
 };
 
 /**
@@ -57,6 +82,7 @@ struct PlayerLeaveEvent {};
  */
 using EventPayload = std::variant<
     PlayerMoveEvent,
+    PlayerChatEvent,
     PlayerDiggingEvent,
     BlockPlacementEvent,
     PlayerJoinEvent,

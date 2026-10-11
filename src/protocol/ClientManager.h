@@ -48,6 +48,15 @@ class ClientManager {
   /// 向除指定会话外的所有在线玩家广播数据包（如玩家移动、聊天）
   void broadcastExcept(ByteBuffer packet, const std::shared_ptr<ClientSession>& except);
 
+  /// 向除指定会话ID外的所有在线玩家广播数据包
+  void broadcastExceptSessionId(ByteBuffer packet, uint64_t except_session_id);
+
+  /// 向指定会话ID发送数据包
+  void sendPacketTo(uint64_t session_id, ByteBuffer packet);
+
+  /// 根据会话ID查找会话
+  std::shared_ptr<ClientSession> findSession(uint64_t session_id) const;
+
   /// 优雅踢出全服玩家
   void kickAll();
 
