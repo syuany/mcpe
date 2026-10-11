@@ -112,9 +112,14 @@ assert dimension == 0, f"Dimension 预期为 0(主世界), 实际为 {dimension}
 # ==========================================
 # 5. 接收 Player Position And Look (0x2F)
 # ==========================================
-p_len = read_varint(sock)
-p_id = read_varint(sock)
-assert p_id == 0x2F, f"Expected 0x2F (PPAL), got 0x{p_id:02X}"
+while True:
+    p_len = read_varint(sock)
+    p_id = read_varint(sock)
+    if p_id == 0x2F:
+        break
+    else:
+        id_len = len(encode_varint(p_id))
+        recv_exact(sock, p_len - id_len)
 x, y, z = struct.unpack('>ddd', recv_exact(sock, 24))
 yaw, pitch = struct.unpack('>ff', recv_exact(sock, 8))
 flags = struct.unpack('>B', recv_exact(sock, 1))[0]
