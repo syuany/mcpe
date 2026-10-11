@@ -65,7 +65,7 @@ mcpe/
 ├── bin/                        # 产物输出目录
 ├── lib/                        # 内嵌第三方依赖库（asio, spdlog, googletest 等）
 ├── doc/                        # 技术文档库
-│   ├── tutorial/               # 教程实战系列 (00_tutorial, sprint3, sprint4, sprint5)
+│   ├── tutorial/               # 教程实战系列 (00_tutorial, sprint0, sprint1, sprint2, sprint3, sprint4, sprint5)
 │   ├── protocol/               # 协议规范速查
 │   └── guides/                 # 架构专题指南
 ├── src/                        # 源代码 (严格遵循四层架构红线)
@@ -117,16 +117,19 @@ mcpe/
 
 ### 阶段 0：基础组件与单测驱动（已完成）
 * **核心成果**：完成 `mcpe::ByteBuffer`（大端读写、Netty 风格切片、写时复制 COW）与 `mcpe::VarInt`（LEB128、`std::expected` 无异常设计），GoogleTest 单元测试 100% 覆盖。
+* **实战独立教程**：详见 [`doc/tutorial/sprint0_infra.md`](sprint0_infra.md)。
 
 ---
 
 ### 阶段 1：网络基座、分包器与服务器列表展示（已完成）
 * **核心成果**：基于 Standalone Asio 搭建异步 TCP 服务器；设计 `PacketFraming` VarInt 定界流式拆包器；完成 `HandshakeHandler` 与 `StatusHandler`，官方客户端多人游戏列表成功刷新延迟绿条与 MOTD。
+* **实战独立教程**：详见 [`doc/tutorial/sprint1_network_ping.md`](sprint1_network_ping.md)。
 
 ---
 
 ### 阶段 2：握手鉴权与 5x5 区块流式下发（已完成）
 * **核心成果**：打通 `Login Start (0x00)` 与离线 UUID 鉴权；下发 `Join Game (0x23)` 与 `0x2F Player Position And Look`；实现 4096 方块的紧凑 `ChunkSection`（13 位调色板位打包压缩）；在进服时下发以玩家为中心的 5x5 区块矩阵，玩家稳固站在实体地面上。
+* **实战独立教程**：详见 [`doc/tutorial/sprint2_login_spawn.md`](sprint2_login_spawn.md)。
 
 ---
 
