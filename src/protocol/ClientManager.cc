@@ -80,6 +80,7 @@ ClientManager::broadcastExcept(ByteBuffer packet, const std::shared_ptr<ClientSe
       targets[i]->sendPacket(std::move(packet));
     } else {
       targets[i]->sendPacket(packet.clone());
+    }
   }
 }
 
