@@ -223,6 +223,8 @@ PlayHandler::handlePlayerMovement(
       return;
   }
 
+  payload.retrieveAll();
+
   if (auto q = session->eventQueue()) {
     world::WorldEvent ev;
     ev.session_id = session->sessionId();

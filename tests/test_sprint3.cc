@@ -55,8 +55,9 @@ TEST(Sprint3Test, EntityManagerSpawnAndVisibilitySequence) {
   std::vector<std::pair<uint64_t, int32_t>> sent_packets;
 
   auto sender = [&](uint64_t sid, ByteBuffer pkt) {
+    auto len_res = pkt.readVarInt();
     auto id_res = pkt.readVarInt();
-    if (id_res) {
+    if (len_res && id_res) {
       sent_packets.emplace_back(sid, *id_res);
     }
   };
@@ -90,8 +91,9 @@ TEST(Sprint3Test, DeltaMovementVsTeleportThreshold) {
   std::vector<int32_t> broadcast_packet_ids;
 
   auto broadcast_except = [&](uint64_t /*except_sid*/, ByteBuffer pkt) {
+    auto len_res = pkt.readVarInt();
     auto id_res = pkt.readVarInt();
-    if (id_res) {
+    if (len_res && id_res) {
       broadcast_packet_ids.push_back(*id_res);
     }
   };
@@ -144,15 +146,23 @@ TEST(Sprint3Test, ChatJsonEscapingAndCommandRouting) {
 
   ChatHandler chat(
       [&](uint64_t /*sid*/, ByteBuffer pkt) {
+        auto len = pkt.readVarInt();
+        ASSERT_TRUE(len.has_value());
         auto id = pkt.readVarInt();
+        ASSERT_TRUE(id.has_value());
         EXPECT_EQ(*id, ClientboundPacket::ChatMessage);
         auto json = pkt.readString();
+        ASSERT_TRUE(json.has_value());
         sys_messages.push_back(*json);
       },
       [&](ByteBuffer pkt) {
+        auto len = pkt.readVarInt();
+        ASSERT_TRUE(len.has_value());
         auto id = pkt.readVarInt();
+        ASSERT_TRUE(id.has_value());
         EXPECT_EQ(*id, ClientboundPacket::ChatMessage);
         auto json = pkt.readString();
+        ASSERT_TRUE(json.has_value());
         public_messages.push_back(*json);
       }
   );
