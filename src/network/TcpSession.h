@@ -29,8 +29,6 @@ namespace mcpe::network {
  */
 class TcpSession : public std::enable_shared_from_this<TcpSession> {
  public:
-  using PacketHandler = std::function<void(const std::shared_ptr<TcpSession>&, ByteBuffer)>;
-
   explicit TcpSession(asio::ip::tcp::socket socket);
   ~TcpSession();
 
@@ -64,11 +62,6 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
     return callbacks_;
   }
 
-  void
-  setPacketHandler(PacketHandler handler) noexcept {
-    packet_handler_ = std::move(handler);
-  }
-
   /// 线程安全的异步发包（内部经由队列串行化发送）
   void sendPacket(ByteBuffer buffer);
 
@@ -86,7 +79,6 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
   bool is_stopped_{false};
 
   std::shared_ptr<SessionCallbacks> callbacks_;
-  PacketHandler packet_handler_;
 };
 
 }  // namespace mcpe::network

@@ -295,12 +295,13 @@ sequenceDiagram
 ```
 src/
 ├── common/
-│   └── EventQueue.h           # [核心] MPSC 双缓冲无锁/低锁任务队列
-├── game/
+│   ├── SpatialTypes.h         # [基石] Vector3d, Rotation, BlockPos 空间原语
+│   └── EventQueue.h           # [核心] MPSC 双缓冲无锁/低锁跨线程任务队列
+├── world/
 │   ├── WorldTicker.h/.cc      # [核心] 20 TPS 物理主循环与单调时钟漂移补偿
-│   ├── EntityManager.h/.cc    # [核心] 玩家实体生命周期、坐标管理与位移广播
-│   └── ChatHandler.h/.cc      # [核心] 聊天 JSON 序列化、富文本多播与指令路由
+│   └── EntityManager.h/.cc    # [核心] 玩家实体生命周期、坐标管理与位移广播
 ├── protocol/
+│   ├── ChatHandler.h/.cc      # [核心] 聊天 JSON 序列化、富文本多播与指令路由
 │   ├── PlayHandler.cc         # [修改] 增加 0x0E/0x0F/0x10 移动包与 0x02 聊天包解码
 │   └── PacketTypes.h          # [修改] 补齐 0x05, 0x26, 0x27, 0x28, 0x2E, 0x32, 0x4C 数据包 ID
 └── server.cc                  # [修改] 启动并挂接 WorldTicker 线程
@@ -321,6 +322,7 @@ src/
 #### 2. 头文件实现蓝图 (`src/common/EventQueue.h`)：
 ```cpp
 #pragma once
+#include "common/SpatialTypes.h"
 #include <vector>
 #include <mutex>
 #include <variant>
@@ -328,13 +330,13 @@ src/
 #include <cstdint>
 #include <string>
 
-namespace mcpe::game {
+namespace mcpe::world {
 
-// 定义具体事件载荷
+// 定义具体事件载荷（使用 common 空间强类型 Vector3d 与 Rotation，彻底消除 Primitive Obsession）
 struct PlayerMoveEvent {
     int32_t session_id;
-    double x, y, z;
-    float yaw, pitch;
+    Vector3d position;
+    Rotation rotation;
     bool on_ground;
     bool has_position;
     bool has_look;
@@ -378,21 +380,21 @@ private:
     std::vector<GameEvent> write_queue_;
 };
 
-} // namespace mcpe::game
+} // namespace mcpe::world
 ```
 
 ---
 
 ### TASK-3.2: 精准 20 TPS 物理节拍器与漂移补偿 (`WorldTicker.h/.cc`)
 
-#### 1. 核心数学与实现代码 (`src/game/WorldTicker.cc`)：
+#### 1. 核心数学与实现代码 (`src/world/WorldTicker.cc`)：
 ```cpp
-#include "game/WorldTicker.h"
+#include "world/WorldTicker.h"
 #include <thread>
 #include <chrono>
 #include <spdlog/spdlog.h>
 
-namespace mcpe::game {
+namespace mcpe::world {
 
 WorldTicker::WorldTicker(EventQueue& event_queue)
     : event_queue_(event_queue), running_(false) {}
@@ -464,7 +466,7 @@ void WorldTicker::tick() {
     getEntityManager().updateAndBroadcast();
 }
 
-} // namespace mcpe::game
+} // namespace mcpe::world
 ```
 
 ---
@@ -473,38 +475,67 @@ void WorldTicker::tick() {
 
 客户端跑跳时以 20Hz 频率发送上行移动包。服务端在 `PlayHandler` 中进行精准定界提取。
 
-#### 1. 解码实现要点：
+#### 1. 解码实现要点（结合 Vector3d 与 Rotation 强类型）：
 * **`0x0E Player Position`**：
   ```cpp
-  double x = packet.readDouble();
-  double feet_y = packet.readDouble();
-  double z = packet.readDouble();
+  Vector3d pos{packet.readDouble(), packet.readDouble(), packet.readDouble()};
   bool on_ground = packet.readBool();
+  // 仅包含位移：has_position = true, has_look = false
+  PlayerMoveEvent ev{
+      .session_id = session_id_,
+      .position = pos,
+      .rotation = {},
+      .on_ground = on_ground,
+      .has_position = true,
+      .has_look = false
+  };
+  event_queue_.push(std::move(ev));
   ```
 * **`0x0F Player Look`**：
   ```cpp
-  float yaw = packet.readFloat();
-  float pitch = packet.readFloat();
+  Rotation rot{packet.readFloat(), packet.readFloat()};
   bool on_ground = packet.readBool();
+  // 仅包含朝向：has_position = false, has_look = true
+  PlayerMoveEvent ev{
+      .session_id = session_id_,
+      .position = {},
+      .rotation = rot,
+      .on_ground = on_ground,
+      .has_position = false,
+      .has_look = true
+  };
+  event_queue_.push(std::move(ev));
   ```
 * **`0x10 Player Position And Look`**：
-  依次读取 `x, feet_y, z, yaw, pitch, on_ground`。
-* **投递事件**：
-  将数据组装为 `PlayerMoveEvent`，直接调用 `event_queue_.push(std::move(event))`。
+  ```cpp
+  Vector3d pos{packet.readDouble(), packet.readDouble(), packet.readDouble()};
+  Rotation rot{packet.readFloat(), packet.readFloat()};
+  bool on_ground = packet.readBool();
+  PlayerMoveEvent ev{
+      .session_id = session_id_,
+      .position = pos,
+      .rotation = rot,
+      .on_ground = on_ground,
+      .has_position = true,
+      .has_look = true
+  };
+  event_queue_.push(std::move(ev));
+  ```
 
 ---
 
 ### TASK-3.4: 玩家进出视野广播与实体生命周期 (`EntityManager.h/.cc`)
 
-#### 1. 实体管理器接口设计 (`src/game/EntityManager.h`)：
+#### 1. 实体管理器接口设计 (`src/world/EntityManager.h`)：
 ```cpp
 #pragma once
+#include "common/SpatialTypes.h"
 #include <unordered_map>
 #include <memory>
 #include <cstdint>
 #include <string>
 
-namespace mcpe::game {
+namespace mcpe::world {
 
 struct PlayerEntity {
     int32_t session_id;
@@ -512,16 +543,13 @@ struct PlayerEntity {
     std::string username;
     uint8_t uuid[16];
 
-    double x = 0.0, y = 64.0, z = 0.0;
-    float yaw = 0.0f, pitch = 0.0f;
+    Vector3d position{0.0, 64.0, 0.0};
+    Rotation rotation{0.0f, 0.0f};
     bool on_ground = true;
 
     // 上一次同步给网络的历史坐标（用于差分计算）
-    double last_synced_x = 0.0;
-    double last_synced_y = 64.0;
-    double last_synced_z = 0.0;
-    float last_synced_yaw = 0.0f;
-    float last_synced_pitch = 0.0f;
+    Vector3d last_synced_pos{0.0, 64.0, 0.0};
+    Rotation last_synced_rot{0.0f, 0.0f};
     bool dirty = false;
 };
 
@@ -529,7 +557,7 @@ class EntityManager {
 public:
     void addPlayer(int32_t session_id, const std::string& name, const uint8_t uuid[16]);
     void removePlayer(int32_t session_id);
-    void updatePlayerPosition(int32_t session_id, double x, double y, double z, float yaw, float pitch, bool on_ground);
+    void updatePlayerPosition(int32_t session_id, const Vector3d& pos, const Rotation& rot, bool on_ground);
 
     // 每 Tick 触发一次：全量扫描脏标记并广播
     void updateAndBroadcast();
@@ -538,7 +566,7 @@ private:
     std::unordered_map<int32_t, PlayerEntity> players_;
 };
 
-} // namespace mcpe::game
+} // namespace mcpe::world
 ```
 
 #### 2. 新玩家连入时互相广播（进服互见）：
@@ -575,12 +603,11 @@ void EntityManager::updateAndBroadcast() {
     for (auto& [sid, p] : players_) {
         if (!p.dirty) continue;
 
-        double dx = p.x - p.last_synced_x;
-        double dy = p.y - p.last_synced_y;
-        double dz = p.z - p.last_synced_z;
+        Vector3d delta = p.position - p.last_synced_pos;
 
-        bool move_changed = (dx != 0.0 || dy != 0.0 || dz != 0.0);
-        bool look_changed = (p.yaw != p.last_synced_yaw || p.pitch != p.last_synced_pitch);
+        bool move_changed = (delta.x != 0.0 || delta.y != 0.0 || delta.z != 0.0);
+        bool look_changed = (p.rotation.yaw != p.last_synced_rot.yaw || 
+                             p.rotation.pitch != p.last_synced_rot.pitch);
 
         if (!move_changed && !look_changed) {
             p.dirty = false;
@@ -588,7 +615,7 @@ void EntityManager::updateAndBroadcast() {
         }
 
         // 检查 8.0 格溢出边界
-        bool overflow = (std::abs(dx) >= 8.0 || std::abs(dy) >= 8.0 || std::abs(dz) >= 8.0);
+        bool overflow = (std::abs(delta.x) >= 8.0 || std::abs(delta.y) >= 8.0 || std::abs(delta.z) >= 8.0);
 
         std::shared_ptr<ByteBuffer> broadcast_pkt;
         if (overflow) {
@@ -596,10 +623,10 @@ void EntityManager::updateAndBroadcast() {
             broadcast_pkt = buildEntityTeleportPacket(p);
         } else if (move_changed && look_changed) {
             // 下发 0x27 Look And Relative Move
-            broadcast_pkt = buildLookAndRelMovePacket(p, dx, dy, dz);
+            broadcast_pkt = buildLookAndRelMovePacket(p, delta.x, delta.y, delta.z);
         } else if (move_changed) {
             // 下发 0x26 Relative Move
-            broadcast_pkt = buildRelMovePacket(p, dx, dy, dz);
+            broadcast_pkt = buildRelMovePacket(p, delta.x, delta.y, delta.z);
         } else {
             // 下发 0x28 Entity Look
             broadcast_pkt = buildEntityLookPacket(p);
@@ -613,11 +640,8 @@ void EntityManager::updateAndBroadcast() {
         }
 
         // 更新同步基准
-        p.last_synced_x = p.x;
-        p.last_synced_y = p.y;
-        p.last_synced_z = p.z;
-        p.last_synced_yaw = p.yaw;
-        p.last_synced_pitch = p.pitch;
+        p.last_synced_pos = p.position;
+        p.last_synced_rot = p.rotation;
         p.dirty = false;
     }
 }
@@ -627,8 +651,13 @@ void EntityManager::updateAndBroadcast() {
 
 ### TASK-3.5: 聊天多播与快捷指令路由系统 (`ChatHandler.h/.cc`)
 
-#### 1. 聊天与指令处理流程：
+#### 1. 聊天与指令处理流程 (`src/protocol/ChatHandler.cc`)：
 ```cpp
+#include "protocol/ChatHandler.h"
+#include <fmt/format.h>
+
+namespace mcpe::protocol {
+
 void ChatHandler::handleMessage(int32_t sender_sid, const std::string& raw_msg) {
     if (raw_msg.empty()) return;
 
@@ -641,7 +670,7 @@ void ChatHandler::handleMessage(int32_t sender_sid, const std::string& raw_msg) 
     // 2. 普通聊天富文本 JSON 格式化
     auto sender_name = getEntityManager().getPlayerName(sender_sid);
     std::string json_chat = fmt::format(
-        "{{"text":"<{}> {}","color":"white"}}", 
+        "{{\"text\":\"<{}> {}\",\"color\":\"white\"}}", 
         sender_name, escapeJson(raw_msg)
     );
 
@@ -660,6 +689,8 @@ void ChatHandler::handleCommand(int32_t sender_sid, const std::string& cmd_line)
         sendSystemMessage(sender_sid, "§c[错误] 未知指令，请输入 /maps 查看支持的指令。");
     }
 }
+
+} // namespace mcpe::protocol
 ```
 
 ---
@@ -683,6 +714,10 @@ void ChatHandler::handleCommand(int32_t sender_sid, const std::string& cmd_line)
   * **作答**：1.12.2 协议为了极致节省带宽，将相对位移量压缩为 16 位 Short 定点数（单位 $\frac{1}{4096}$ 方块）。Short 的最大值 32767 除以 4096 约为 7.999 格。当单次位移超限时，强行填入会导致有符号整数溢出翻转，造成客户端严重瞬移错位，因此必须动态降级下发绝对坐标包 `Entity Teleport (0x4C)`。
 * **Q3：高并发多播广播如何优化内存开销？**
   * **作答**：当大厅有 500 人时，直接为每人序列化一份数据包会引发 500 次堆分配。我们利用支持 COW（写时复制）的 `ByteBuffer` 与 `std::shared_ptr`，在主线程仅序列化一次，向 500 个会话发送管道推入共享指针，底层通过浅拷贝共享内存，吞吐量提升显著。
+* **Q4：Minecraft 服务端架构中，为什么没有通用的 `game/` 层，而是以 `world/` 作为顶层领域？（Cuberite 工业级沙盒架构考点）**
+  * **作答**：在工业级体素沙盒引擎（如 Cuberite 与 Notchian 原版）中，`World` 本身就是领域驱动设计（DDD）的**核心聚合根（Aggregate Root）**。Minecraft 的所有核心机制（20 TPS 物理节拍、Chunk 地形管理与流式加载、实体生命周期、红石方块状态机）都是严格围绕“单世界物理空间”展开运作的。设立平行的 `game/` 层不仅职责模糊（违背单一职责 SRP），还会导致双头管理与循环依赖。将物理主循环 `WorldTicker` 与实体管理器 `EntityManager` 归位至 `world/` 层，使架构四层边界清澈纯粹。
+* **Q5：为什么坚决拒绝原始类型偏执（Primitive Obsession），将坐标封装为 `SpatialTypes.h` 并提升至 `common/` 层？**
+  * **作答**：在移动与空间计算中，若裸写 `double x, y, z; float yaw, pitch`，会带来三大严重弊端：① 函数参数列表膨胀且极易传错顺序（如 yaw/pitch 颠倒）；② 无法附带向量加减乘、距离计算、定点数转码等空间数学语义；③ 网络层解包与世界层存储若各自定义独立的 Vector，会导致无谓的中间转换冗余。将 `Vector3d`、`Rotation`、`BlockPos`、`ChunkPos` 作为基础空间原语固化在 `src/common/SpatialTypes.h`，能让底层基础库、协议层与世界领域层零摩擦复用，保障类型安全与心智统一。
 
 ---
 

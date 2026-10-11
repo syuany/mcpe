@@ -28,7 +28,9 @@ TcpSession::TcpSession(asio::ip::tcp::socket socket) : socket_(std::move(socket)
   spdlog::info("[Session] Connected from {}", remote_address_);
 }
 
-TcpSession::~TcpSession() { spdlog::info("[Session] Destroyed: {}", remote_address_); }
+TcpSession::~TcpSession() {
+  spdlog::info("[Session] Destroyed: {}", remote_address_);
+}
 
 void
 TcpSession::start() {
@@ -124,8 +126,6 @@ TcpSession::readerLoop() {
 
       if (callbacks_) {
         callbacks_->onPacket(shared_from_this(), std::move(packet));
-      } else if (packet_handler_) {
-        packet_handler_(shared_from_this(), std::move(packet));
       }
     }
     if (has_malformed_packet) break;

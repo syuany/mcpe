@@ -59,8 +59,6 @@ TcpServer::listenLoop() {
       session->setCallbacks(std::move(cb));
     } else if (callbacks_) {
       session->setCallbacks(callbacks_);
-    } else if (packet_handler_) {
-      session->setPacketHandler(packet_handler_);
     }
     session->start();
   }

@@ -24,7 +24,6 @@ namespace mcpe::network {
  */
 class TcpServer {
  public:
-  using PacketHandler = TcpSession::PacketHandler;
   using SessionFactory =
       std::function<std::shared_ptr<SessionCallbacks>(const std::shared_ptr<TcpSession>&)>;
 
@@ -40,8 +39,7 @@ class TcpServer {
 
   /**
    * @brief 设置连接会话工厂（对齐 Cuberite cServer::OnIncomingConnection 架构设计）
-   * @param factory 每当新 TCP 连接到来时被调用，用于创建并绑定专属的业务会话实例（如
-   * ClientSession）
+   * @param factory 每当新 TCP 连接到来时被调用，用于创建并绑定专属的业务会话实例（如 ClientSession）
    */
   void
   setSessionFactory(SessionFactory factory) noexcept {
@@ -68,15 +66,6 @@ class TcpServer {
   }
 
   /**
-   * @brief 设置全局数据包到达回调函数（向后兼容）
-   * @param handler 数据包处理回调
-   */
-  void
-  setPacketHandler(PacketHandler handler) noexcept {
-    packet_handler_ = std::move(handler);
-  }
-
-  /**
    * @brief 启动服务器监听
    * 将运行标志置为 true，并注册第一个异步 accept 操作
    */
@@ -95,13 +84,11 @@ class TcpServer {
    */
   asio::awaitable<void> listenLoop();
 
- private:
-  asio::io_context& io_context_;                 ///< 关联的 Asio IO 上下文
-  asio::ip::tcp::acceptor acceptor_;             ///< 底层 TCP 接受器
-  bool is_running_{false};                       ///< 服务器运行状态标志
-  SessionFactory session_factory_;               ///< 连接会话工厂
+  asio::io_context& io_context_;      ///< 关联的 Asio IO 上下文
+  asio::ip::tcp::acceptor acceptor_;  ///< 底层 TCP 接受器
+  bool is_running_{false};            ///< 服务器运行状态标志
+  SessionFactory session_factory_;    ///< 连接会话工厂
   std::shared_ptr<SessionCallbacks> callbacks_;  ///< 会话抽象事件监听器
-  PacketHandler packet_handler_;                 ///< 业务层数据包处理回调
 };
 
 }  // namespace mcpe::network

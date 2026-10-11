@@ -43,8 +43,6 @@ ClientSession::onPacket(
 ) {
   if (protocol_handler_) {
     protocol_handler_->handlePacket(shared_from_this(), std::move(packet));
-  } else {
-    PacketRouter::dispatch(shared_from_this(), std::move(packet));
   }
 }
 
