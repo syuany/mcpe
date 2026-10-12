@@ -161,15 +161,9 @@ sequenceDiagram
 * **推导公式**：
   1. 对字符串 `OfflinePlayer:<username>` 计算标准 128 位 MD5 散列值（共 16 字节，`data[0..15]`）；
   2. **Version 字段设置（强制为 3）**：
-     位于字节 6（高 4 位为版本号）：
-     ```cpp
-     data[6] = (data[6] & 0x0F) | 0x30; // 将高 4 位设置为 0011 (Version 3)
-     ```
+     位于字节 6（高 4 位为版本号）：通过掩码位运算将高 4 位设置为 `0011`（即 `(data[6] & 0x0F) | 0x30`），标识 RFC-4122 Version 3；
   3. **Variant 字段设置（强制为 RFC-4122 变体）**：
-     位于字节 8（最高两位必须为 `10`）：
-     ```cpp
-     data[8] = (data[8] & 0x3F) | 0x80; // 将最高两位设置为 10
-     ```
+     位于字节 8（最高两位必须为 `10`）：通过掩码位运算将最高两位设置为 `10`（即 `(data[8] & 0x3F) | 0x80`），标识 IETF 变体。
 * **标准测试向量**：
   用户名 `"Steve"` 生成的标准离线 UUID 为：
   `d5f963a4-8464-325b-8005-59b583f707f5`（必须与 Java 官方版计算结果完全吻合）。
@@ -206,14 +200,9 @@ sequenceDiagram
   - 起始 Long 数组下标：$start\_long = bit\_start / 64$；
   - 在当前 Long 内的位偏移：$offset = bit\_start \% 64$；
   - 结束 Long 数组下标：$end\_long = (bit\_start + 13 - 1) / 64$；
-  - **核心打包位运算**：
-    ```cpp
-    out_longs[start_long] |= (val << offset);
-    if (start_long != end_long) {
-        // 跨界处理：溢出的高位放到下一个 Long 的低位中！
-        out_longs[end_long] |= (val >> (64 - offset));
-    }
-    ```
+  - **跨界打包核心位运算逻辑**：
+    - 当前 Long 注入：将 13 位方块值左移 `offset` 位后，通过按位或累加进 `out_longs[start_long]`；
+    - 跨界判定（$start\_long \ne end\_long$）：当 13 位跨越 64 位边界时，溢出的高位部分（共 $13 - (64 - offset)$ 位）经右移 $(64 - offset)$ 后，按位或累加进下一个单元 `out_longs[end_long]` 的低位，实现比特流的连续致密排布。
 
 ---
 
@@ -283,272 +272,111 @@ scripts/
 
 ---
 
-## 四、 任务逐步实现指南（怎么做：接口契约与代码落地）
+### 四、 任务逐步实现指南（怎么做：接口契约与设计落地）
 
-### TASK-2.1: LoginHandler 解析 Login Start (0x00) 与用户名校验
+### TASK-2.1: LoginHandler 解析 Login Start (0x00) 与用户名校验设计
 
-```cpp
-// src/protocol/LoginHandler.cc
-void LoginHandler::handlePacket(std::shared_ptr<network::TcpSession> session, int32_t packet_id, ByteBuffer& payload) {
-  if (packet_id != 0x00) { // 必须为 0x00 Login Start
-    session->close();
-    return;
-  }
-
-  auto name_res = payload.readString(16);
-  if (!name_res || !AuthUtils::isValidUsername(*name_res)) {
-    session->close(); // 用户名非法，直接阻断
-    return;
-  }
-
-  std::string username = *name_res;
-  std::string uuid_str = AuthUtils::generateOfflineUuid(username);
-
-  // 组装并发送 0x02 Login Success
-  sendLoginSuccess(session, uuid_str, username);
-
-  // 状态机平滑跃迁至 PLAY 阶段
-  session->setState(ConnectionState::PLAY);
-
-  // 交接给 PlayHandler 开始世界初始化流水线
-  play_handler_->onPlayerJoin(session, username, uuid_str);
-}
-```
+* **协议解包契约（0x00 Login Start）**：
+  - 严格校验数据包 ID 必须为 `0x00`；
+  - 读取载荷中的玩家用户名字符串（长度限制 1~16 字符）；
+* **安全过滤与字符集防御**：
+  - 用户名合法性规则：强制限定为 ASCII 字母、数字与下划线（`[a-zA-Z0-9_]`）；
+  - 阻断策略：若用户名为空、超长或包含非法控制字符/空格，立即视为恶意注入并切断底层 TCP 连接；
+* **登录流转编排流水线**：
+  - 调用 `AuthUtils` 生成确定性离线 UUID 字符串；
+  - 组装并向客户端下发 `0x02 Login Success` 数据包；
+  - 将当前会话状态机平滑跃迁至不可逆的 `PLAY` 状态；
+  - 将控制权交接给 `PlayHandler`，启动世界参数与区块初始化下发流水线。
 
 ---
 
-### TASK-2.2: AuthUtils 离线 UUID 生成算法（RFC-4122 v3 MD5）与标准向量测试
+### TASK-2.2: AuthUtils 离线 UUID 生成算法设计与测试向量
 
-```cpp
-// src/protocol/AuthUtils.cc
-namespace mcpe::protocol {
-
-bool AuthUtils::isValidUsername(std::string_view name) noexcept {
-  if (name.empty() || name.size() > 16) return false;
-  for (char c : name) {
-    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
-      return false;
-    }
-  }
-  return true;
-}
-
-std::string AuthUtils::generateOfflineUuid(std::string_view username) {
-  std::string pre = "OfflinePlayer:" + std::string(username);
-  
-  // 计算 16 字节 MD5 散列
-  uint8_t digest[16];
-  computeMD5(reinterpret_cast<const uint8_t*>(pre.data()), pre.size(), digest);
-
-  // RFC-4122 v3 规范修正
-  digest[6] = static_cast<uint8_t>((digest[6] & 0x0F) | 0x30); // Version 3
-  digest[8] = static_cast<uint8_t>((digest[8] & 0x3F) | 0x80); // IETF Variant
-
-  // 格式化为 8-4-4-4-12 字符串
-  return fmt::format(
-      "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-      digest[0], digest[1], digest[2], digest[3],
-      digest[4], digest[5],
-      digest[6], digest[7],
-      digest[8], digest[9],
-      digest[10], digest[11], digest[12], digest[13], digest[14], digest[15]
-  );
-}
-
-} // namespace mcpe::protocol
-```
+* **RFC-4122 Version 3 标准算法契约**：
+  - **命名空间与哈希计算**：构造前缀字符串 `"OfflinePlayer:" + username`，执行标准 MD5 摘要算法，生成 16 字节（128 位）二进制散列；
+  - **Version 3 规范修正**：提取第 6 字节（0-indexed），清空高 4 位并置为 `0x30`（即 `(byte & 0x0F) | 0x30`），标识该 UUID 为 Version 3 规范；
+  - **IETF Variant 规范修正**：提取第 8 字节，清空最高两位并置为 `0x80`（即 `(byte & 0x3F) | 0x80`），标识其遵循 IETF RFC-4122 变体标准；
+* **格式化输出与一致性验证**：
+  - 将 16 字节格式化为经典的 `8-4-4-4-12` 连字符十六进制字符串格式；
+  - **标准测试向量门禁**：对用户名 `"Steve"` 运算出的结果必须恒等于 `d5f963a4-8464-325b-8005-59b583f707f5`，确保多平台与官方 Java 版行为 100% 吻合。
 
 ---
 
 ### TASK-2.3: Login Success (0x02) 组装与状态平滑切入 PLAY
 
-```cpp
-// src/protocol/LoginHandler.cc
-void LoginHandler::sendLoginSuccess(std::shared_ptr<network::TcpSession> session, const std::string& uuid, const std::string& username) {
-  ByteBuffer pkt;
-  pkt.appendVarInt(0x02); // Packet ID = 0x02 Login Success
-  pkt.appendString(uuid);
-  pkt.appendString(username);
-
-  pkt.prependVarInt(pkt.readableBytes());
-  session->sendPacket(std::move(pkt));
-}
-```
+* **协议组装契约（0x02 Login Success）**：
+  - 包体载荷布局：`Packet ID = 0x02` + 格式化后的 36 字符 UUID 字符串 + 玩家用户名字符串；
+  - 帧头封装：利用 `prependVarInt` 就地封装外层包长度，推入写队列下发；
+* **状态机流转原子性**：
+  - `Login Success` 是协议层从鉴权过渡到游戏世界的临界分界点；
+  - 包发送后，会话的 `ConnectionState` 立即设置为 `PLAY`。协议路由器 `PacketRouter` 此后的所有数据包将自动委派至 `PlayHandler` 处理。
 
 ---
 
-### TASK-2.4: PlayHandler 组装 Join Game (0x23) 世界参数包
+### TASK-2.4: PlayHandler 组装 Join Game (0x23) 世界参数包设计
 
-```cpp
-// src/protocol/PlayHandler.cc
-void PlayHandler::sendJoinGame(std::shared_ptr<network::TcpSession> session, int32_t entity_id) {
-  ByteBuffer pkt;
-  pkt.appendVarInt(0x23);          // Packet ID = 0x23 Join Game
-  pkt.writeBe<int32_t>(entity_id); // 实体 EID
-  pkt.writeBe<uint8_t>(0);         // 游戏模式: 0 生存
-  pkt.writeBe<int32_t>(0);         // 维度: 0 主世界 (Overworld)
-  pkt.writeBe<uint8_t>(1);         // 难度: 1 简单
-  pkt.writeBe<uint8_t>(100);       // 最大玩家数: 100
-  pkt.appendString("default");     // 世界生成类型
-  pkt.writeBe<uint8_t>(0);         // 是否精简调试信息 (Reduced Debug Info: false)
-
-  pkt.prependVarInt(pkt.readableBytes());
-  session->sendPacket(std::move(pkt));
-}
-```
+* **客户端世界引擎初始化契约**：
+  - 官方客户端在收到 `0x23 Join Game` 之前，处于“世界未加载”的空白状态。收到该包后，客户端才会启动本地 `WorldClient` 渲染管线与光照计算；
+* **字段排布与严格类型约束**：
+  - `Entity ID`（4 字节大端整数）：客户端玩家自身在本地维度的唯一实体标识；
+  - `Game Mode`（1 字节）：设置游戏模式（0 生存模式，1 创造模式）；
+  - `Dimension`（4 字节大端整数）：世界维度（0 代表主世界 Overworld）；
+  - `Difficulty`（1 字节）：游戏难度（1 简单）；
+  - `Max Players`（1 字节）：服务器最大人数上限提示；
+  - `Level Type`（VarInt 长度 UTF-8 字符串）：世界生成类型（如 `"default"`）；
+  - `Reduced Debug Info`（1 字节布尔）：是否精简 F3 调试界面的空间坐标（填 `false`）；
+  - 采用 `prependVarInt` 封装包长并异步下发。
 
 ---
 
-### TASK-2.5: 紧凑 ChunkSection 调色板位打包与 5x5 地形下发
+### TASK-2.5: 紧凑 ChunkSection 调色板位打包与 5x5 地形流式下发架构
 
-```cpp
-// src/world/ChunkSection.cc
-void ChunkSection::packToBits13(std::span<uint64_t, kDataLongs> out_longs) const {
-  std::ranges::fill(out_longs, 0);
-
-  for (size_t idx = 0; idx < kBlockCount; ++idx) {
-    const uint64_t val = static_cast<uint64_t>(blocks_[idx]) & ((1ULL << kBitsPerBlock) - 1);
-    const size_t bit_start = idx * kBitsPerBlock;
-    const size_t start_long = bit_start / 64;
-    const size_t start_offset = bit_start % 64;
-    const size_t end_long = (bit_start + kBitsPerBlock - 1) / 64;
-
-    out_longs[start_long] |= (val << start_offset);
-    if (start_long != end_long) {
-      // 跨 64 位 Long 边界：溢出部分注入下一个 Long 的低位
-      out_longs[end_long] |= (val >> (64 - start_offset));
-    }
-  }
-}
-```
-
-```cpp
-// 5x5 区块流式下发：以玩家出生区块为中心辐射
-void PlayHandler::streamInitialChunks(std::shared_ptr<network::TcpSession> session, int center_cx, int center_cz) {
-  for (int dx = -2; dx <= 2; ++dx) {
-    for (int dz = -2; dz <= 2; ++dz) {
-      const auto& chunk = world_->getOrCreateChunk(center_cx + dx, center_cz + dz);
-      ByteBuffer chunk_pkt = ChunkSerializer::serialize(chunk, /*ground_up=*/true);
-      session->sendPacket(std::move(chunk_pkt));
-    }
-  }
-}
-```
+* **空间拓扑与 Direct 模式 13 位打包数学模型**：
+  - **Section 三维体素空间**：一个 `ChunkSection` 包含 $16 \times 16 \times 16 = 4096$ 个方块；
+  - **坐标一维平坦化**：$idx = (y \times 16 + z) \times 16 + x$；
+  - **13 位跨界致密打包设计**：
+    - 全局方块状态最大为 4096 种（占 13 位）。整个 Section 总比特数为 $4096 \times 13 = 53248$ 位；
+    - 使用 832 个 64 位无符号整型（`uint64_t`）紧凑容纳；
+    - 针对跨 Long 边界（$start\_long \ne end\_long$）的情况，通过精确的位掩码与高低位分流移位算法，将溢出比特无损衔接至下一个 Long 单元，空间体积相比传统未压缩存储缩减达 80%；
+* **5x5 区块辐射流式下发流水线**：
+  - **解除客户端 Loading 屏障**：官方客户端要求玩家脚下及周围的物理碰撞区块必须先行就绪；
+  - **中心辐射流式发送**：以玩家出生点所在区块坐标 $(cx, cz)$ 为圆心，在 $[-2, +2]$ 的 $5 \times 5$ 方阵范围内流式序列化生成 25 个 `0x20 Chunk Data` 数据包，连续投递至底层会话写队列。
 
 ---
 
-### TASK-2.6: Player Position And Look (0x2F) 与 Teleport Confirm (0x00) 确认闭环
+### TASK-2.6: Player Position And Look (0x2F) 与两阶段传送确认闭环设计
 
-```cpp
-// 下发初始坐标包
-void PlayHandler::sendPlayerPosition(std::shared_ptr<network::TcpSession> session, double x, double y, double z) {
-  ByteBuffer pkt;
-  pkt.appendVarInt(0x2F);      // 0x2F Player Position And Look (Clientbound)
-  pkt.writeBe<double>(x);
-  pkt.writeBe<double>(y);
-  pkt.writeBe<double>(z);
-  pkt.writeBe<float>(0.0f);    // Yaw
-  pkt.writeBe<float>(0.0f);    // Pitch
-  pkt.writeBe<uint8_t>(0x00);  // Flags: 全部绝对坐标
-  
-  int32_t teleport_id = session->allocateTeleportId();
-  pkt.appendVarInt(teleport_id);
-
-  pkt.prependVarInt(pkt.readableBytes());
-  session->sendPacket(std::move(pkt));
-}
-
-// 消费客户端 0x00 确认包
-void PlayHandler::handleTeleportConfirm(std::shared_ptr<network::TcpSession> session, ByteBuffer& payload) {
-  auto tid_res = payload.readVarInt();
-  if (tid_res && *tid_res == session->getLastTeleportId()) {
-    session->setTeleportConfirmed(true); // 确认闭环达成，解除移动过滤屏障！
-  }
-}
-```
+* **初始坐标下发契约（0x2F Clientbound）**：
+  - 载荷排布：绝对空间坐标 $(X, Y, Z)$（双精度浮点数，各占 8 字节大端）+ 朝向 $(Yaw, Pitch)$（单精度浮点数，各占 4 字节大端）+ 坐标相对性标志位（`0x00` 表示全部为绝对坐标）+ 单调递增的变长整数 `Teleport ID`；
+* **两阶段确认与幽灵位移屏蔽机制**：
+  - 服务端在发出 `0x2F` 后，记录分配的 `teleport_id`，并置位会话的传送未确认屏障标志；
+  - 官方客户端本地调整相机与实体坐标后，立即上行 `0x00 Teleport Confirm` 并附带相同的 `Teleport ID`；
+  - 服务端 `PlayHandler` 校验收到确认号与服务端记录匹配后，解除移动过滤屏障，正式放行玩家的后续自主移动，彻底根除高时延环境下的幽灵位移与反复拉回问题。
 
 ---
 
-### TASK-2.7: 基于 steady_timer 的 KeepAlive 双向保活定时器机制
+### TASK-2.7: 基于 steady_timer 的 KeepAlive 双向保活与超时熔断设计
 
-```cpp
-// 挂载在 TcpSession 内部的周期性心跳定时器
-void TcpSession::scheduleKeepAlive() {
-  keep_alive_timer_.expires_after(std::chrono::seconds(15));
-  keep_alive_timer_.async_wait([this, self = shared_from_this()](const asio::error_code& ec) {
-    if (ec || !is_running_) return;
-
-    if (!keep_alive_responded_) {
-      // 客户端超过 20 秒未回复心跳，超时熔断主动踢出！
-      close();
-      return;
-    }
-
-    keep_alive_responded_ = false;
-    last_keep_alive_id_ = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-
-    ByteBuffer pkt;
-    pkt.appendVarInt(0x1F);                  // 0x1F Keep Alive (Clientbound)
-    pkt.writeBe<int64_t>(last_keep_alive_id_); // 严格 8 字节大端整数
-    pkt.prependVarInt(pkt.readableBytes());
-    sendPacket(std::move(pkt));
-
-    scheduleKeepAlive(); // 驱动下一个周期
-  });
-}
-```
+* **应用层双向探活拓扑**：
+  - 会话内部挂载 `asio::steady_timer`，周期设定为 15 秒；
+* **心跳下发与 64 位大端时间戳契约**：
+  - 服务端每次定时器触发时构造 `0x1F Keep Alive` 数据包，载荷严格写入 8 字节大端当前单调时钟时间戳（`int64_t`）；
+* **超时判定与死连接熔断策略**：
+  - 定时器触发时首先检查上一周期的心跳应答标志位：若客户端在 20 秒超时窗口内未回复 `0x0B Keep Alive`，立即触发超时熔断，安全关闭该套接字并回收相关内存；
+  - 若客户端在规定时间内正确回复匹配的 64 位数值，服务端重置应答标志并驱动下一个 15 秒探活周期。
 
 ---
 
-### TASK-2.8: 编写自动化 Python 进服与保活脚本（scripts/test_login.py）
+### TASK-2.8: 编写自动化 Python 进服与保活脚本及回归验证标准
 
-```python
-#!/usr/bin/env python3
-# scripts/test_login.py: 免客户端极速进服与保活测试脚本
-import socket, struct, time
-
-def encode_varint(val):
-    res = bytearray()
-    while True:
-        b = val & 0x7F
-        val >>= 7
-        if val != 0: res.append(b | 0x80)
-        else: res.append(b); break
-    return bytes(res)
-
-def send_packet(s, pkt_id, payload):
-    body = encode_varint(pkt_id) + payload
-    s.sendall(encode_varint(len(body)) + body)
-
-def test_login():
-    s = socket.create_connection(('127.0.0.1', 25565), timeout=5)
-    
-    # 1. Handshake (NextState = 2 LOGIN)
-    host = b'localhost'
-    hs = encode_varint(340) + encode_varint(len(host)) + host + struct.pack('>H', 25565) + encode_varint(2)
-    send_packet(s, 0x00, hs)
-
-    # 2. Login Start ("TestPlayer")
-    name = b'TestPlayer'
-    send_packet(s, 0x00, encode_varint(len(name)) + name)
-
-    # 3. 接收 Login Success (0x02) 与 Join Game (0x23)
-    data = s.recv(4096)
-    assert len(data) > 0, "Login failed"
-    print("✅ 登录鉴权通过，成功收到 Login Success 与 Join Game！")
-
-    # 4. 回复 Teleport Confirm (0x00)
-    send_packet(s, 0x00, encode_varint(1))
-    print("✅ 已下发 Teleport Confirm (ID=1)，着陆闭环成功！")
-
-    # 5. 保活运行 3 秒验证心跳正常
-    time.sleep(3)
-    s.close()
-
-if __name__ == '__main__':
-    test_login()
-```
+* **端到端集成测试闭环设计**：
+  - 通过轻量 Python 自动化测试脚本，全面模拟官方客户端与服务端的协议握手过程：
+    1. 建立 TCP 套接字并发送握手帧（意图设置为进入 `LOGIN` 状态）；
+    2. 发送 `0x00 Login Start`，断言收到合法的 `0x02 Login Success` 与 `0x23 Join Game`；
+    3. 模拟客户端上行回复 `0x00 Teleport Confirm`，验证两阶段传送闭环；
+    4. 持续接收并断言服务端流式下发的区块矩阵载荷数据；
+    5. 脚本后台保持长连接运行，验证 15 秒周期的 `KeepAlive` 双向交互与心跳应答正常；
+  - 纳入全自动化测试套件，杜绝进服核心链路发生静默功能衰退。
 
 ---
 

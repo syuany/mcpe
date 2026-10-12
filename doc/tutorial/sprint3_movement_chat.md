@@ -69,18 +69,13 @@
 
 * **是什么**：
   Minecraft 的物理时间以 **TPS（Ticks Per Second，每秒刻数）** 计量。标准节拍为 **20 TPS**，即每个游戏物理刻的间隔必须严格维持在 **50 毫秒（50,000,000 纳秒）**。
-* **为什么不能直接 `sleep_for(50ms)`**：
-  ```cpp
-  // 错误示范：累积漂移崩塌
-  while (running) {
-      auto start = steady_clock::now();
-      tick(); // 假设业务消耗了 5ms
-      std::this_thread::sleep_for(50ms); // 实际一个循环耗时 55ms！
-  }
-  ```
-  如果每次循环都 sleep 固定的 50ms，那么加上 `tick()` 自身的计算耗时以及操作系统的线程调度延迟，实际每 Tick 都会比 50ms 多出几毫秒。运行一小时后，世界时间会比真实物理时间慢几分钟，导致移动插值卡顿、心跳超时踢出！
-* **怎么做（漂移消除算法）**：
-  采用**基于单调时钟（`std::chrono::steady_clock`）与时间累加器（Accumulator）的高精度追帧算法**，实时计算补偿，并在帧超时时保护不陷入死亡螺旋（见后文实现）。
+* **为什么不能直接固定休眠 50ms（固定 Sleep 的累积漂移崩塌）**：
+  若在物理主循环中写成 `tick()` 之后直接调用固定时长的 `sleep_for(50ms)`，系统将面临灾难性的**累积时间漂移（Cumulative Drift）**：
+  - 设单帧业务计算开销为 $\Delta t_{work} = 5\text{ms}$，操作系统线程调度切换延迟为 $\Delta t_{sched} = 1\text{ms}$；
+  - 实际物理循环的单 Tick 真实耗时将膨胀为 $50 + 5 + 1 = 56\text{ms}$；
+  - 运行仅 1 小时后，逻辑世界时间相比真实物理时间将严重滞后数分钟，直接破坏客户端移动插值平滑度并导致心跳超时误踢！
+* **怎么做（漂移消除与恒定步长算法）**：
+  采用**基于单调时钟（`std::chrono::steady_clock`）与时间累加器（Accumulator）的高精度追帧算法**，按恒定 50ms 步长消耗累加时间，结合防死亡螺旋熔断阈值（如最多追 5 帧 / 250ms），并动态休眠剩余余量。
 
 ---
 
@@ -105,17 +100,10 @@
 
 在开发 MC 服务端时，很多初学者实现完“玩家加入下发 `Spawn Player (0x05)`”后，进服却发现**屏幕上空无一人**，但服务端日志明明显示发包成功。
 
-* **是什么（底层原因）**：
-  Notchian 官方客户端（Java 原版 Client）在接收到 `Spawn Player (0x05)` 时，内部会执行如下断言检查：
-  ```java
-  // 官方客户端 net.minecraft.client.network.NetHandlerPlayClient 源码逻辑
-  NetworkPlayerInfo networkplayerinfo = this.playerInfoMap.get(packetIn.getUniqueId());
-  if (networkplayerinfo == null) {
-      // 客户端本地找不到该 UUID 的 Profile 信息（皮肤、游戏模式、用户名）！
-      // 客户端将直接丢弃该实体的渲染，不抛出异常，静默失败！
-      return;
-  }
-  ```
+* **是什么（官方客户端渲染断言契约）**：
+  Notchian 官方客户端（Java 原版 Client）在接收到 `Spawn Player (0x05)` 时，内部渲染管线存在严格的前置断言契约：
+  - 客户端通过数据包携带的玩家 UUID，在本地玩家信息哈希表（`playerInfoMap`）中检索对应的 `NetworkPlayerInfo`（包含皮肤材质、用户名文本与游戏模式）；
+  - **静默丢弃陷阱**：若表中检索不到该 UUID（即服务端尚未同步该玩家的 Profile），客户端本地渲染器将直接静默忽略该实体的 3D 模型创建与画面渲染，既不报错也不抛出异常，直接表现为“看不见的隐形人”！
 * **协议铁律**：
   **向客户端下发 `Spawn Player (0x05)` 之前，必须先下发携带该玩家 UUID 的 `Player List Item (0x2E, Action=0)`！**
   
@@ -309,389 +297,93 @@ src/
 
 ---
 
-## 四、 任务逐步实现指南（怎么做：接口契约与代码落地）
+## 四、 任务逐步实现指南（怎么做：接口契约与设计落地）
 
 ---
 
-### TASK-3.1: 跨线程 MPSC 任务队列与双缓冲交换 (`EventQueue.h`)
+### TASK-3.1: 跨线程 MPSC 任务队列与双缓冲低锁拓扑设计 (`EventQueue.h`)
 
-#### 1. 为什么选择双缓冲（Double-Buffering）而不是标准 `std::queue + mutex`？
-* 标准队列在高并发下，消费者每 Pop 一个元素都要加锁解锁一次；
-* 双缓冲维护两个 `std::vector`（`write_buffer_` 与 `read_buffer_`）。网络线程 push 时只锁定极短几纳秒；主线程 Tick 阶段通过 `swap()` 一次性交换指针，随后在完全无锁状态下遍历整个 `read_buffer_`，彻底杜绝主线程与 I/O 线程的争抢！
-
-#### 2. 头文件实现蓝图 (`src/common/EventQueue.h`)：
-```cpp
-#pragma once
-#include "common/SpatialTypes.h"
-#include <vector>
-#include <mutex>
-#include <variant>
-#include <memory>
-#include <cstdint>
-#include <string>
-
-namespace mcpe::world {
-
-// 定义具体事件载荷（使用 common 空间强类型 Vector3d 与 Rotation，彻底消除 Primitive Obsession）
-struct PlayerMoveEvent {
-    int32_t session_id;
-    Vector3d position;
-    Rotation rotation;
-    bool on_ground;
-    bool has_position;
-    bool has_look;
-};
-
-struct PlayerChatEvent {
-    int32_t session_id;
-    std::string message;
-};
-
-struct PlayerJoinEvent {
-    int32_t session_id;
-};
-
-struct PlayerLeaveEvent {
-    int32_t session_id;
-};
-
-// 使用 std::variant 零开销多态包装
-using GameEvent = std::variant<PlayerMoveEvent, PlayerChatEvent, PlayerJoinEvent, PlayerLeaveEvent>;
-
-class EventQueue {
-public:
-    EventQueue() = default;
-
-    // 网络线程并发调用：高吞吐推入
-    void push(GameEvent event) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        write_queue_.push_back(std::move(event));
-    }
-
-    // 逻辑主线程单一调用：微秒级交换并批量取出
-    void swap(std::vector<GameEvent>& out_events) {
-        out_events.clear();
-        std::lock_guard<std::mutex> lock(mutex_);
-        write_queue_.swap(out_events);
-    }
-
-private:
-    std::mutex mutex_;
-    std::vector<GameEvent> write_queue_;
-};
-
-} // namespace mcpe::world
-```
+* **MPSC 并发拓扑架构（Multi-Producer Single-Consumer）**：
+  - **生产者角色**：多个 Asio 网络 I/O 线程，在解析出客户端操作事件后并发推入；
+  - **消费者角色**：唯一的世界物理主线程 `WorldTicker`，在每个 50ms Tick 开始时批量收取；
+* **双缓冲设计（Double-Buffering）与微秒级交换契约**：
+  - **为什么拒绝标准 `std::queue + mutex`**：传统队列在高并发下，消费者每 Pop 一个元素都要加锁解锁一次，主线程与 I/O 线程争锁极度剧烈；
+  - **双缓冲内存拓扑**：内部维护写入队列 `write_queue_` 与读取队列 `read_queue_`；
+  - **推入契约（push）**：网络线程推入事件时仅需持有互斥锁数纳秒，将事件移入 `write_queue_` 尾部后即刻释放；
+  - **交换契约（swap）**：逻辑主线程在单 Tick 开始时调用 `swap()`，在互斥锁极短保护下瞬间交换双缓冲底层指针（耗时 $\approx 10\text{ns}$）。随后主线程在**完全无锁状态下安全遍历读取队列**，彻底消除高并发下的锁争用与 CPU Cache 颠簸；
+* **强类型事件多态载荷设计**：
+  - 运用 `std::variant` 零开销值语义多态包装各类事件：`PlayerMoveEvent`、`PlayerChatEvent`、`PlayerJoinEvent`、`PlayerLeaveEvent`；
+  - **消除原始类型偏执（Primitive Obsession）**：移动事件显式复用 `SpatialTypes.h` 中的 `Vector3d` 与 `Rotation` 空间强类型，并携带 `has_position`、`has_look`、`on_ground` 等状态标志位。
 
 ---
 
-### TASK-3.2: 精准 20 TPS 物理节拍器与漂移补偿 (`WorldTicker.h/.cc`)
+### TASK-3.2: 精准 20 TPS 物理节拍器与漂移补偿算法设计 (`WorldTicker.h/.cc`)
 
-#### 1. 核心数学与实现代码 (`src/world/WorldTicker.cc`)：
-```cpp
-#include "world/WorldTicker.h"
-#include <thread>
-#include <chrono>
-#include <spdlog/spdlog.h>
-
-namespace mcpe::world {
-
-WorldTicker::WorldTicker(EventQueue& event_queue)
-    : event_queue_(event_queue), running_(false) {}
-
-WorldTicker::~WorldTicker() {
-    stop();
-}
-
-void WorldTicker::start() {
-    running_.store(true, std::memory_order_release);
-    worker_thread_ = std::thread(&WorldTicker::run, this);
-    spdlog::info("[WorldTicker] 20 TPS 物理节拍器主线程已启动！");
-}
-
-void WorldTicker::stop() {
-    if (running_.exchange(false, std::memory_order_acq_rel)) {
-        if (worker_thread_.joinable()) {
-            worker_thread_.join();
-        }
-        spdlog::info("[WorldTicker] 物理主线程安全退出。");
-    }
-}
-
-void WorldTicker::run() {
-    using namespace std::chrono;
-    constexpr nanoseconds kTickInterval(50'000'000); // 严格 50ms (20 TPS)
-    constexpr nanoseconds kMaxAccumulator(250'000'000); // 防死亡螺旋阈值: 250ms (最多追 5 帧)
-
-    auto last_time = steady_clock::now();
-    nanoseconds accumulator(0);
-
-    while (running_.load(std::memory_order_relaxed)) {
-        auto current_time = steady_clock::now();
-        accumulator += (current_time - last_time);
-        last_time = current_time;
-
-        // 避免宿主机严重卡顿后无限追帧导致崩溃
-        if (accumulator > kMaxAccumulator) {
-            spdlog::warn("[WorldTicker] 检测到严重单帧卡顿，重置时间累加器以防死亡螺旋！");
-            accumulator = kMaxAccumulator;
-        }
-
-        // 恒定步长物理循环
-        while (accumulator >= kTickInterval) {
-            tick();
-            accumulator -= kTickInterval;
-        }
-
-        // 动态计算精准休眠余量
-        auto elapsed = steady_clock::now() - current_time;
-        if (elapsed < kTickInterval) {
-            std::this_thread::sleep_for(kTickInterval - elapsed);
-        }
-    }
-}
-
-void WorldTicker::tick() {
-    // 1. 批量收取并消费 MPSC 队列事件
-    std::vector<GameEvent> current_events;
-    event_queue_.swap(current_events);
-
-    for (const auto& ev : current_events) {
-        std::visit([this](auto&& arg) {
-            handleEvent(arg);
-        }, ev);
-    }
-
-    // 2. 调度实体管理器广播增量移动
-    getEntityManager().updateAndBroadcast();
-}
-
-} // namespace mcpe::world
-```
+* **恒定步长物理循环架构（Fixed Timestep）**：
+  - 物理世界刻严格锁定为 20 TPS，每个 Tick 间隔为恒定 50ms（`kTickInterval = 50'000'000ns`）；
+  - 游戏世界的逻辑推进与网络包收发完全解耦；
+* **单调时钟时间累加器（Accumulator）追帧算法**：
+  - 借助 `std::chrono::steady_clock` 记录当前时间与上一帧时间的时间差，累加进 `accumulator`；
+  - **恒定步长消耗循环**：只要 `accumulator >= kTickInterval`，持续调用 `tick()` 并扣除 50ms 间隔；
+* **防死亡螺旋保护屏障（Anti-Death-Spiral Safeguard）**：
+  - 当宿主机发生突发性系统冻结或重载时，`accumulator` 可能会暴涨至数秒；
+  - 若无限制追帧，主线程将连续执行数十次 `tick()`，导致当前帧再次超时，进而陷入永远无法追上时间的“死亡螺旋”；
+  - **熔断设计**：设定累加器上限阈值 `kMaxAccumulator = 250ms`（最多追 5 帧），超限时强制截断并记录日志告警，保护服务器平稳降级；
+* **高精度动态休眠余量**：在追帧完毕后，计算当前帧已消耗的时间，使用 `sleep_for` 休眠剩余余量，平衡 CPU 占用率与节拍精度。
 
 ---
 
-### TASK-3.3: 客户端移动包解析与坐标合法性校验 (`PlayHandler.cc`)
+### TASK-3.3: 客户端移动包解析与空间坐标契约 (`PlayHandler.cc`)
 
-客户端跑跳时以 20Hz 频率发送上行移动包。服务端在 `PlayHandler` 中进行精准定界提取。
-
-#### 1. 解码实现要点（结合 Vector3d 与 Rotation 强类型）：
-* **`0x0E Player Position`**：
-  ```cpp
-  Vector3d pos{packet.readDouble(), packet.readDouble(), packet.readDouble()};
-  bool on_ground = packet.readBool();
-  // 仅包含位移：has_position = true, has_look = false
-  PlayerMoveEvent ev{
-      .session_id = session_id_,
-      .position = pos,
-      .rotation = {},
-      .on_ground = on_ground,
-      .has_position = true,
-      .has_look = false
-  };
-  event_queue_.push(std::move(ev));
-  ```
-* **`0x0F Player Look`**：
-  ```cpp
-  Rotation rot{packet.readFloat(), packet.readFloat()};
-  bool on_ground = packet.readBool();
-  // 仅包含朝向：has_position = false, has_look = true
-  PlayerMoveEvent ev{
-      .session_id = session_id_,
-      .position = {},
-      .rotation = rot,
-      .on_ground = on_ground,
-      .has_position = false,
-      .has_look = true
-  };
-  event_queue_.push(std::move(ev));
-  ```
-* **`0x10 Player Position And Look`**：
-  ```cpp
-  Vector3d pos{packet.readDouble(), packet.readDouble(), packet.readDouble()};
-  Rotation rot{packet.readFloat(), packet.readFloat()};
-  bool on_ground = packet.readBool();
-  PlayerMoveEvent ev{
-      .session_id = session_id_,
-      .position = pos,
-      .rotation = rot,
-      .on_ground = on_ground,
-      .has_position = true,
-      .has_look = true
-  };
-  event_queue_.push(std::move(ev));
-  ```
+* **三态移动数据包反序列化契约**：
+  - `0x0E Player Position`：包含 3 个 Double 大端浮点数 $(X, Y, Z)$ 与 1 字节 `on_ground` 标志（`has_position=true, has_look=false`）；
+  - `0x0F Player Look`：包含 2 个 Float 大端浮点数 $(Yaw, Pitch)$ 与 1 字节 `on_ground` 标志（`has_position=false, has_look=true`）；
+  - `0x10 Player Position And Look`：包含完整 3 个 Double 坐标、2 个 Float 朝向与 `on_ground` 标志（`has_position=true, has_look=true`）；
+* **数据包过滤与跨线程解耦分流**：
+  - **两阶段传送未确认屏障**：若当前会话的 `Teleport ID` 尚未收到匹配的确认包，静默丢弃客户端上行的移动包，防范网络延迟引发的幽灵拉回；
+  - **基础合法性防御**：校验坐标数值是否为 NaN 或 Inf，若非法直接拒绝；
+  - 纯数据解包后构造 `PlayerMoveEvent`，通过 MPSC 队列投递至主线程，网络线程严禁直接修改实体状态。
 
 ---
 
-### TASK-3.4: 玩家进出视野广播与实体生命周期 (`EntityManager.h/.cc`)
+### TASK-3.4: 玩家进出视野广播与增量位移同步算法设计 (`EntityManager.h/.cc`)
 
-#### 1. 实体管理器接口设计 (`src/world/EntityManager.h`)：
-```cpp
-#pragma once
-#include "common/SpatialTypes.h"
-#include <unordered_map>
-#include <memory>
-#include <cstdint>
-#include <string>
-
-namespace mcpe::world {
-
-struct PlayerEntity {
-    int32_t session_id;
-    int32_t entity_id;       // EID
-    std::string username;
-    uint8_t uuid[16];
-
-    Vector3d position{0.0, 64.0, 0.0};
-    Rotation rotation{0.0f, 0.0f};
-    bool on_ground = true;
-
-    // 上一次同步给网络的历史坐标（用于差分计算）
-    Vector3d last_synced_pos{0.0, 64.0, 0.0};
-    Rotation last_synced_rot{0.0f, 0.0f};
-    bool dirty = false;
-};
-
-class EntityManager {
-public:
-    void addPlayer(int32_t session_id, const std::string& name, const uint8_t uuid[16]);
-    void removePlayer(int32_t session_id);
-    void updatePlayerPosition(int32_t session_id, const Vector3d& pos, const Rotation& rot, bool on_ground);
-
-    // 每 Tick 触发一次：全量扫描脏标记并广播
-    void updateAndBroadcast();
-
-private:
-    std::unordered_map<int32_t, PlayerEntity> players_;
-};
-
-} // namespace mcpe::world
-```
-
-#### 2. 新玩家连入时互相广播（进服互见）：
-```cpp
-void EntityManager::addPlayer(int32_t session_id, const std::string& name, const uint8_t uuid[16]) {
-    // 1. 创建新实体并分配自增 EID
-    PlayerEntity new_player;
-    new_player.session_id = session_id;
-    new_player.entity_id = allocateNextEID();
-    new_player.username = name;
-    std::memcpy(new_player.uuid, uuid, 16);
-
-    // 2. 关键时序：先向现有玩家下发新玩家的 0x2E，再发 0x05！
-    auto add_list_pkt = buildPlayerListItemPacket(new_player);
-    auto spawn_pkt = buildSpawnPlayerPacket(new_player);
-
-    for (const auto& [other_sid, other_player] : players_) {
-        // 向既有玩家展示新玩家
-        sendPacketTo(other_sid, add_list_pkt);
-        sendPacketTo(other_sid, spawn_pkt);
-
-        // 向新玩家展示既有玩家
-        sendPacketTo(session_id, buildPlayerListItemPacket(other_player));
-        sendPacketTo(session_id, buildSpawnPlayerPacket(other_player));
-    }
-
-    players_[session_id] = std::move(new_player);
-}
-```
-
-#### 3. 增量位移广播算法与溢出防御：
-```cpp
-void EntityManager::updateAndBroadcast() {
-    for (auto& [sid, p] : players_) {
-        if (!p.dirty) continue;
-
-        Vector3d delta = p.position - p.last_synced_pos;
-
-        bool move_changed = (delta.x != 0.0 || delta.y != 0.0 || delta.z != 0.0);
-        bool look_changed = (p.rotation.yaw != p.last_synced_rot.yaw || 
-                             p.rotation.pitch != p.last_synced_rot.pitch);
-
-        if (!move_changed && !look_changed) {
-            p.dirty = false;
-            continue;
-        }
-
-        // 检查 8.0 格溢出边界
-        bool overflow = (std::abs(delta.x) >= 8.0 || std::abs(delta.y) >= 8.0 || std::abs(delta.z) >= 8.0);
-
-        std::shared_ptr<ByteBuffer> broadcast_pkt;
-        if (overflow) {
-            // 降级下发绝对瞬移包 0x4C Entity Teleport
-            broadcast_pkt = buildEntityTeleportPacket(p);
-        } else if (move_changed && look_changed) {
-            // 下发 0x27 Look And Relative Move
-            broadcast_pkt = buildLookAndRelMovePacket(p, delta.x, delta.y, delta.z);
-        } else if (move_changed) {
-            // 下发 0x26 Relative Move
-            broadcast_pkt = buildRelMovePacket(p, delta.x, delta.y, delta.z);
-        } else {
-            // 下发 0x28 Entity Look
-            broadcast_pkt = buildEntityLookPacket(p);
-        }
-
-        // 多播给除自己以外的所有玩家 (COW 零拷贝浅共享)
-        for (const auto& [other_sid, _] : players_) {
-            if (other_sid != sid) {
-                sendSharedPacket(other_sid, broadcast_pkt);
-            }
-        }
-
-        // 更新同步基准
-        p.last_synced_pos = p.position;
-        p.last_synced_rot = p.rotation;
-        p.dirty = false;
-    }
-}
-```
+* **玩家实体生命周期模型（`PlayerEntity`）**：
+  - 空间状态：维护当前坐标 `position`、朝向 `rotation`、着地状态 `on_ground`；
+  - 差分同步基准：维护上一次同步给客户端的历史坐标 `last_synced_pos` 与朝向 `last_synced_rot`，以及增量脏标记 `dirty`；
+* **进服与离线双向可见性编排（AOI Life Cycle）**：
+  - **新玩家连入时序铁律**：
+    1. 为新玩家分配单调自增的正整数实体 ID（EID）；
+    2. 严格按时序先广播 `Player List Item (0x2E, Action=0)`，再广播 `Spawn Player (0x05)`；
+    3. 双向展示：向所有既有玩家展示新玩家模型，同时向新玩家展示所有既有玩家的模型；
+  - **玩家离开时序**：
+    1. 向同大厅其他玩家下发 `Destroy Entities (0x32)` 携带该玩家 EID，彻底销毁客户端模型，杜绝幽灵替身；
+    2. 下发 `Player List Item (0x2E, Action=4)` 从 Tab 列表中移除该玩家条目；
+* **8.0 格定点数增量位移广播算法与降级设计**：
+  - 差分位移计算：$\Delta X = X - X_{last}$，$\Delta Y = Y - Y_{last}$，$\Delta Z = Z - Z_{last}$；
+  - **8.0 格物理临界判定**：
+    - 1.12.2 协议增量包将位移编码为 16 位有符号整型（Short，单位 $\frac{1}{4096}$ 方块）；
+    - 若单轴位移绝对值 $\ge 8.0$ 格（或发生了超大瞬移），Short 定点数将发生符号翻转与溢出；
+    - **降级分支**：若溢出，降级下发包含绝对 Double 坐标的 `0x4C Entity Teleport`；
+    - **增量分支**：若未溢出且位移与朝向均有变化，下发 `0x27 Look And Relative Move`；若仅有位移变化，下发 `0x26 Relative Move`；若仅有朝向变化，下发 `0x28 Entity Look`；
+  - **COW 零拷贝多播**：主线程仅序列化一次数据包，通过 `std::shared_ptr<ByteBuffer>` 推入其余玩家的异步发送队列，底层共享同一只读内存，极致节省系统带宽与内存吞吐。
 
 ---
 
-### TASK-3.5: 聊天多播与快捷指令路由系统 (`ChatHandler.h/.cc`)
+### TASK-3.5: 聊天富文本多播与指令路由系统架构设计 (`ChatHandler.h/.cc`)
 
-#### 1. 聊天与指令处理流程 (`src/protocol/ChatHandler.cc`)：
-```cpp
-#include "protocol/ChatHandler.h"
-#include <fmt/format.h>
-
-namespace mcpe::protocol {
-
-void ChatHandler::handleMessage(int32_t sender_sid, const std::string& raw_msg) {
-    if (raw_msg.empty()) return;
-
-    // 1. 指令分流判断
-    if (raw_msg[0] == '/') {
-        handleCommand(sender_sid, raw_msg);
-        return;
-    }
-
-    // 2. 普通聊天富文本 JSON 格式化
-    auto sender_name = getEntityManager().getPlayerName(sender_sid);
-    std::string json_chat = fmt::format(
-        "{{\"text\":\"<{}> {}\",\"color\":\"white\"}}", 
-        sender_name, escapeJson(raw_msg)
-    );
-
-    auto chat_packet = buildChatPacket(json_chat, /*position=*/0);
-
-    // 3. 广播给同房间全体成员 (包含发送者自己)
-    multicastToRoom(chat_packet);
-}
-
-void ChatHandler::handleCommand(int32_t sender_sid, const std::string& cmd_line) {
-    if (cmd_line == "/lobby") {
-        sendSystemMessage(sender_sid, "§a[系统] 您已经在主大厅中！");
-    } else if (cmd_line == "/maps") {
-        sendSystemMessage(sender_sid, "§e[地图列表] 1. 新手跑酷 (输入 /join 1)  2. 螺旋跑酷 (输入 /join 2)");
-    } else {
-        sendSystemMessage(sender_sid, "§c[错误] 未知指令，请输入 /maps 查看支持的指令。");
-    }
-}
-
-} // namespace mcpe::protocol
-```
+* **客户端聊天上行消费（0x02 Chat Message Serverbound）**：
+  - 读取变长 UTF-8 文本载荷（长度上限 256 字符）；
+* **指令分流路由（Command Dispatching）**：
+  - 若消息以斜杠 `/` 开头，截断广播，路由至指令解析系统：
+    - `/lobby`：系统提示当前已在主大厅；
+    - `/maps`：系统富文本输出可用跑酷地图列表与加入引导；
+    - 未知指令：下发友好帮助提示；
+  - 指令应答采用系统提示级别下发，仅发送者自身可见，不打扰其他玩家；
+* **普通聊天富文本多播（0x0F Chat Message Clientbound）**：
+  - 富文本 JSON 转义防御：对消息内容进行 JSON 字符转义（防御引号、换行符破坏 JSON 语法）；
+  - 格式化为标准富文本 JSON 树（`{"text": "<玩家名> 消息内容", "color": "white"}`）；
+  - 设置 Position 为聊天栏（`position = 0`），使用共享 Buffer 多播给同房间全体在线成员（包含发送者自身）。
 
 ---
 

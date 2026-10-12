@@ -156,7 +156,7 @@ mcpe/
 4. **聊天多播与指令分流**：
    * 消费客户端上行 `Chat Message (0x02)`；
    * 若文本以 `/` 开头：交由指令解析器处理（不广播）；
-   * 若为普通文本：封装为富文本 JSON `{"text": "<张三> 你好！"}`，通过客户端 `0x02 Chat (Clientbound)` 多播。
+   * 若为普通文本：封装为富文本 JSON `{"text": "<张三> 你好！"}`，通过客户端 `0x0F Chat Message (Clientbound)` 多播。
 
 * **实战独立教程**：详见 [`doc/tutorial/sprint3_movement_chat.md`](sprint3_movement_chat.md)。
 

@@ -76,15 +76,9 @@
 ### 1.3 写时复制（Copy-On-Write, COW）与浅拷贝隔离哲学
 
 * **是什么**：
-  多个 `ByteBuffer` 切片可以同时指向同一个 `std::shared_ptr<Storage>`。
-  当某个切片或会话仅进行只读解析时，大家平安无事，享受零拷贝红利；
-  但若某个持有者试图调用 `append` 或 `ensureWritableBytes` 写入新数据，且检测到底层 `storage_.use_count() > 1` 时，必须触发**写时复制（COW）**：
-  ```cpp
-  if (storage_.use_count() > 1) {
-      // 存在其他共享者，克隆独立副本后再写入！
-      detachAndDuplicate();
-  }
-  ```
+  多个 `ByteBuffer` 切片可以同时指向同一个底层的共享存储块（`std::shared_ptr<Storage>`）。
+  当某个切片或会话仅进行只读解析时，各视图共享同一片只读物理内存，享受零拷贝红利；
+  但若某个持有者试图调用写操作追加新数据，且检测到底层存储存在多个引用（`storage_.use_count() > 1`）时，系统自动触发**写时复制（COW）**：在真实写入前深拷贝属于自身有效区间的数据并绑定至独立的独占存储中，完成与其余切片的解耦隔离。
 * **为什么**：
   在多播（Multicast）场景下（例如一个玩家移动，需要广播给房间内其余 99 个玩家）：服务端只需在逻辑线程构造一份 `ByteBuffer`，通过 `std::shared_ptr` 浅拷贝推入 99 个发送队列，底层物理内存只有一份。若未来某层需要独立修改（如加密），COW 机制自动隔离，既安全又极致省内存。
 
@@ -148,38 +142,21 @@
 
 * **原理**：
   x86_64 和 ARM64 绝大多数为小端机器（低地址存低位），而网络标准协议（RFC 1700）强制要求大端序（高地址存低位，低地址存高位）。
-* **现代 C++23 原语**：
-  C++23 引入了 `<bit>` 中的 `std::byteswap`：
-  ```cpp
-  template <typename T>
-  void writeBe(T value) {
-      if constexpr (std::endian::native == std::endian::little) {
-          value = std::byteswap(value); // 编译器内联发射 BSWAP / REV 汇编指令！
-      }
-      append(&value, sizeof(T));
-  }
-  ```
-  在汇编层面直接被编译为单条硬件指令（x86 的 `bswap eax`，ARM 的 `rev w0, w0`），开销为 0 周期开销（单时钟执行）。
+* **编译期字节序转换设计**：
+  现代 C++23 引入了 `<bit>` 中的标准库原语 `std::byteswap` 与 `std::endian`：
+  - **零运行时分支开销**：通过 `if constexpr (std::endian::native == std::endian::little)` 在编译阶段完成机器字节序判定。在小端平台上，编译器将字节序调换逻辑直接优化为内联硬件指令（x86 的 `bswap eax`，ARM 的 `rev w0, w0`）；若在原生大端平台上，该分支被完全消除，等同于零开销内存直写；
+  - **泛型约束与类型安全**：基于 C++20 Concepts 约束整数与浮点数类型，杜绝指针强转引发的潜在对齐缺陷与未定义行为。
 
 ---
 
 ### 2.4 IEEE 754 浮点数的二进制序列化与类型双关（std::bit_cast vs UB）
 
-* **传统错误写法（违反 Strict Aliasing 引发 UB）**：
-  ```cpp
-  float f = 1.0f;
-  uint32_t u = *(uint32_t*)&f; // 严重未定义行为！现代编译器激进优化会导致静默数据破坏
-  ```
-* **工业级安全实现**：
-  采用 C++20 `<bit>` 的 `std::bit_cast`（类型安全、值保持双关）：
-  ```cpp
-  using UInt = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
-  UInt bits = std::bit_cast<UInt>(value);
-  if constexpr (std::endian::native == std::endian::little) {
-      bits = std::byteswap(bits);
-  }
-  append(&bits, sizeof(UInt));
-  ```
+* **类型双关的未定义行为陷阱（Strict Aliasing Rule）**：
+  传统 C 语言常使用裸指针强制转换（如 `*(uint32_t*)&float_val`）提取浮点数底层的比特位。但在现代 C++ 标准与开启激进优化（如 `-O2` / `-O3`）的编译器眼中，该写法严重违反了**严格别名规则（Strict Aliasing Rule）**。编译器有权假设不同类型的指针绝不可能指向同一块内存区域，从而引发指令乱序重排甚至死代码消除，导致难以追踪的幽灵数据破坏。
+* **基于 std::bit_cast 的安全序列化架构**：
+  在架构底层采用 C++20 `<bit>` 的 `std::bit_cast` 规范实现类型双关：
+  - **语义保障**：`std::bit_cast` 是编译器内建的值级别位重解释原语，要求源类型与目标类型尺寸一致且满足平凡可复制（Trivially Copyable），完全规避指针别名违背；
+  - **位转换管线**：将 32 位 `float` 或 64 位 `double` 转换为等宽无符号整型（`uint32_t` / `uint64_t`）后，复用大端字节序翻转管线（`std::byteswap`），实现硬件级高效无损序列化。
 
 ---
 
@@ -241,168 +218,76 @@ tests/
 
 ---
 
-## 四、 任务逐步实现指南（怎么做：接口契约与代码落地）
+## 四、 任务逐步实现指南（怎么做：接口契约与设计落地）
 
-### TASK-0.1: 现代 CMake FetchContent 依赖编排与 GCC 14 零警告门禁
+### TASK-0.1: 现代 CMake 依赖编排与 GCC 14 零警告质量门禁
 
-在工程根目录 `CMakeLists.txt` 中，使用现代 CMake 3.25+ `FetchContent` 管理依赖，杜绝手动下载源码包引入的脏子模块：
-
-```cmake
-cmake_minimum_required(VERSION 3.25)
-project(mcpe LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-# 严禁任何告警，开启最高级别代码卫生检查
-add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow)
-
-include(FetchContent)
-
-# 引入 GoogleTest 单元测试框架
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
-)
-FetchContent_MakeAvailable(googletest)
-
-# 构建基础库
-add_library(mcpe_common STATIC
-  src/common/ByteBuffer.cc
-  src/common/VarInt.cc
-)
-target_include_directories(mcpe_common PUBLIC src)
-```
+* **构建系统拓扑架构设计**：
+  - **C++23 强约束**：以根目录 `CMakeLists.txt` 为唯一构建入口，强制开启 `CMAKE_CXX_STANDARD 23` 与 `CMAKE_CXX_STANDARD_REQUIRED ON`，禁用编译器非标扩展（`CMAKE_CXX_EXTENSIONS OFF`），确保多平台纯净合规；
+  - **声明式依赖编排**：全面采用 CMake 3.25+ 的 `FetchContent` 模块取代传统的 Git Submodule。在构建配置期声明外部单元测试依赖（GoogleTest）的 URL 与版本指纹，自动化完成源码拉取、隔离编译与目标链接，杜绝开发者本地环境差异导致的“编译玄学”；
+  - **最高级别代码卫生规范（-Werror 门禁）**：开启 `-Wall -Wextra -Wpedantic -Wconversion -Wshadow` 组合拳。在基础库阶段即强制杜绝隐式类型截断（如 `size_t` 隐式强转 `int`）、变量遮蔽（Shadowing）与非标扩展，将所有潜在安全隐患消灭在编译期；
+  - **模块化静态目标划分**：定义底层基础静态库 `mcpe_common`，仅对外暴露公共 `src/` 头文件目录，清晰界定 Foundations 层对外的符号边界。
 
 ---
 
-### TASK-0.2: mcpe::ByteBuffer 核心数据结构与双游标大端读写落地
+### TASK-0.2: mcpe::ByteBuffer 核心数据结构与双游标大端读写设计契约
 
-`ByteBuffer` 采用内部 `Storage` 结构维护连续内存，并在头前预留 `kCheapPrepend = 8` 字节，供外层定界拆包器快速前插数据包长度：
-
-```cpp
-// src/common/ByteBuffer.h 核心片段
-namespace mcpe {
-
-class ByteBuffer {
- public:
-  static constexpr size_t kCheapPrepend = 8;
-  static constexpr size_t kInitialSize = 1024;
-
-  struct Storage {
-    std::vector<char> data;
-    explicit Storage(size_t cap = kCheapPrepend + kInitialSize) : data(cap) {}
-  };
-
-  ByteBuffer() : storage_(std::make_shared<Storage>()), capacity_(kInitialSize) {}
-
-  // 泛型大端写入：使用 C++20 Concepts 约束
-  template <typename T>
-    requires (std::integral<T> || std::floating_point<T>)
-  void writeBe(T value) {
-    if constexpr (sizeof(T) == 1) {
-      append(&value, 1);
-    } else if constexpr (std::integral<T>) {
-      if constexpr (std::endian::native == std::endian::little) {
-        value = std::byteswap(value);
-      }
-      append(&value, sizeof(T));
-    } else if constexpr (std::floating_point<T>) {
-      using UInt = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
-      UInt bits = std::bit_cast<UInt>(value);
-      if constexpr (std::endian::native == std::endian::little) {
-        bits = std::byteswap(bits);
-      }
-      append(&bits, sizeof(UInt));
-    }
-  }
-};
-```
+* **物理内存拓扑与三段式连续布局**：
+  - **头前预留区（Prependable Zone）**：底层存储前置预留 `kCheapPrepend = 8` 字节。当上层协议准备下发数据包时，外层长度定界拆包器可直接利用 `prependVarInt` 在载荷前就地写入长度帧头，彻底消灭二次内存申请与 $O(N)$ 整体内存前移；
+  - **可读载荷区（Readable Zone）**：由 `readerIndex_` 与 `writerIndex_` 闭区间界定，有效数据长度严格定义为 `readableBytes() = writerIndex_ - readerIndex_`；
+  - **可写空闲区（Writable Zone）**：由 `writerIndex_` 与总容量 `capacity_` 界定，`writableBytes() = capacity_ - writerIndex_`。
+* **双游标状态不变量（Class Invariants）**：
+  - 核心状态机必须在任意读写调用后恒定满足几何约束：
+    $$0 \le \text{kCheapPrepend} \le \text{readerIndex\_} \le \text{writerIndex\_} \le \text{capacity\_}$$
+* **泛型大端序列化契约**：
+  - **编译期类型约束**：利用 C++20 Concepts 约束方法接收 `std::integral` 与 `std::floating_point` 类型；
+  - **大端翻转与写入**：通过 `if constexpr` 探测主机字节序，若为主机小端则调用 `std::byteswap`（单字节跳过，浮点数通过 `std::bit_cast` 转换为同尺寸无符号整型后翻转），随后追加至可写区并前移 `writerIndex_`；
+  - **无副作用读取契约**：读操作严格校验 `readableBytes() >= sizeof(T)`。若数据不足，直接返回 `DecodeError::kIncomplete`，且**读游标 `readerIndex_` 保持原位不动（零副作用保证）**。
+* **RAII 事务回滚机制（ByteBuffer::Mark）**：
+  - 引入内部守卫类 `Mark`：构造时在栈上记录当前 `readerIndex_`；若解析成功，业务显式调用 `mark.commit()`；若半包或者发生错误退出作用域，析构函数自动将 `readerIndex_` 重置回保存点，天然适配网络流式拆包回滚场景。
 
 ---
 
-### TASK-0.3: Netty 风格 readSlice 零拷贝切片与 COW 机制落地
+### TASK-0.3: Netty 风格 readSlice 零拷贝切片与 COW 机制设计
 
-```cpp
-// 切片实现：零内存分配，浅拷贝 Storage
-ByteBuffer ByteBuffer::readSlice(size_t len) {
-  assert(hasBytes(len) && "readSlice exceeds readable bytes");
-  ByteBuffer slice_buf(storage_, offset_ + readerIndex_, len);
-  readerIndex_ += len;
-  return slice_buf;
-}
-
-// COW 机制保障：写入前检查引用计数
-void ByteBuffer::ensureWritableBytes(size_t len) {
-  if (storage_.use_count() > 1) {
-    // 触发写时复制：深拷贝属于自己的数据
-    auto new_storage = std::make_shared<Storage>(kCheapPrepend + readableBytes() + len);
-    std::memcpy(new_storage->data.data() + kCheapPrepend, peek(), readableBytes());
-    storage_ = std::move(new_storage);
-    offset_ = 0;
-    writerIndex_ = kCheapPrepend + readableBytes();
-    readerIndex_ = kCheapPrepend;
-    capacity_ = storage_->data.size() - kCheapPrepend;
-    is_slice_ = false;
-  }
-  if (writableBytes() < len) {
-    makeSpace(len);
-  }
-}
-```
+* **只读切片（readSlice）拓扑契约**：
+  - **零分配视图（Zero-Allocation View）**：`readSlice(len)` 接收长度参数，父 Buffer 仅递增其 `readerIndex_`，并返回一个新构造的 `ByteBuffer` 子切片；
+  - **底层所有权模型**：子切片与父 Buffer 共同持有同一个 `std::shared_ptr<Storage>`，子切片的绝对基准偏移 `offset_` 映射至父 Buffer 的历史读取点。切片创建过程耗时严格为 $O(1)$，内存堆分配次数恒为 0。
+* **写时复制（Copy-On-Write, COW）生命周期隔离模型**：
+  - **触发条件**：任何引发内存修改的操作（如 `append`、`ensureWritableBytes`）均强制前置探测共享所有权：
+    $$\text{storage\_}.\text{use\_count}() > 1$$
+  - **脱离与独立化（Detach & Duplicate）**：一旦判定当前缓冲区处于“被其他切片或网络多播共享”状态，立即在堆上为自身申请独立的 `Storage` 空间，将有效载荷 `[readerIndex_, writerIndex_)` 深拷贝至新缓冲区的预留区之后，重置内部游标与切片标识（`is_slice_ = false`），完成物理内存的解耦隔离；
+  - **自动内存碎片整理（Compaction）**：当写入所需长度超出尾部空闲空间，但已读区域产生的空间碎片与尾部空间总和足以容纳时，触发内部数据向前平移对齐，最大化复用已分配内存。
 
 ---
 
-### TASK-0.4: mcpe::VarInt 编解码算法与 std::expected 无异常设计
+### TASK-0.4: mcpe::VarInt 编解码状态机与 std::expected 无异常接口契约
 
-```cpp
-// src/common/VarInt.h 核心模板实现
-namespace mcpe::varint {
-
-template <typename UInt, size_t kMaxBytes>
-[[nodiscard]] constexpr std::expected<DecodedVar<UInt>, DecodeError>
-decode(const char* data, size_t available) noexcept {
-  UInt value = 0;
-  for (size_t i = 0; i < kMaxBytes; ++i) {
-    if (i >= available) {
-      return std::unexpected(DecodeError::kIncomplete); // 数据不完整，半包
-    }
-    const uint8_t byte = static_cast<uint8_t>(data[i]);
-    value |= static_cast<UInt>(byte & kValueMask) << (7 * i);
-    if ((byte & kContinuationBit) == 0) {
-      return DecodedVar<UInt>{value, i + 1}; // 成功解码
-    }
-  }
-  // 超过最大字节上限（VarInt > 5 或 VarLong > 10），恶意畸形包
-  return std::unexpected(DecodeError::kMalformed);
-}
-
-} // namespace mcpe::varint
-```
+* **变长整数 LEB128 编码设计**：
+  - 循环取模提取低 7 位数据，当剩余有效数值不为 0 时，将最高位 Continuation Bit 置 1（`byte | 0x80`）；当剩余值为 0 时，作为终止字节直接写入，完成紧凑压缩。
+* **流式解码有限状态机（Decoding FSM）与 DoS 防御屏障**：
+  - **单步解码循环**：每轮循环从字节流中提取 1 字节并转为 `uint8_t`，将其低 7 位通过位移 `(7 * i)` 累加进目标值；
+  - **半包检测**：若可用字节数不足且尚未遇到终止字节（Continuation Bit 为 0），立即返回 `DecodeError::kIncomplete`；
+  - **畸形溢出熔断机制（防恶意 DoS 攻击）**：
+    - VarInt（32 位整型）：解码循环上限设为 5 字节；
+    - VarLong（64 位整型）：解码循环上限设为 10 字节；
+    - 若循环达到上限且当前字节的最高位依然为 1，状态机立即判定为非法溢出，返回 `DecodeError::kMalformed`，通知网络层即刻切断连接。
+* **C++23 强类型无异常契约**：
+  - 解码接口被标记为 `[[nodiscard]] constexpr ... noexcept`，返回值统一定义为 `std::expected<DecodedVar<T>, DecodeError>`；
+  - 返回成功时包含解码后的数值与消耗的物理字节数；失败时携带强类型错误枚举，以极简值语义保证零运行时异常开销与高吞吐。
 
 ---
 
-### TASK-0.5: GoogleTest 极限边界自动化单元测试套件
+### TASK-0.5: GoogleTest 极限边界与攻击防御自动化测试体系设计
 
-```cpp
-// tests/test_varint.cc 边界与攻击防御测试
-TEST(VarIntTest, MaliciousPayloadProtection) {
-  // 构造 6 个字节全为 0x80 的恶意攻击字节序列
-  const char attack_bytes[] = {'\x80', '\x80', '\x80', '\x80', '\x80', '\x80'};
-  auto res = mcpe::decodeVarInt(attack_bytes, sizeof(attack_bytes));
-  ASSERT_FALSE(res.has_value());
-  EXPECT_EQ(res.error(), mcpe::DecodeError::kMalformed);
-}
-
-TEST(VarIntTest, ZeroSideEffectOnIncomplete) {
-  // 只有 1 个字节且高位为 1，属于半包状态
-  const char incomplete_bytes[] = {'\x80'};
-  auto res = mcpe::decodeVarInt(incomplete_bytes, sizeof(incomplete_bytes));
-  ASSERT_FALSE(res.has_value());
-  EXPECT_EQ(res.error(), mcpe::DecodeError::kIncomplete);
-}
-```
+* **边界值覆盖矩阵（Boundary Value Analysis）**：
+  - 编解码回环测试：覆盖 0、单字节上边界 127 (`0x7F`)、双字节临界 128 (`0x80`)、Minecraft 默认端口 25565、-1 以及系统极限值 `INT32_MAX`、`INT32_MIN`、`INT64_MAX`、`INT64_MIN`，验证二进制序列化与反序列化的确定性一致；
+* **恶意攻击与容错测试设计**：
+  - 恶意长序列注入：构造连续 6 个以上 `0x80` 的恶意字节流，断言解码器能够精准阻断并返回 `kMalformed`，严防死循环与未定义整数溢出；
+  - 事务无副作用验证：构造单字节半包序列（`0x80`），断言解码返回 `kIncomplete`，且被测试缓冲区的读游标严格保持不变；
+* **内存安全与并发多播隔离验证**：
+  - 切片读写隔离验证：断言子切片修改不会污染父切片，父切片修改自动触发 COW 内存解耦；
+  - 内存分析门禁：全量测试必须通过 GCC AddressSanitizer (ASan) 与 UndefinedBehaviorSanitizer (UBSan) 检测，保证 0 内存泄漏、0 悬垂指针、0 未定义行为。
 
 ---
 

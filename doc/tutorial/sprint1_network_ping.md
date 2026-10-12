@@ -266,293 +266,117 @@ scripts/
 
 ---
 
-## 四、 任务逐步实现指南（怎么做：接口契约与代码落地）
+### 四、 任务逐步实现指南（怎么做：接口契约与设计落地）
 
-### TASK-1.1: Standalone Asio 异步 TcpServer 与端口监听骨架
+### TASK-1.1: Standalone Asio 异步 TcpServer 监听器与工厂模式设计
 
-```cpp
-// src/network/TcpServer.cc 核心片段
-namespace mcpe::network {
-
-TcpServer::TcpServer(asio::io_context& ioc, uint16_t port)
-    : ioc_(ioc), acceptor_(ioc, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {}
-
-void TcpServer::start() {
-  is_running_ = true;
-  doAccept();
-}
-
-void TcpServer::doAccept() {
-  acceptor_.async_accept([this](const asio::error_code& ec, asio::ip::tcp::socket socket) {
-    if (!is_running_) return;
-
-    if (!ec) {
-      // 禁用 Nagle 算法，降低游戏交互延迟
-      asio::error_code opt_ec;
-      socket.set_option(asio::ip::tcp::no_delay(true), opt_ec);
-
-      auto session = std::make_shared<TcpSession>(std::move(socket));
-      if (packet_handler_) {
-        session->setPacketHandler(packet_handler_);
-      }
-      session->start();
-    }
-    // 尾递归驱动：继续监听下一个客户端连入
-    doAccept();
-  });
-}
-
-} // namespace mcpe::network
-```
+* **Acceptor 生命周期与事件循环绑定**：
+  - `TcpServer` 持有 `asio::io_context&` 引用与 `asio::ip::tcp::acceptor` 实例；
+  - 在指定端口（如 25565）开启 IPv4 监听，启动时进入运行态（`is_running_ = true`）；
+* **套接字底层选项调优策略（TCP_NODELAY）**：
+  - 在每次成功接受新的客户端连接套接字后，第一时间配置 `asio::ip::tcp::no_delay(true)` 禁用 Nagle 算法；
+  - 杜绝小尺寸数据包（如 Ping/Pong 或玩家单步位移）因 TCP 延迟确认机制（Delayed ACK，约 40ms）引发的人工延迟抖动；
+* **异步工厂与尾递归监听闭环**：
+  - 采用现代 Asio 异步回调驱动模式：在 `acceptor_.async_accept` 回调中，若连接成功，将套接字所有权移动（`std::move`）构造独立的 `TcpSession` 会话对象；
+  - 为会话挂接全局分包/路由处理器，并启动会话的异步读管线（`session->start()`）；
+  - 无论本次连接是否成功，在回调结尾无条件发起下一次 `async_accept`，维持持续监听流水线。
 
 ---
 
-### TASK-1.2: TcpSession 智能指针保活与串行化发送队列
+### TASK-1.2: TcpSession 智能指针保活与串行化发送队列设计
 
-```cpp
-// src/network/TcpSession.h 核心片段
-namespace mcpe::network {
-
-class TcpSession : public std::enable_shared_from_this<TcpSession> {
- public:
-  explicit TcpSession(asio::ip::tcp::socket socket) : socket_(std::move(socket)) {}
-
-  void start() { doRead(); }
-
-  void sendPacket(ByteBuffer packet) {
-    // 确保线程安全地投递到 Asio 事件循环
-    asio::post(socket_.get_executor(), [this, self = shared_from_this(), pkt = std::move(packet)]() mutable {
-      bool write_in_progress = !write_queue_.empty();
-      write_queue_.push_back(std::move(pkt));
-      if (!write_in_progress) {
-        doWrite();
-      }
-    });
-  }
-
- private:
-  void doRead();
-  void doWrite();
-
-  asio::ip::tcp::socket socket_;
-  ByteBuffer recv_buf_;
-  std::deque<ByteBuffer> write_queue_;
-};
-
-} // namespace mcpe::network
-```
+* **生命周期延续模型（std::enable_shared_from_this）**：
+  - 网络层连接具有天然的异步动态生命周期。`TcpSession` 必须公有继承 `std::enable_shared_from_this<TcpSession>`；
+  - 在发起的每一个异步 I/O 操作（`async_read_some` 与 `async_write`）的回调闭包中，必须按值捕获 `self = shared_from_this()`；
+  - **核心保障**：只要底层操作系统仍有未决（Outstanding）的 I/O 请求，引用计数就至少为 1，确保回调触发时 `this` 指针绝对有效，彻底消灭野指针与回调崩溃。
+* **串行化写队列设计（Write Queue）**：
+  - **并发写崩溃防御**：Asio 底层要求同一个套接字在同一时间只能存在一个未完成的 `async_write`；
+  - **队列与投递契约**：
+    - 内部维护 `std::deque<ByteBuffer> write_queue_`；
+    - 外部线程或游戏主线程调用 `sendPacket(ByteBuffer)` 时，使用 `asio::post(socket_.get_executor(), ...)` 将写任务调度至套接字关联的 I/O 线程上下文中；
+    - 若当前队列为空（`!write_in_progress`），则将包推入队尾并立即触发首包的 `async_write`；
+    - 在异步写完成回调中弹出已送达的数据包。若队列中仍有积压数据，继续递归触发下一个包的下发；若队列完全排空，重置写入中标志位。
 
 ---
 
-### TASK-1.3: PacketFraming VarInt 长度定界流式拆包器（事务性回滚）
+### TASK-1.3: PacketFraming VarInt 长度定界流式拆包器与事务回滚设计
 
-```cpp
-// src/network/PacketFraming.cc
-namespace mcpe::network {
-
-std::expected<ByteBuffer, FramingError> PacketFraming::slicePacket(ByteBuffer& buf) {
-  // 1. 使用 RAII Mark 机制实现事务性回滚
-  ByteBuffer::Mark mark(buf);
-
-  // 2. 探测 VarInt 长度
-  auto len_res = buf.readVarInt();
-  if (!len_res) {
-    if (len_res.error() == DecodeError::kIncomplete) {
-      return std::unexpected(FramingError::kIncomplete); // 数据未到齐，回滚游标
-    }
-    return std::unexpected(FramingError::kMalformed);
-  }
-
-  int32_t packet_len = *len_res;
-  if (packet_len <= 0 || static_cast<size_t>(packet_len) > kMaxPacketSize) {
-    return std::unexpected(FramingError::kPacketTooLarge);
-  }
-
-  // 3. 检查包体数据是否全部到达
-  if (buf.readableBytes() < static_cast<size_t>(packet_len)) {
-    return std::unexpected(FramingError::kIncomplete); // 半包，Mark 析构自动回滚
-  }
-
-  // 4. 数据齐全：提交事务，切出整包并前移读游标
-  mark.commit();
-  return buf.readSlice(static_cast<size_t>(packet_len));
-}
-
-} // namespace mcpe::network
-```
+* **流式拆包状态机与三阶段拓扑**：
+  - **阶段 1：事务开启（RAII Mark）**：实例化 `ByteBuffer::Mark` 锁定当前的读游标位置；
+  - **阶段 2：帧长探测与合法性防御**：
+    - 尝试以 VarInt 解码帧长度 `packet_len`；
+    - 若返回 `DecodeError::kIncomplete`，表明外层长度字段本身遭遇半包，直接退出，`Mark` 析构自动回滚游标；
+    - 若长度 $\le 0$ 或超过安全上限（如 2MB），判定为恶意攻击或协议严重破损，返回 `FramingError::kMalformed` / `kPacketTooLarge`，直接通知会话踢出；
+  - **阶段 3：整包载荷校验与零拷贝切片**：
+    - 检查缓冲区剩余可读字节是否满足 `readableBytes() >= packet_len`；
+    - 若不满足（半包状态），维持事务回滚，等待下一次 TCP 数据到达；
+    - 若满足（整包齐全），显式调用 `mark.commit()` 提交事务，并通过 `readSlice(packet_len)` 零拷贝切出完整的子数据包。
 
 ---
 
-### TASK-1.4: ConnectionState 状态机与 PacketRouter 路由器
+### TASK-1.4: ConnectionState 状态机与 PacketRouter 路由器架构设计
 
-```cpp
-// src/protocol/ConnectionState.h
-namespace mcpe::protocol {
-
-enum class ConnectionState : uint8_t {
-  HANDSHAKING = 0,
-  STATUS = 1,
-  LOGIN = 2,
-  PLAY = 3
-};
-
-} // namespace mcpe::protocol
-```
-
-```cpp
-// src/protocol/PacketRouter.cc
-namespace mcpe::protocol {
-
-void PacketRouter::dispatch(std::shared_ptr<network::TcpSession> session, ByteBuffer packet) {
-  auto packet_id_res = packet.readVarInt();
-  if (!packet_id_res) {
-    session->close();
-    return;
-  }
-  int32_t packet_id = *packet_id_res;
-
-  switch (session->getState()) {
-    case ConnectionState::HANDSHAKING:
-      handshake_handler_->handlePacket(session, packet_id, packet);
-      break;
-    case ConnectionState::STATUS:
-      status_handler_->handlePacket(session, packet_id, packet);
-      break;
-    default:
-      session->close();
-      break;
-  }
-}
-
-} // namespace mcpe::protocol
-```
+* **协议生命周期四态模型**：
+  - 强类型枚举 `ConnectionState`：`HANDSHAKING` (0)、`STATUS` (1)、`LOGIN` (2)、`PLAY` (3)；
+  - 连接建立之初，会话初始状态严格锁定为 `HANDSHAKING`。
+* **职责分离的路由器分派机制（PacketRouter）**：
+  - 作为网络层与协议业务层的分界防火墙，仅负责解包分发；
+  - 从 `PacketFraming` 提取出的包体中读取首个字段 `Packet ID`（VarInt）；
+  - 根据当前会话的 `ConnectionState` 精准分发至专职处理器：
+    - `HANDSHAKING` 独占交由 `HandshakeHandler`；
+    - `STATUS` 独占交由 `StatusHandler`；
+  - 任何状态不匹配的越权包或非法 ID，统一阻断并安全切断连接。
 
 ---
 
-### TASK-1.5: HandshakeHandler 意图流转与协议版本校验
+### TASK-1.5: HandshakeHandler 意图流转与协议版本校验设计契约
 
-```cpp
-// src/protocol/HandshakeHandler.cc
-void HandshakeHandler::handleHandshake(std::shared_ptr<network::TcpSession> session, ByteBuffer& payload) {
-  auto proto_ver = payload.readVarInt();
-  auto host = payload.readString(255);
-  auto port = payload.readBe<uint16_t>();
-  auto next_state = payload.readVarInt();
-
-  if (!proto_ver || !host || !port || !next_state) {
-    session->close();
-    return;
-  }
-
-  if (*next_state == 1) {
-    // 跃迁到 STATUS 状态
-    session->setState(ConnectionState::STATUS);
-  } else if (*next_state == 2) {
-    // 跃迁到 LOGIN 状态
-    session->setState(ConnectionState::LOGIN);
-  } else {
-    session->close();
-  }
-}
-```
+* **协议解包契约（0x00 Handshake）**：
+  - 顺序反序列化四大字段：`Protocol Version`（VarInt）、`Server Address`（String(255)）、`Server Port`（Unsigned Short, 16位大端）、`Next State`（VarInt: 1=STATUS, 2=LOGIN）；
+* **流转决策矩阵**：
+  - 若 `Next State == 1`：当前会话意图为服务器列表探测，将其状态机更新为 `STATUS`；
+  - 若 `Next State == 2`：当前会话意图为进入游戏，将其状态机更新为 `LOGIN`；
+  - 若包含其他未定义状态代码或数据截断，直接关闭连接；
+* **架构隔离红线**：
+  - `HandshakeHandler` 严禁下发任何响应包，仅负责状态机跃迁，彻底与 `StatusHandler` 解耦。
 
 ---
 
-### TASK-1.6: StatusHandler 处理 Request (0x00) 与动态 JSON 组装
+### TASK-1.6: StatusHandler 处理 Request (0x00) 与动态 JSON 组装设计
 
-```cpp
-// src/protocol/StatusHandler.cc
-void StatusHandler::handleRequest(std::shared_ptr<network::TcpSession> session) {
-  std::string motd_json = R"({
-    "version": {"name": "1.12.2", "protocol": 340},
-    "players": {"max": 100, "online": 0, "sample": []},
-    "description": {"text": "§a[MCPE] §f高性能 C++23 游戏引擎"}
-  })";
-
-  ByteBuffer body;
-  body.appendVarInt(0x00); // Packet ID = 0x00 Status Response
-  body.appendString(motd_json);
-
-  // 使用 Cheap Prepend 封装外层包长度
-  body.prependVarInt(body.readableBytes());
-  session->sendPacket(std::move(body));
-}
-```
+* **请求消费契约**：
+  - 消费客户端发送的 `0x00 Status Request`（该包载荷长度为 0，无需反序列化额外字段）；
+* **响应组装与下发流水线（0x00 Status Response）**：
+  - 动态组装服务端状态描述 JSON 抽象语法树（AST）：
+    - `version`：指定展示版本文本与协议号（340）；
+    - `players`：配置最大承载人数、当前在线人数及样本玩家列表；
+    - `description`：组装带颜色代码的富文本 MOTD 介绍；
+  - 将 JSON 字符串作为载荷写入 `ByteBuffer`，包头填充 `Packet ID = 0x00`；
+  - 利用 `prependVarInt` 在头部前插包体总长度，推入写队列异步下发。
 
 ---
 
-### TASK-1.7: StatusHandler 处理 Ping (0x01) 与原样 Pong 下发
+### TASK-1.7: StatusHandler 处理 Ping (0x01) 与原样 Pong 下发设计
 
-```cpp
-// src/protocol/StatusHandler.cc
-void StatusHandler::handlePing(std::shared_ptr<network::TcpSession> session, ByteBuffer& payload) {
-  auto time_res = payload.readBe<int64_t>();
-  if (!time_res) {
-    session->close();
-    return;
-  }
-
-  ByteBuffer pong_pkt;
-  pong_pkt.appendVarInt(0x01);       // Packet ID = 0x01 Pong
-  pong_pkt.writeBe<int64_t>(*time_res); // 原封不动写回 8 字节大端整数！
-
-  pong_pkt.prependVarInt(pong_pkt.readableBytes());
-  session->sendPacket(std::move(pong_pkt));
-}
-```
+* **时延采样协议契约**：
+  - 消费客户端的 `0x01 Ping` 数据包；
+  - 读取载荷中包含的 8 字节大端整数时间戳（`int64_t`）；
+* **二进制镜像回显机制（0x01 Pong）**：
+  - 严禁将该 8 字节时间戳当作变长整型压缩；
+  - 构造 `Packet ID = 0x01` 的 Pong 数据包，以严格的大端 64 位有符号整型格式将收到的时间戳原封不动写回；
+  - 客户端通过计算本地收到 Pong 的时间与发送 Ping 时间的差值，在列表上绘制网络延迟绿条。
 
 ---
 
-### TASK-1.8: 编写自动化 Python 探测脚本（scripts/test_ping.py）
+### TASK-1.8: 编写自动化 Python 探测脚本与端到端回归标准
 
-```python
-#!/usr/bin/env python3
-# scripts/test_ping.py: 极速自动化 Server List Ping 探测脚本
-import socket, struct, json, time
-
-def encode_varint(val):
-    res = bytearray()
-    while True:
-        b = val & 0x7F
-        val >>= 7
-        if val != 0:
-            res.append(b | 0x80)
-        else:
-            res.append(b)
-            break
-    return bytes(res)
-
-def send_packet(s, pkt_id, payload):
-    body = encode_varint(pkt_id) + payload
-    s.sendall(encode_varint(len(body)) + body)
-
-def test_ping():
-    s = socket.create_connection(('127.0.0.1', 25565), timeout=3)
-    
-    # 1. 发送握手包 (Proto=340, Host=localhost, Port=25565, NextState=1)
-    host_bytes = b'localhost'
-    hs = encode_varint(340) + encode_varint(len(host_bytes)) + host_bytes + struct.pack('>H', 25565) + encode_varint(1)
-    send_packet(s, 0x00, hs)
-
-    # 2. 发送 Status Request
-    send_packet(s, 0x00, b'')
-
-    # 3. 接收并验证 Status Response
-    data = s.recv(4096)
-    assert len(data) > 0, "No data received"
-    print("✅ Status Response 探测成功！")
-
-    # 4. 发送 Ping 并验证 Pong
-    now = int(time.time() * 1000)
-    send_packet(s, 0x01, struct.pack('>q', now))
-    pong = s.recv(64)
-    assert len(pong) >= 9, "Invalid Pong packet"
-    print("✅ Ping/Pong 延迟回显成功！")
-    s.close()
-
-if __name__ == '__main__':
-    test_ping()
-```
+* **测试驱动开发（TDD）闭环设计**：
+  - 在无需启动大型 Java 客户端与图形界面的前提下，通过轻量 Python 脚本建立原生 TCP 套接字；
+  - 脚本按标准协议编解码 VarInt 与大端数据，端到端执行：
+    1. 发送标准握手帧（意图为状态探测）；
+    2. 发送状态查询包，接收并断言 MOTD JSON 格式与协议代号（340）合法；
+    3. 发送毫秒级 Ping 时间戳，接收 Pong 包并断言 8 字节时间戳镜像一致；
+  - 作为 CI 自动化流水线中的常驻轻量级测试用例，保障网络基座零回退。
 
 ---
 
