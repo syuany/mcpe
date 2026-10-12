@@ -29,4 +29,6 @@
 * [ ] 广播管线零拷贝共享改造：TcpSession 发送管线支持 std::shared_ptr\<ByteBuffer\> 浅共享广播
 * [ ] CMake 构建体系重构与目标精简
 
-* [ ] 每阶段zhong'ya技术选型分析
+* [ ] 每阶段重要技术选型分析
+* [x] 定时器架构分析与 Linux 对比（详见 [linux_timers_and_mcpe_timer_architecture.md](guides/linux_timers_and_mcpe_timer_architecture.md)）
+* [ ] test 抄 cuberite 重写
