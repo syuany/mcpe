@@ -40,8 +40,9 @@ inline constexpr int32_t PlayerBlockPlacement = 0x1F;
  * @brief 服务端发往客户端的数据包 ID (Clientbound / Outbound)
  */
 namespace ClientboundPacket {
+inline constexpr int32_t SpawnGlobalEntity = 0x02;
 inline constexpr int32_t SpawnPlayer = 0x05;
-inline constexpr int32_t ChatMessage = 0x02;
+inline constexpr int32_t ChatMessage = 0x0F;
 inline constexpr int32_t KeepAlive = 0x1F;
 inline constexpr int32_t ChunkData = 0x20;
 inline constexpr int32_t JoinGame = 0x23;

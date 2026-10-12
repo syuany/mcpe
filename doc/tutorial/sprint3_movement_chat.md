@@ -214,7 +214,7 @@
 * **是什么**：
   - **上行包 `0x02 Chat Message (Serverbound)`**：
     载荷为 `VarInt` 定界的 UTF-8 字符串（长度 $1 \sim 256$ 字符）。
-  - **下行包 `0x02 Chat Message (Clientbound)`**：
+  - **下行包 `0x0F Chat Message (Clientbound)`**：
     载荷为：
     1. `JSON Data`: `String`（Minecraft 标准富文本格式）
     2. `Position`: `Byte`（`0 = 聊天框 Chat Box`, `1 = 系统消息 System Message`, `2 = 快捷栏上方 Actionbar`）

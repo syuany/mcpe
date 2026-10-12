@@ -217,12 +217,12 @@ def main():
     while time.time() - start < 2.0:
         try:
             p_id, payload = read_packet(alex.sock)
-            if p_id == 0x02:
+            if p_id == 0x0F:
                 # payload: VarInt str_len + str + byte pos
                 chat_json = payload[1:-1].decode('utf-8', errors='ignore')
                 if "<Steve> Hello from Steve!" in chat_json:
                     alex_saw_chat = True
-                    print(f"[✔] Alex 收到公屏聊天: {chat_json}")
+                    print(f"[✔] Alex 收到公屏聊天 (0x0F): {chat_json}")
                     break
         except socket.timeout:
             break
@@ -238,11 +238,11 @@ def main():
     while time.time() - start < 2.0:
         try:
             p_id, payload = read_packet(steve.sock)
-            if p_id == 0x02:
+            if p_id == 0x0F:
                 chat_json = payload[1:-1].decode('utf-8', errors='ignore')
                 if "地图列表" in chat_json:
                     steve_saw_cmd = True
-                    print(f"[✔] Steve 收到指令单播回复: {chat_json}")
+                    print(f"[✔] Steve 收到指令单播回复 (0x0F): {chat_json}")
                     break
         except socket.timeout:
             break
