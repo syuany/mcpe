@@ -98,6 +98,7 @@ endif()
 add_library(mcpe_common STATIC
     src/common/ByteBuffer.cc
     src/common/VarInt.cc
+    src/common/ZipArchive.cc
 )
 
 target_include_directories(mcpe_common PUBLIC
@@ -105,7 +106,7 @@ target_include_directories(mcpe_common PUBLIC
 )
 
 target_compile_options(mcpe_common PRIVATE -O3)
-target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio)
+target_link_libraries(mcpe_common PUBLIC spdlog::spdlog asio ZLIB::ZLIB)
 
 # ==============================================
 # 模块2: mcpe_network 静态库
@@ -134,6 +135,7 @@ add_library(mcpe_world STATIC
     src/world/SchematicLoader.cc
     src/world/World.cc
     src/world/SpatialGrid.cc
+    src/world/AnvilLoader.cc
 )
 
 target_include_directories(mcpe_world PUBLIC
@@ -340,3 +342,30 @@ target_link_libraries(test_spatial_grid PRIVATE
 )
 
 gtest_discover_tests(test_spatial_grid)
+
+# ZipArchive 基础归档解析器测试
+add_executable(test_zip_archive
+    tests/test_zip_archive.cc
+)
+
+target_link_libraries(test_zip_archive PRIVATE
+    mcpe_common
+    GTest::gtest_main
+    ZLIB::ZLIB
+)
+
+gtest_discover_tests(test_zip_archive)
+
+# AnvilLoader 原版世界存档 (.mca / .zip) 解析测试
+add_executable(test_anvil_loader
+    tests/test_anvil_loader.cc
+)
+
+target_link_libraries(test_anvil_loader PRIVATE
+    mcpe_world
+    mcpe_common
+    GTest::gtest_main
+    ZLIB::ZLIB
+)
+
+gtest_discover_tests(test_anvil_loader)
