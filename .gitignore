@@ -17,3 +17,5 @@ reference/
 /sprints/
 /tutorial/
 .obsidian/
+
+*.log
