@@ -11,23 +11,61 @@
 #include "world/Chunk.h"
 #include "world/EventQueue.h"
 #include "world/FlatWorldGenerator.h"
+#include "world/World.h"
 
 namespace mcpe::protocol {
+
+namespace {
+std::shared_ptr<world::World> g_world = nullptr;
+}
+
+void
+PlayHandler::setWorld(std::shared_ptr<world::World> world) {
+  g_world = std::move(world);
+}
+
+std::shared_ptr<world::World>
+PlayHandler::getWorld() {
+  return g_world;
+}
 
 void
 PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   sendJoinGame(session, session->entityId());
 
-  world::FlatWorldGenerator generator;
-  for (int cx = -2; cx <= 2; ++cx) {
-    for (int cz = -2; cz <= 2; ++cz) {
-      world::Chunk chunk(world::ChunkPos{cx, cz});
-      generator.generate(chunk);
-      ChunkSerializer::sendChunkData(session, chunk, true);
+  Vector3d spawn_pos{0.5, 4.0, 0.5};
+
+  if (g_world) {
+    spawn_pos = g_world->spawnPoint();
+    const world::ChunkPos center_chunk = spawn_pos.toBlockPos().toChunkPos();
+    constexpr int32_t kViewRadius = 3;  // 7x7 视距区块窗口
+
+    for (int32_t cz = center_chunk.z - kViewRadius; cz <= center_chunk.z + kViewRadius; ++cz) {
+      for (int32_t cx = center_chunk.x - kViewRadius; cx <= center_chunk.x + kViewRadius; ++cx) {
+        const world::ChunkPos cpos{cx, cz};
+        if (const auto* chunk = g_world->getChunk(cpos)) {
+          ChunkSerializer::sendChunkData(session, *chunk, true);
+        } else {
+          // 下发空区块保持视野平滑
+          world::Chunk empty_chunk(cpos);
+          ChunkSerializer::sendChunkData(session, empty_chunk, true);
+        }
+      }
+    }
+  } else {
+    // 兼容回退：未配置 World 时下发 5x5 超平坦区块
+    world::FlatWorldGenerator generator;
+    for (int cx = -2; cx <= 2; ++cx) {
+      for (int cz = -2; cz <= 2; ++cz) {
+        world::Chunk chunk(world::ChunkPos{cx, cz});
+        generator.generate(chunk);
+        ChunkSerializer::sendChunkData(session, chunk, true);
+      }
     }
   }
+
   const int32_t teleport_id = session->nextTeleportId();
-  sendPlayerPositionAndLook(session, 0.5, 4.0, 0.5, 0.0f, 0.0f, 0x00, teleport_id);
+  sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, 0.0f, 0.0f, 0x00, teleport_id);
   session->startKeepAliveTimer();
 
   // 投递玩家进服事件至世界任务队列（触发同屏实体生成与 Tab 列表更新）
@@ -224,6 +262,28 @@ PlayHandler::handlePlayerMovement(
   }
 
   payload.retrieveAll();
+
+  // 商业大厅虚空跌落复位 (Fall Reset: Y < 20.0 瞬移拉回出生点)
+  if (move_event.has_position && move_event.position.y < 20.0) {
+    const Vector3d reset_pos = g_world ? g_world->spawnPoint() : Vector3d{0.5, 4.0, 0.5};
+    const int32_t tid = session->nextTeleportId();
+    sendPlayerPositionAndLook(
+        session,
+        reset_pos.x,
+        reset_pos.y,
+        reset_pos.z,
+        0.0f,
+        0.0f,
+        0x00,
+        tid
+    );
+    spdlog::info(
+        "[PlayHandler] Fall reset triggered for {} at Y={:.2f}",
+        session->remoteAddress(),
+        move_event.position.y
+    );
+    return;
+  }
 
   if (auto q = session->eventQueue()) {
     world::WorldEvent ev;

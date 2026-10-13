@@ -132,6 +132,7 @@ add_library(mcpe_world STATIC
     src/world/EntityManager.cc
     src/world/WorldTicker.cc
     src/world/SchematicLoader.cc
+    src/world/World.cc
 )
 
 target_include_directories(mcpe_world PUBLIC
@@ -312,3 +313,16 @@ target_link_libraries(test_schematic PRIVATE
 )
 
 gtest_discover_tests(test_schematic)
+
+# World 容器与大厅世界常驻加载测试
+add_executable(test_world
+    tests/test_world.cc
+)
+
+target_link_libraries(test_world PRIVATE
+    mcpe_world
+    mcpe_common
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_world)

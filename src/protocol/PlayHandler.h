@@ -7,12 +7,20 @@
 #include "common/ByteBuffer.h"
 #include "protocol/GameTypes.h"
 
+namespace mcpe::world {
+class World;
+}
+
 namespace mcpe::protocol {
 
 class ClientSession;
 
 class PlayHandler {
  public:
+  /** @brief 绑定全局世界实例（大厅/跑酷） */
+  static void setWorld(std::shared_ptr<world::World> world);
+  static std::shared_ptr<world::World> getWorld();
+
   /** @brief 玩家鉴权通过后调用：下发 Join Game、Player Position And Look 并启动保活心跳 */
   static void onPlayerJoin(const std::shared_ptr<ClientSession>& session);
 

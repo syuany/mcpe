@@ -43,6 +43,7 @@ namespace ClientboundPacket {
 inline constexpr int32_t SpawnGlobalEntity = 0x02;
 inline constexpr int32_t SpawnPlayer = 0x05;
 inline constexpr int32_t ChatMessage = 0x0F;
+inline constexpr int32_t UnloadChunk = 0x1D;
 inline constexpr int32_t KeepAlive = 0x1F;
 inline constexpr int32_t ChunkData = 0x20;
 inline constexpr int32_t JoinGame = 0x23;

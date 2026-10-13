@@ -5,6 +5,7 @@
 
 #include "network/PacketWriter.h"
 #include "protocol/ClientSession.h"
+#include "protocol/PacketTypes.h"
 #include "world/Chunk.h"
 #include "world/ChunkSection.h"
 
@@ -76,7 +77,10 @@ ChunkSerializer::sendChunkData(
 
   ByteBuffer data_payload = serialize(chunk, ground_up);
 
-  network::PacketWriter<protocol::ClientSession> writer(session, 0x20);
+  network::PacketWriter<protocol::ClientSession> writer(
+      session,
+      protocol::ClientboundPacket::ChunkData
+  );
   writer.writeBe<int32_t>(chunk.x());
   writer.writeBe<int32_t>(chunk.z());
   writer.writeBe<uint8_t>(ground_up ? 1 : 0);
@@ -84,6 +88,23 @@ ChunkSerializer::sendChunkData(
   writer.appendVarInt(static_cast<int32_t>(data_payload.readableBytes()));
   writer.append(data_payload.peek(), data_payload.readableBytes());
   writer.appendVarInt(0);  // Number of block entities
+}
+
+void
+ChunkSerializer::sendUnloadChunk(
+    const std::shared_ptr<protocol::ClientSession>& session,
+    world::ChunkPos pos
+) {
+  if (!session) {
+    return;
+  }
+
+  network::PacketWriter<protocol::ClientSession> writer(
+      session,
+      protocol::ClientboundPacket::UnloadChunk
+  );
+  writer.writeBe<int32_t>(pos.x);
+  writer.writeBe<int32_t>(pos.z);
 }
 
 }  // namespace mcpe::protocol

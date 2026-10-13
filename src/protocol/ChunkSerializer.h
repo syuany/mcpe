@@ -24,6 +24,14 @@ class ChunkSerializer {
   );
 
   /**
+   * @brief 向客户端发送 0x1D Unload Chunk 数据包，通知客户端卸载指定区块
+   */
+  static void sendUnloadChunk(
+      const std::shared_ptr<protocol::ClientSession>& session,
+      world::ChunkPos pos
+  );
+
+  /**
    * @brief 核心序列化逻辑：将 Chunk 转换为未加帧头的原始 0x20 数据包载荷 ByteBuffer
    */
   static ByteBuffer serialize(const world::Chunk& chunk, bool ground_up = true);
