@@ -79,6 +79,16 @@ class World {
   size_t loadWorldFromDirectory(const std::filesystem::path& path);
 
   /**
+   * @brief 查询指定世界水平坐标 (X, Z) 的最高非空气方块高度 Y，若该垂直列无方块则返回 -1
+   */
+  [[nodiscard]] int32_t getHighestBlockY(int32_t x, int32_t z) const;
+
+  /**
+   * @brief 将当前出生点自适应修正到安全站立地面上（防止地图作者创造模式飞行保存或虚空出生点）
+   */
+  void adjustSpawnPointToSafeGround();
+
+  /**
    * @brief 获取当前世界中所有已加载区块的坐标列表
    */
   [[nodiscard]] size_t chunkCount() const noexcept { return chunks_.size(); }

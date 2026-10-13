@@ -31,6 +31,7 @@ namespace mcpe::world {
 struct WorldSaveMetadata {
   std::string level_name{"world"};
   Vector3d spawn_point{0.5, 64.0, 0.5};
+  std::optional<Vector3d> player_pos{std::nullopt};
 };
 
 /**

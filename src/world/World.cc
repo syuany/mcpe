@@ -106,4 +106,63 @@ World::getAllChunkPositions() const {
   return positions;
 }
 
+int32_t
+World::getHighestBlockY(int32_t x, int32_t z) const {
+  const ChunkPos cpos{x >> 4, z >> 4};
+  const Chunk* chunk = getChunk(cpos);
+  if (!chunk) {
+    return -1;
+  }
+
+  for (int32_t y = 255; y >= 0; --y) {
+    if (chunk->getBlock(BlockPos{x, y, z}) != BlockStates::kAir) {
+      return y;
+    }
+  }
+  return -1;
+}
+
+void
+World::adjustSpawnPointToSafeGround() {
+  if (chunks_.empty()) {
+    return;
+  }
+
+  const int32_t target_x = static_cast<int32_t>(std::floor(spawn_point_.x));
+  const int32_t target_z = static_cast<int32_t>(std::floor(spawn_point_.z));
+
+  int32_t ground_y = getHighestBlockY(target_x, target_z);
+  if (ground_y >= 0) {
+    spawn_point_.y = static_cast<double>(ground_y + 1);
+    spdlog::info(
+        "[World] Adjusted spawn point to safe ground at ({:.1f}, {:.1f}, {:.1f})",
+        spawn_point_.x,
+        spawn_point_.y,
+        spawn_point_.z
+    );
+    return;
+  }
+
+  // 若当前出生点下方完全是空气（虚空），在已加载的区块中寻找最近的非空方块
+  for (const auto& [cpos, chunk] : chunks_) {
+    for (int32_t lz = 8; lz < 16; ++lz) {
+      for (int32_t lx = 8; lx < 16; ++lx) {
+        const int32_t wx = (cpos.x << 4) + lx;
+        const int32_t wz = (cpos.z << 4) + lz;
+        int32_t gy = getHighestBlockY(wx, wz);
+        if (gy >= 0) {
+          spawn_point_ = Vector3d{wx + 0.5, static_cast<double>(gy + 1), wz + 0.5};
+          spdlog::info(
+              "[World] Spawn was in void! Repositioned to nearest solid block at ({:.1f}, {:.1f}, {:.1f})",
+              spawn_point_.x,
+              spawn_point_.y,
+              spawn_point_.z
+          );
+          return;
+        }
+      }
+    }
+  }
+}
+
 }  // namespace mcpe::world

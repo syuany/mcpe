@@ -122,12 +122,44 @@ AnvilLoader::parseLevelDat(std::span<const uint8_t> level_dat_bytes) {
         } else if (sub_type == common::NbtTag::String && *sub_name_opt == "LevelName") {
           auto val = reader.readString();
           if (val) meta.level_name = std::string(*val);
+        } else if (sub_type == common::NbtTag::Compound && *sub_name_opt == "Player") {
+          while (reader.hasRemaining()) {
+            auto p_type_opt = reader.readU8();
+            if (!p_type_opt) break;
+            auto p_type = static_cast<common::NbtTag>(*p_type_opt);
+            if (p_type == common::NbtTag::End) break;
+            auto p_name_opt = reader.readString();
+            if (!p_name_opt) break;
+
+            if (p_type == common::NbtTag::List && *p_name_opt == "Pos") {
+              auto elem_type_opt = reader.readU8();
+              auto len_opt = reader.readI32();
+              if (elem_type_opt && len_opt && *len_opt == 3 &&
+                  static_cast<common::NbtTag>(*elem_type_opt) == common::NbtTag::Double) {
+                auto px = reader.readDouble();
+                auto py = reader.readDouble();
+                auto pz = reader.readDouble();
+                if (px && py && pz) {
+                  meta.player_pos = Vector3d{*px, *py, *pz};
+                }
+              } else if (elem_type_opt && len_opt && *len_opt > 0) {
+                for (int32_t i = 0; i < *len_opt; ++i) {
+                  reader.skipTag(static_cast<common::NbtTag>(*elem_type_opt));
+                }
+              }
+            } else {
+              if (!reader.skipTag(p_type)) break;
+            }
+          }
         } else {
           if (!reader.skipTag(sub_type)) break;
         }
       }
 
-      if (has_sx && has_sz) {
+      // 优先采用地图作者保存时的 Player 真实坐标，无则回退至 SpawnX/Y/Z
+      if (meta.player_pos.has_value()) {
+        meta.spawn_point = *meta.player_pos;
+      } else if (has_sx && has_sz) {
         (void)has_sy;
         meta.spawn_point = Vector3d{sx + 0.5, static_cast<double>(sy), sz + 0.5};
       }
@@ -378,6 +410,9 @@ AnvilLoader::loadFromZip(const std::filesystem::path& zip_path, World& world) {
     }
   }
 
+  // 3. 自适应修正出生点至安全实体方块表面，杜绝虚空或凌空坠落
+  world.adjustSpawnPointToSafeGround();
+
   spdlog::info(
       "[AnvilLoader] Successfully loaded {} Chunks from ZIP: {}",
       total_chunks,
@@ -427,6 +462,9 @@ AnvilLoader::loadFromDirectory(const std::filesystem::path& dir_path, World& wor
       total_chunks += chunks;
     }
   }
+
+  // 3. 自适应修正出生点至安全实体方块表面
+  world.adjustSpawnPointToSafeGround();
 
   spdlog::info(
       "[AnvilLoader] Successfully loaded {} Chunks from directory: {}",
