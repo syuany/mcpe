@@ -16,6 +16,8 @@
 
 namespace mcpe::protocol {
 
+class ClientManager;
+
 class ChatHandler {
  public:
   using SystemMessageSender = std::function<void(uint64_t session_id, ByteBuffer packet)>;
@@ -23,10 +25,12 @@ class ChatHandler {
 
   explicit ChatHandler(
       SystemMessageSender sys_sender = nullptr,
-      MulticastSender multicast_sender = nullptr
+      MulticastSender multicast_sender = nullptr,
+      std::weak_ptr<ClientManager> client_manager = {}
   );
 
   void setSenders(SystemMessageSender sys_sender, MulticastSender multicast_sender);
+  void setClientManager(std::weak_ptr<ClientManager> client_manager);
 
   /**
    * @brief 处理来自玩家的消息（区分普通公屏聊天与以 / 开头的快捷指令）
@@ -58,8 +62,11 @@ class ChatHandler {
   static ByteBuffer buildChatPacket(std::string_view json_text, ChatPosition pos);
 
  private:
+  void handleFlyCommand(uint64_t sender_sid, const std::string& cmd_line);
+
   SystemMessageSender sys_sender_;
   MulticastSender multicast_sender_;
+  std::weak_ptr<ClientManager> client_manager_;
 };
 
 }  // namespace mcpe::protocol

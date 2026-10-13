@@ -10,15 +10,30 @@
 #include <format>
 #include <utility>
 
+#include "protocol/ClientManager.h"
+#include "protocol/ClientSession.h"
+#include "protocol/PlayHandler.h"
+
 namespace mcpe::protocol {
 
-ChatHandler::ChatHandler(SystemMessageSender sys_sender, MulticastSender multicast_sender)
-    : sys_sender_(std::move(sys_sender)), multicast_sender_(std::move(multicast_sender)) {}
+ChatHandler::ChatHandler(
+    SystemMessageSender sys_sender,
+    MulticastSender multicast_sender,
+    std::weak_ptr<ClientManager> client_manager
+)
+    : sys_sender_(std::move(sys_sender)),
+      multicast_sender_(std::move(multicast_sender)),
+      client_manager_(std::move(client_manager)) {}
 
 void
 ChatHandler::setSenders(SystemMessageSender sys_sender, MulticastSender multicast_sender) {
   sys_sender_ = std::move(sys_sender);
   multicast_sender_ = std::move(multicast_sender);
+}
+
+void
+ChatHandler::setClientManager(std::weak_ptr<ClientManager> client_manager) {
+  client_manager_ = std::move(client_manager);
 }
 
 void
@@ -63,8 +78,54 @@ ChatHandler::handleCommand(uint64_t sender_sid, const std::string& cmd_line) {
     sendSystemMessage(sender_sid, "§a[系统] 您已经在主大厅中！");
   } else if (cmd_line == "/maps") {
     sendSystemMessage(sender_sid, "§e[地图列表] 1. 新手跑酷 (输入 /join 1)  2. 螺旋跑酷 (输入 /join 2)");
+  } else if (cmd_line == "/fly" || cmd_line.starts_with("/fly ")) {
+    handleFlyCommand(sender_sid, cmd_line);
+  } else if (cmd_line == "/help") {
+    sendSystemMessage(sender_sid, "§e[帮助] 支持指令: /lobby, /maps, /fly [on|off]");
   } else {
-    sendSystemMessage(sender_sid, "§c[错误] 未知指令，请输入 /maps 查看支持的指令。");
+    sendSystemMessage(sender_sid, "§c[错误] 未知指令，输入 /help 或 /maps 查看支持指令。");
+  }
+}
+
+void
+ChatHandler::handleFlyCommand(uint64_t sender_sid, const std::string& cmd_line) {
+  auto mgr = client_manager_.lock();
+  if (!mgr) {
+    sendSystemMessage(sender_sid, "§c[错误] 会话管理器未就绪");
+    return;
+  }
+
+  auto session = mgr->findSession(sender_sid);
+  if (!session || session->state() != ConnectionState::PLAY) {
+    sendSystemMessage(sender_sid, "§c[错误] 只能在游戏主世界中开启飞行模式");
+    return;
+  }
+
+  bool target_fly = !session->canFly();
+  if (cmd_line == "/fly on" || cmd_line == "/fly 1" || cmd_line == "/fly true") {
+    target_fly = true;
+  } else if (cmd_line == "/fly off" || cmd_line == "/fly 0" || cmd_line == "/fly false") {
+    target_fly = false;
+  } else if (cmd_line != "/fly") {
+    sendSystemMessage(sender_sid, "§e[用法] /fly [on|off] - 开启或关闭大厅飞行漫游");
+    return;
+  }
+
+  session->setCanFly(target_fly);
+  session->setIsFlying(target_fly);
+
+  if (target_fly) {
+    const uint8_t flags = PlayerAbilitiesFlags::AllowFlying |
+                          PlayerAbilitiesFlags::Flying |
+                          PlayerAbilitiesFlags::Invulnerable;
+    PlayHandler::sendPlayerAbilities(session, flags);
+    sendSystemMessage(sender_sid, "§a[系统] 飞行模式已开启！(按空格起飞，Shift 下降，再次输入 /fly 关闭)");
+    spdlog::info("[Command] Player {} (SID {}) enabled flight mode", session->username(), sender_sid);
+  } else {
+    const uint8_t flags = PlayerAbilitiesFlags::Invulnerable;
+    PlayHandler::sendPlayerAbilities(session, flags);
+    sendSystemMessage(sender_sid, "§c[系统] 飞行模式已关闭。");
+    spdlog::info("[Command] Player {} (SID {}) disabled flight mode", session->username(), sender_sid);
   }
 }
 

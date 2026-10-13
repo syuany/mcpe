@@ -51,6 +51,7 @@ main() {
 
     // 4. 初始化聊天多播与快捷指令路由系统
     auto chat_handler = std::make_shared<ChatHandler>();
+    chat_handler->setClientManager(client_manager);
     chat_handler->setSenders(
         [client_manager](uint64_t session_id, ByteBuffer packet) {
           client_manager->sendPacketTo(session_id, std::move(packet));
