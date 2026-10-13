@@ -15,8 +15,10 @@
 #include "protocol/ChatHandler.h"
 #include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
+#include "protocol/PlayHandler.h"
 #include "world/EntityManager.h"
 #include "world/EventQueue.h"
+#include "world/World.h"
 #include "world/WorldTicker.h"
 
 namespace {
@@ -71,7 +73,19 @@ main() {
         }
     );
 
-    // 6. 初始化并启动 20 TPS 物理主循环节拍器
+    // 6. 初始化大厅世界并预加载浮空岛建筑蓝图
+    auto world = std::make_shared<World>();
+    if (world->loadLobbySchematic("assets/maps/lobby.schematic", BlockPos{0, 0, 0})) {
+      // 96x48x96 浮空岛中心位于 (48, 48)，广场地面位于 Y=32，安全站立点位于 Y=34.0
+      world->setSpawnPoint(Vector3d{48.5, 34.0, 48.5});
+      entity_manager->setDefaultSpawn(world->spawnPoint());
+      spdlog::info("[Main] Loaded floating island lobby schematic, spawn set to (48.5, 34.0, 48.5)");
+    } else {
+      spdlog::warn("[Main] Failed to load lobby schematic, falling back to default flat world");
+    }
+    PlayHandler::setWorld(world);
+
+    // 7. 初始化并启动 20 TPS 物理主循环节拍器
     auto world_ticker = std::make_shared<WorldTicker>(
         *event_queue,
         *entity_manager,
@@ -81,7 +95,7 @@ main() {
     );
     world_ticker->start();
 
-    // 7. 使用独立端口监听
+    // 8. 使用独立端口监听
     TcpServer server(io_context, kServerPort);
 
     // 会话工厂：挂接 ClientManager 与 EventQueue
