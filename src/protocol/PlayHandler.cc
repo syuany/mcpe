@@ -38,7 +38,7 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   if (g_world) {
     spawn_pos = g_world->spawnPoint();
     const world::ChunkPos center_chunk = spawn_pos.toBlockPos().toChunkPos();
-    constexpr int32_t kViewRadius = 3;  // 7x7 视距区块窗口
+    constexpr int32_t kViewRadius = 5;  // 11x11 视距区块窗口（覆盖大厅全貌）
 
     for (int32_t cz = center_chunk.z - kViewRadius; cz <= center_chunk.z + kViewRadius; ++cz) {
       for (int32_t cx = center_chunk.x - kViewRadius; cx <= center_chunk.x + kViewRadius; ++cx) {
@@ -63,6 +63,10 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
       }
     }
   }
+
+  // 0x46 Spawn Position: 指南针与官方世界出生点坐标
+  network::PacketWriter spawn_pos_writer(session, 0x46);
+  spawn_pos_writer.writeBe<uint64_t>(spawn_pos.toBlockPos().toProtocolPosition());
 
   const int32_t teleport_id = session->nextTeleportId();
   sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, 0.0f, 0.0f, 0x00, teleport_id);

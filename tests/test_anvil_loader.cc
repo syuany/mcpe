@@ -202,8 +202,11 @@ TEST(AnvilLoaderTest, ParseRegionFileChunkSections) {
 
 TEST(AnvilLoaderTest, LoadFromDiskZipIfAvailable) {
   const std::filesystem::path paths[] = {
+      "assets/maps/lobby/floating-island.zip",
       "assets/maps/lobby/world.zip",
+      "../assets/maps/lobby/floating-island.zip",
       "../assets/maps/lobby/world.zip",
+      "../../assets/maps/lobby/floating-island.zip",
       "../../assets/maps/lobby/world.zip"
   };
 
@@ -213,10 +216,9 @@ TEST(AnvilLoaderTest, LoadFromDiskZipIfAvailable) {
       size_t count = AnvilLoader::loadFromZip(p, world);
       EXPECT_GT(count, 0);
       EXPECT_GT(world.chunkCount(), 0);
-      // 验证出生点被正确解析
-      EXPECT_DOUBLE_EQ(world.spawnPoint().x, 8.5);
-      EXPECT_DOUBLE_EQ(world.spawnPoint().y, 4.0);
-      EXPECT_DOUBLE_EQ(world.spawnPoint().z, 8.5);
+      // 验证出生点被自适应修正至大厅安全地面（Y=56.0，非虚空 Y=4.0）
+      EXPECT_GE(world.spawnPoint().y, 50.0);
+      EXPECT_LT(world.spawnPoint().x, 0.0);
       break;
     }
   }

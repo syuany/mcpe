@@ -68,6 +68,7 @@ class MockClient:
         self.sock = socket.create_connection((host, port), timeout=5.0)
         self.entity_id = -1
         self.uuid = ""
+        self.spawn_pos = (0.0, 0.0, 0.0)
 
     def login_and_spawn(self):
         # 1. Handshake
@@ -105,6 +106,8 @@ class MockClient:
                 self.entity_id = struct.unpack('>i', payload[:4])[0]
             elif p_id == 0x2F:  # Player Position And Look
                 # double x, y, z, float yaw, pitch, byte flags, VarInt tp_id
+                x, y, z = struct.unpack('>ddd', payload[0:24])
+                self.spawn_pos = (x, y, z)
                 tp_id_bytes = payload[33:]
                 val = 0
                 for i, b in enumerate(tp_id_bytes):
@@ -189,7 +192,8 @@ def main():
     # 4. 验证移动差分同步 (Steve 跑动，Alex 接收位移)
     print("\n[*] 验证阶段 2: 玩家移动差分广播 (0x26 / 0x27)...")
     alex.sock.settimeout(2.0)
-    steve.send_move_and_look(49.5, 34.0, 48.5, 90.0, 0.0, on_ground=True)
+    sx, sy, sz = steve.spawn_pos
+    steve.send_move_and_look(sx + 1.0, sy, sz, 90.0, 0.0, on_ground=True)
 
     alex_saw_move = False
     start = time.time()
