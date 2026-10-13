@@ -189,7 +189,7 @@ def main():
     # 4. 验证移动差分同步 (Steve 跑动，Alex 接收位移)
     print("\n[*] 验证阶段 2: 玩家移动差分广播 (0x26 / 0x27)...")
     alex.sock.settimeout(2.0)
-    steve.send_move_and_look(1.5, 4.0, 0.5, 90.0, 0.0, on_ground=True)
+    steve.send_move_and_look(49.5, 34.0, 48.5, 90.0, 0.0, on_ground=True)
 
     alex_saw_move = False
     start = time.time()
