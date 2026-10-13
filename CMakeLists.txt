@@ -133,6 +133,7 @@ add_library(mcpe_world STATIC
     src/world/WorldTicker.cc
     src/world/SchematicLoader.cc
     src/world/World.cc
+    src/world/SpatialGrid.cc
 )
 
 target_include_directories(mcpe_world PUBLIC
@@ -326,3 +327,16 @@ target_link_libraries(test_world PRIVATE
 )
 
 gtest_discover_tests(test_world)
+
+# SpatialGrid 九宫格空间桶与邻居差异集测试
+add_executable(test_spatial_grid
+    tests/test_spatial_grid.cc
+)
+
+target_link_libraries(test_spatial_grid PRIVATE
+    mcpe_world
+    mcpe_common
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_spatial_grid)
