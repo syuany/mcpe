@@ -65,6 +65,20 @@ class World {
   bool loadLobbySchematic(const std::filesystem::path& path, const BlockPos& origin);
 
   /**
+   * @brief 从原版世界存档 ZIP 包（包含 level.dat 与 region 区域文件）加载世界并设置出生点
+   * @param path ZIP 文件路径
+   * @return 成功加载的 Chunk 总数
+   */
+  size_t loadWorldFromZip(const std::filesystem::path& path);
+
+  /**
+   * @brief 从原版世界存档目录加载世界并设置出生点
+   * @param path 存档根目录路径
+   * @return 成功加载的 Chunk 总数
+   */
+  size_t loadWorldFromDirectory(const std::filesystem::path& path);
+
+  /**
    * @brief 获取当前世界中所有已加载区块的坐标列表
    */
   [[nodiscard]] size_t chunkCount() const noexcept { return chunks_.size(); }

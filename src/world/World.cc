@@ -7,6 +7,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include "world/AnvilLoader.h"
+
 namespace mcpe::world {
 
 const Chunk*
@@ -82,6 +84,16 @@ World::loadLobbySchematic(const std::filesystem::path& path, const BlockPos& ori
 
   loadSchematic(*schem_opt, origin);
   return true;
+}
+
+size_t
+World::loadWorldFromZip(const std::filesystem::path& path) {
+  return AnvilLoader::loadFromZip(path, *this);
+}
+
+size_t
+World::loadWorldFromDirectory(const std::filesystem::path& path) {
+  return AnvilLoader::loadFromDirectory(path, *this);
 }
 
 std::vector<ChunkPos>
