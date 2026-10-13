@@ -108,16 +108,28 @@ PacketRouter::dispatch(
           PlayHandler::handlePlayerMovement(session, packet_id, packet);
           break;
 
-        // 白名单容忍原版客户端高频例行报文（语言、视距、皮肤偏好、快捷栏切换等）
+        case ServerboundPacket::PlayerDigging:
+          PlayHandler::handlePlayerDigging(session, packet);
+          break;
+
+        case ServerboundPacket::PlayerBlockPlacement:
+          PlayHandler::handleBlockPlacement(session, packet);
+          break;
+
+        // 白名单容忍原版客户端高频例行与交互报文（语言、视距、皮肤偏好、快捷栏切换、摆臂挥手、物品使用等）
         case ServerboundPacket::ClientStatus:
         case ServerboundPacket::ClientSettings:
         case ServerboundPacket::ConfirmTransaction:
+        case ServerboundPacket::ClickWindow:
         case ServerboundPacket::CloseWindow:
         case ServerboundPacket::PluginMessage:
+        case ServerboundPacket::UseEntity:
         case ServerboundPacket::PlayerAbilities:
         case ServerboundPacket::EntityAction:
         case ServerboundPacket::ResourcePackStatus:
         case ServerboundPacket::HeldItemChange:
+        case ServerboundPacket::Animation:
+        case ServerboundPacket::UseItem:
           spdlog::debug("[Router] Ignored routine PLAY packet 0x{:02X}", packet_id);
           packet.retrieveAll();
           break;

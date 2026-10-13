@@ -21,8 +21,10 @@ inline constexpr int32_t ChatMessage = 0x02;
 inline constexpr int32_t ClientStatus = 0x03;
 inline constexpr int32_t ClientSettings = 0x04;
 inline constexpr int32_t ConfirmTransaction = 0x05;
+inline constexpr int32_t ClickWindow = 0x07;
 inline constexpr int32_t CloseWindow = 0x08;
 inline constexpr int32_t PluginMessage = 0x09;
+inline constexpr int32_t UseEntity = 0x0A;
 inline constexpr int32_t KeepAlive = 0x0B;
 inline constexpr int32_t Player = 0x0C;
 inline constexpr int32_t PlayerPosition = 0x0D;
@@ -33,7 +35,9 @@ inline constexpr int32_t PlayerDigging = 0x14;
 inline constexpr int32_t EntityAction = 0x15;
 inline constexpr int32_t ResourcePackStatus = 0x18;
 inline constexpr int32_t HeldItemChange = 0x1A;
+inline constexpr int32_t Animation = 0x1D;
 inline constexpr int32_t PlayerBlockPlacement = 0x1F;
+inline constexpr int32_t UseItem = 0x20;
 }  // namespace ServerboundPacket
 
 /**

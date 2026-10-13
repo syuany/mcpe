@@ -62,6 +62,18 @@ class PlayHandler {
       const std::shared_ptr<ClientSession>& session,
       ByteBuffer& payload
   );
+
+  /** @brief 处理客户端发来的方块挖掘包 (0x14)：大厅保护环境下拒绝并静默消费 */
+  static void handlePlayerDigging(
+      const std::shared_ptr<ClientSession>& session,
+      ByteBuffer& payload
+  );
+
+  /** @brief 处理客户端发来的方块放置包 (0x1F)：大厅保护环境下拒绝并静默消费 */
+  static void handleBlockPlacement(
+      const std::shared_ptr<ClientSession>& session,
+      ByteBuffer& payload
+  );
 };
 
 }  // namespace mcpe::protocol

@@ -315,4 +315,28 @@ PlayHandler::handleChatMessage(
   }
 }
 
+void
+PlayHandler::handlePlayerDigging(
+    const std::shared_ptr<ClientSession>& session,
+    ByteBuffer& payload
+) {
+  spdlog::debug(
+      "[PlayHandler] Block digging rejected (lobby block protection) from {}",
+      session->remoteAddress()
+  );
+  payload.retrieveAll();
+}
+
+void
+PlayHandler::handleBlockPlacement(
+    const std::shared_ptr<ClientSession>& session,
+    ByteBuffer& payload
+) {
+  spdlog::debug(
+      "[PlayHandler] Block placement rejected (lobby block protection) from {}",
+      session->remoteAddress()
+  );
+  payload.retrieveAll();
+}
+
 }  // namespace mcpe::protocol

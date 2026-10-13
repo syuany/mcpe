@@ -249,15 +249,21 @@ INSTANTIATE_TEST_SUITE_P(
         0x03,  // Client Status
         0x04,  // Client Settings
         0x05,  // Confirm Transaction
+        0x07,  // Click Window
         0x08,  // Close Window
         0x09,  // Plugin Message
+        0x0A,  // Use Entity
         0x0C,  // Player
         0x0D,  // Player Position
         0x0E,  // Player Position And Look
         0x0F,  // Player Look
         0x13,  // Player Abilities
+        0x14,  // Player Digging (Lobby block protection)
         0x18,  // Resource Pack Status
-        0x1A   // Held Item Change
+        0x1A,  // Held Item Change
+        0x1D,  // Animation
+        0x1F,  // Player Block Placement (Lobby block protection)
+        0x20   // Use Item
     )
 );
 

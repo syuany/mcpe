@@ -30,9 +30,9 @@ struct ServerConfig {
   std::string motd{"§aA High Performance C++ Server §7[Asio/C++23]"};
   int32_t max_players{100};
 
-  GameMode default_gamemode{GameMode::Creative};
+  GameMode default_gamemode{GameMode::Adventure};
   Dimension default_dimension{Dimension::Overworld};
-  Difficulty default_difficulty{Difficulty::Normal};
+  Difficulty default_difficulty{Difficulty::Peaceful};
   std::string level_type{"flat"};
   bool reduced_debug_info{false};
 
