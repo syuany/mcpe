@@ -54,11 +54,23 @@ inline constexpr int32_t JoinGame = 0x23;
 inline constexpr int32_t EntityRelativeMove = 0x26;
 inline constexpr int32_t EntityLookAndRelativeMove = 0x27;
 inline constexpr int32_t EntityLook = 0x28;
+inline constexpr int32_t PlayerAbilities = 0x2C;
 inline constexpr int32_t PlayerListItem = 0x2E;
 inline constexpr int32_t PlayerPositionAndLook = 0x2F;
 inline constexpr int32_t DestroyEntities = 0x32;
+inline constexpr int32_t SpawnPosition = 0x46;
 inline constexpr int32_t EntityTeleport = 0x4C;
 }  // namespace ClientboundPacket
+
+/**
+ * @brief 0x2C / 0x13 Player Abilities 标志位掩码 (Bit field)
+ */
+namespace PlayerAbilitiesFlags {
+inline constexpr uint8_t Invulnerable = 0x01;  // 无敌 (不承受伤害)
+inline constexpr uint8_t Flying       = 0x02;  // 正在飞行
+inline constexpr uint8_t AllowFlying  = 0x04;  // 允许飞行 (双击空格起飞)
+inline constexpr uint8_t CreativeMode = 0x08;  // 创造模式
+}  // namespace PlayerAbilitiesFlags
 
 /**
  * @brief 0x2E Player List Item 动作枚举

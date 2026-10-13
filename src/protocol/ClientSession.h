@@ -142,6 +142,25 @@ class ClientSession : public network::SessionCallbacks,
     pending_teleport_id_ = id;
   }
 
+  // --- 飞行与能力状态 ---
+  bool
+  canFly() const noexcept {
+    return can_fly_;
+  }
+  void
+  setCanFly(bool can_fly) noexcept {
+    can_fly_ = can_fly;
+  }
+
+  bool
+  isFlying() const noexcept {
+    return is_flying_;
+  }
+  void
+  setIsFlying(bool is_flying) noexcept {
+    is_flying_ = is_flying;
+  }
+
   // --- 全局会话管理器关联 ---
   void
   setClientManager(std::weak_ptr<ClientManager> mgr) noexcept {
@@ -189,6 +208,9 @@ class ClientSession : public network::SessionCallbacks,
   int64_t last_keep_alive_id_{0};
   std::chrono::steady_clock::time_point last_alive_time_;
   bool awaiting_keep_alive_{false};
+
+  bool can_fly_{false};
+  bool is_flying_{false};
 };
 
 }  // namespace mcpe::protocol

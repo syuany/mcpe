@@ -116,6 +116,10 @@ PacketRouter::dispatch(
           PlayHandler::handleBlockPlacement(session, packet);
           break;
 
+        case ServerboundPacket::PlayerAbilities:
+          PlayHandler::handlePlayerAbilities(session, packet);
+          break;
+
         // 白名单容忍原版客户端高频例行与交互报文（语言、视距、皮肤偏好、快捷栏切换、摆臂挥手、物品使用等）
         case ServerboundPacket::ClientStatus:
         case ServerboundPacket::ClientSettings:
@@ -124,7 +128,6 @@ PacketRouter::dispatch(
         case ServerboundPacket::CloseWindow:
         case ServerboundPacket::PluginMessage:
         case ServerboundPacket::UseEntity:
-        case ServerboundPacket::PlayerAbilities:
         case ServerboundPacket::EntityAction:
         case ServerboundPacket::ResourcePackStatus:
         case ServerboundPacket::HeldItemChange:

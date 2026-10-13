@@ -43,6 +43,20 @@ class PlayHandler {
       int32_t teleport_id
   );
 
+  /** @brief 下发 Player Abilities (0x2C) 玩家能力/飞行状态包 */
+  static void sendPlayerAbilities(
+      const std::shared_ptr<ClientSession>& session,
+      uint8_t flags,
+      float flying_speed = 0.05f,
+      float fov_modifier = 0.1f
+  );
+
+  /** @brief 处理客户端发来的 Player Abilities (0x13) 飞行状态同步包 */
+  static void handlePlayerAbilities(
+      const std::shared_ptr<ClientSession>& session,
+      ByteBuffer& payload
+  );
+
   /** @brief 处理客户端回传的 Teleport Confirm (0x00) */
   static void
   handleTeleportConfirm(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload);

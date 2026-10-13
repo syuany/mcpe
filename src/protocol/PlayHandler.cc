@@ -65,8 +65,11 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   }
 
   // 0x46 Spawn Position: 指南针与官方世界出生点坐标
-  network::PacketWriter spawn_pos_writer(session, 0x46);
+  network::PacketWriter spawn_pos_writer(session, ClientboundPacket::SpawnPosition);
   spawn_pos_writer.writeBe<uint64_t>(spawn_pos.toBlockPos().toProtocolPosition());
+
+  // 0x2C Player Abilities: 默认下发无敌与禁用飞行（行走模式）
+  sendPlayerAbilities(session, PlayerAbilitiesFlags::Invulnerable);
 
   const int32_t teleport_id = session->nextTeleportId();
   sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, 0.0f, 0.0f, 0x00, teleport_id);
@@ -128,6 +131,64 @@ PlayHandler::sendPlayerPositionAndLook(
       session->remoteAddress(),
       teleport_id
   );
+}
+
+void
+PlayHandler::sendPlayerAbilities(
+    const std::shared_ptr<ClientSession>& session,
+    uint8_t flags,
+    float flying_speed,
+    float fov_modifier
+) {
+  network::PacketWriter writer(session, ClientboundPacket::PlayerAbilities);
+  writer.writeBe<uint8_t>(flags);
+  writer.writeBe<float>(flying_speed);
+  writer.writeBe<float>(fov_modifier);
+
+  spdlog::debug(
+      "[PlayHandler] Sent Player Abilities (0x2C) to {}, flags=0x{:02X}, fly_speed={:.2f}",
+      session->remoteAddress(),
+      flags,
+      flying_speed
+  );
+}
+
+void
+PlayHandler::handlePlayerAbilities(
+    const std::shared_ptr<ClientSession>& session,
+    ByteBuffer& payload
+) {
+  if (payload.readableBytes() < 1) {
+    payload.retrieveAll();
+    return;
+  }
+
+  auto flags_opt = payload.readBe<uint8_t>();
+  if (!flags_opt) {
+    payload.retrieveAll();
+    return;
+  }
+
+  const uint8_t flags = *flags_opt;
+  const bool client_flying = (flags & PlayerAbilitiesFlags::Flying) != 0;
+
+  if (client_flying && !session->canFly()) {
+    // 客户端未获授权试图起飞，下发修正包强制拉回行走状态
+    spdlog::warn(
+        "[PlayHandler] Unauthorized flight packet from {}, resetting abilities",
+        session->remoteAddress()
+    );
+    sendPlayerAbilities(session, PlayerAbilitiesFlags::Invulnerable);
+  } else {
+    session->setIsFlying(client_flying);
+    spdlog::debug(
+        "[PlayHandler] Updated flight state for {}: is_flying={}",
+        session->remoteAddress(),
+        client_flying
+    );
+  }
+
+  payload.retrieveAll();
 }
 
 void
@@ -267,8 +328,10 @@ PlayHandler::handlePlayerMovement(
 
   payload.retrieveAll();
 
-  // 商业大厅虚空跌落复位 (Fall Reset: Y < 20.0 瞬移拉回出生点)
-  if (move_event.has_position && move_event.position.y < 20.0) {
+  // 商业大厅虚空跌落复位 (Fall Reset)
+  // 正常行走跌入 Y < 20.0 触发复位；开启飞行模式的玩家在极端虚空 Y < 0.0 时触发复位，避免在岛屿底部漫游时误判
+  const double fall_threshold = session->canFly() ? 0.0 : 20.0;
+  if (move_event.has_position && move_event.position.y < fall_threshold) {
     const Vector3d reset_pos = g_world ? g_world->spawnPoint() : Vector3d{0.5, 4.0, 0.5};
     const int32_t tid = session->nextTeleportId();
     sendPlayerPositionAndLook(
@@ -282,9 +345,10 @@ PlayHandler::handlePlayerMovement(
         tid
     );
     spdlog::info(
-        "[PlayHandler] Fall reset triggered for {} at Y={:.2f}",
+        "[PlayHandler] Fall reset triggered for {} at Y={:.2f} (can_fly={})",
         session->remoteAddress(),
-        move_event.position.y
+        move_event.position.y,
+        session->canFly()
     );
     return;
   }
