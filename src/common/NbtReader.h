@@ -6,6 +6,7 @@
 #ifndef MCPE_COMMON_NBT_READER_H
 #define MCPE_COMMON_NBT_READER_H
 
+#include <bit>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -91,6 +92,13 @@ class NbtReader {
     }
     offset_ += 8;
     return static_cast<int64_t>(val);
+  }
+
+  std::optional<double>
+  readDouble() noexcept {
+    auto i64 = readI64();
+    if (!i64) return std::nullopt;
+    return std::bit_cast<double>(static_cast<uint64_t>(*i64));
   }
 
   std::optional<std::string_view>
