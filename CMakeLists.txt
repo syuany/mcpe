@@ -76,6 +76,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
+# 4. ZLIB (用于 Schematic Gzip 蓝图与 NBT 压缩解压)
+find_package(ZLIB QUIET)
+if(NOT ZLIB_FOUND)
+    FetchContent_Declare(
+        zlib
+        GIT_REPOSITORY https://github.com/madler/zlib.git
+        GIT_TAG        v1.3.1
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(zlib)
+    if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    endif()
+endif()
+
+
 # ==============================================
 # 模块1: mcpe_common 静态库
 # ==============================================
@@ -115,13 +131,14 @@ add_library(mcpe_world STATIC
     src/world/FlatWorldGenerator.cc
     src/world/EntityManager.cc
     src/world/WorldTicker.cc
+    src/world/SchematicLoader.cc
 )
 
 target_include_directories(mcpe_world PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
-target_link_libraries(mcpe_world PUBLIC mcpe_common)
+target_link_libraries(mcpe_world PUBLIC mcpe_common ZLIB::ZLIB)
 
 # ==============================================
 # 模块4: mcpe_protocol 静态库
@@ -283,3 +300,15 @@ target_link_libraries(test_sprint3 PRIVATE
 )
 
 gtest_discover_tests(test_sprint3)
+# WorldEdit .schematic 建筑蓝图加载与解析测试
+add_executable(test_schematic
+    tests/test_schematic.cc
+)
+
+target_link_libraries(test_schematic PRIVATE
+    mcpe_world
+    mcpe_common
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_schematic)
