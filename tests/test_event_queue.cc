@@ -4,8 +4,8 @@
 #include <thread>
 #include <vector>
 
+#include "common/SpatialTypes.h"
 #include "world/EventQueue.h"
-#include "world/WorldTypes.h"
 
 using namespace mcpe::world;
 
@@ -66,7 +66,8 @@ TEST(EventQueueTest, PatternMatchingWithStdVisit) {
       .rotation = {90.0f, 0.0f},
       .on_ground = true,
       .has_position = true,
-      .has_rotation = true};
+      .has_rotation = true
+  };
   queue.push(std::move(move_event));
 
   // 2. 推入挖掘事件
@@ -76,7 +77,8 @@ TEST(EventQueueTest, PatternMatchingWithStdVisit) {
   dig_event.payload = PlayerDiggingEvent{
       .status = DigStatus::Finished,
       .block_pos = BlockPos{12, 64, -8},
-      .face = BlockFace::Top};
+      .face = BlockFace::Top
+  };
   queue.push(std::move(dig_event));
 
   // 3. 消费并断言模式匹配
@@ -103,8 +105,12 @@ TEST(EventQueueTest, PatternMatchingWithStdVisit) {
               EXPECT_EQ(dig.block_pos, BlockPos(12, 64, -8));
               EXPECT_EQ(dig.face, BlockFace::Top);
             },
-            [](const auto&) { FAIL() << "Unexpected event payload"; }},
-        ev.payload);
+            [](const auto&) {
+              FAIL() << "Unexpected event payload";
+            }
+        },
+        ev.payload
+    );
   }
 
   EXPECT_EQ(move_count, 1);
@@ -133,7 +139,8 @@ TEST(EventQueueTest, HighConcurrencyMpscThreadSafety) {
         ev.payload = PlayerMoveEvent{
             .position = {static_cast<double>(i), 0.0, 0.0},
             .rotation = {0.0f, 0.0f},
-            .on_ground = true};
+            .on_ground = true
+        };
         queue.push(std::move(ev));
       }
     });

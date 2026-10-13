@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <span>
 
-#include "world/WorldTypes.h"
+#include "common/SpatialTypes.h"
 
 namespace mcpe::world {
 

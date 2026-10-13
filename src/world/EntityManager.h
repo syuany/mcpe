@@ -24,6 +24,7 @@
 #include "common/ByteBuffer.h"
 #include "common/SpatialTypes.h"
 #include "protocol/PacketTypes.h"
+#include "world/SpatialGrid.h"
 
 namespace mcpe::world {
 
@@ -64,6 +65,11 @@ class EntityManager {
       BroadcastSender broadcast
   );
 
+  void setDefaultSpawn(const Vector3d& pos, const Rotation& rot = {0.0f, 0.0f}) noexcept {
+    default_spawn_pos_ = pos;
+    default_spawn_rot_ = rot;
+  }
+
   /**
    * @brief 注册新玩家加入世界：触发双向同屏广播与 Player List 呈现
    */
@@ -71,8 +77,15 @@ class EntityManager {
       uint64_t session_id,
       int32_t entity_id,
       std::string_view username,
+      const std::array<uint8_t, 16>& uuid
+  );
+
+  void addPlayer(
+      uint64_t session_id,
+      int32_t entity_id,
+      std::string_view username,
       const std::array<uint8_t, 16>& uuid,
-      const Vector3d& spawn_pos = {0.5, 4.0, 0.5},
+      const Vector3d& spawn_pos,
       const Rotation& spawn_rot = {0.0f, 0.0f}
   );
 
@@ -101,6 +114,9 @@ class EntityManager {
   [[nodiscard]] size_t playerCount() const noexcept { return players_.size(); }
   [[nodiscard]] const PlayerEntity* getPlayer(uint64_t session_id) const;
 
+  [[nodiscard]] const SpatialGrid& grid() const noexcept { return grid_; }
+  [[nodiscard]] SpatialGrid& grid() noexcept { return grid_; }
+
   // --- 静态协议数据包构建器 (Minecraft 1.12.2 Protocol 340 物理二进制规范) ---
   static ByteBuffer buildPlayerListItemPacket(
       const PlayerEntity& player,
@@ -122,7 +138,10 @@ class EntityManager {
   PacketSender sender_;
   BroadcastExceptSender broadcast_except_;
   BroadcastSender broadcast_;
+  SpatialGrid grid_;
   std::unordered_map<uint64_t, PlayerEntity> players_;
+  Vector3d default_spawn_pos_{0.5, 4.0, 0.5};
+  Rotation default_spawn_rot_{0.0f, 0.0f};
 };
 
 }  // namespace mcpe::world

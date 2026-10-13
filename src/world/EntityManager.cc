@@ -38,6 +38,16 @@ EntityManager::addPlayer(
     uint64_t session_id,
     int32_t entity_id,
     std::string_view username,
+    const std::array<uint8_t, 16>& uuid
+) {
+  addPlayer(session_id, entity_id, username, uuid, default_spawn_pos_, default_spawn_rot_);
+}
+
+void
+EntityManager::addPlayer(
+    uint64_t session_id,
+    int32_t entity_id,
+    std::string_view username,
     const std::array<uint8_t, 16>& uuid,
     const Vector3d& spawn_pos,
     const Rotation& spawn_rot
@@ -60,17 +70,27 @@ EntityManager::addPlayer(
       session_id
   );
 
-  // 1. 先向既有玩家下发新玩家的 Player List Item (0x2E, Action=0) 与 Spawn Player (0x05)
+  const ChunkPos spawn_chunk = spawn_pos.toBlockPos().toChunkPos();
+  grid_.addPlayer(session_id, spawn_chunk);
+
+  // 1. 获取九宫格范围内的邻居玩家（局部 AOI）
+  const auto nearby_sids = grid_.getNearbyPlayers(spawn_chunk, 1);
+
   auto new_list_pkt =
       buildPlayerListItemPacket(new_player, protocol::PlayerListItemAction::AddPlayer);
   auto new_spawn_pkt = buildSpawnPlayerPacket(new_player);
 
-  for (const auto& [other_sid, other_player] : players_) {
+  for (uint64_t other_sid : nearby_sids) {
+    if (other_sid == session_id) continue;
+    auto other_it = players_.find(other_sid);
+    if (other_it == players_.end()) continue;
+    const auto& other_player = other_it->second;
+
     if (sender_) {
       sender_(other_sid, new_list_pkt.clone());
       sender_(other_sid, new_spawn_pkt.clone());
 
-      // 2. 向新玩家展示既有玩家的 0x2E 与 0x05
+      // 2. 向新玩家展示九宫格内既有邻居玩家的 0x2E 与 0x05
       sender_(
           session_id,
           buildPlayerListItemPacket(other_player, protocol::PlayerListItemAction::AddPlayer)
@@ -102,13 +122,23 @@ EntityManager::removePlayer(uint64_t session_id) {
       session_id
   );
 
+  const ChunkPos p_chunk = grid_.getPlayerChunk(session_id);
+  const auto observers = grid_.getNearbyPlayers(p_chunk, 1);
+  grid_.removePlayer(session_id);
+
   // 广播 0x32 Destroy Entities 销毁模型
   auto destroy_pkt = buildDestroyEntitiesPacket(player.entity_id);
   // 广播 0x2E Player List Item (Action=4 Remove Player) 移除 Tab 列表项
   auto remove_list_pkt =
       buildPlayerListItemPacket(player, protocol::PlayerListItemAction::RemovePlayer);
 
-  if (broadcast_except_) {
+  if (sender_) {
+    for (uint64_t obs_sid : observers) {
+      if (obs_sid == session_id) continue;
+      sender_(obs_sid, destroy_pkt.clone());
+      sender_(obs_sid, remove_list_pkt.clone());
+    }
+  } else if (broadcast_except_) {
     broadcast_except_(session_id, std::move(destroy_pkt));
     broadcast_except_(session_id, std::move(remove_list_pkt));
   } else if (broadcast_) {
@@ -133,7 +163,76 @@ EntityManager::updatePlayerPosition(
 
   auto& player = it->second;
   if (pos.has_value()) {
+    const ChunkPos old_chunk = grid_.getPlayerChunk(session_id);
+    const ChunkPos new_chunk = pos->toBlockPos().toChunkPos();
     player.position = *pos;
+
+    if (old_chunk != new_chunk) {
+      auto trans = grid_.updatePlayerChunk(session_id, new_chunk, 1);
+      spdlog::debug(
+          "[EntityManager] Player '{}' crossed chunk: ({}, {}) -> ({}, {}), enter_chunks: {}, leave_chunks: {}",
+          player.username,
+          old_chunk.x,
+          old_chunk.z,
+          new_chunk.x,
+          new_chunk.z,
+          trans.enter_chunks.size(),
+          trans.leave_chunks.size()
+      );
+      if (trans.crossed) {
+        // 对进入视野的新区块玩家：互发 0x2E 与 0x05
+        for (ChunkPos ec : trans.enter_chunks) {
+          auto enter_sids = grid_.getNearbyPlayers(ec, 0);
+          for (uint64_t other_sid : enter_sids) {
+            if (other_sid == session_id) continue;
+            auto other_it = players_.find(other_sid);
+            if (other_it == players_.end()) continue;
+
+            if (sender_) {
+              sender_(
+                  other_sid,
+                  buildPlayerListItemPacket(player, protocol::PlayerListItemAction::AddPlayer)
+              );
+              sender_(other_sid, buildSpawnPlayerPacket(player));
+              sender_(
+                  session_id,
+                  buildPlayerListItemPacket(
+                      other_it->second,
+                      protocol::PlayerListItemAction::AddPlayer
+                  )
+              );
+              sender_(session_id, buildSpawnPlayerPacket(other_it->second));
+            }
+          }
+        }
+
+        // 对移出视野的旧区块玩家：互发 0x32 销毁模型
+        for (ChunkPos lc : trans.leave_chunks) {
+          auto leave_sids = grid_.getNearbyPlayers(lc, 0);
+          for (uint64_t other_sid : leave_sids) {
+            if (other_sid == session_id) continue;
+            auto other_it = players_.find(other_sid);
+            if (other_it == players_.end()) continue;
+
+            if (sender_) {
+              sender_(other_sid, buildDestroyEntitiesPacket(player.entity_id));
+              sender_(
+                  other_sid,
+                  buildPlayerListItemPacket(player, protocol::PlayerListItemAction::RemovePlayer)
+              );
+              sender_(session_id, buildDestroyEntitiesPacket(other_it->second.entity_id));
+              sender_(
+                  session_id,
+                  buildPlayerListItemPacket(
+                      other_it->second,
+                      protocol::PlayerListItemAction::RemovePlayer
+                  )
+              );
+            }
+          }
+        }
+      }
+    }
   }
   if (rot.has_value()) {
     player.rotation = *rot;
@@ -185,7 +284,16 @@ EntityManager::updateAndBroadcast() {
       pkt = buildEntityLookPacket(p.entity_id, p.rotation, p.on_ground);
     }
 
-    if (broadcast_except_) {
+    // 九宫格局部多播：仅向当前区块九宫格内的邻居投递
+    const ChunkPos cur_chunk = grid_.getPlayerChunk(sid);
+    const auto observers = grid_.getNearbyPlayers(cur_chunk, 1);
+
+    if (sender_) {
+      for (uint64_t obs_sid : observers) {
+        if (obs_sid == sid) continue;
+        sender_(obs_sid, pkt.clone());
+      }
+    } else if (broadcast_except_) {
       broadcast_except_(sid, std::move(pkt));
     }
 

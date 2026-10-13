@@ -1,6 +1,6 @@
 #include "world/FlatWorldGenerator.h"
 
-#include "world/WorldTypes.h"
+#include "common/SpatialTypes.h"
 
 namespace mcpe::world {
 

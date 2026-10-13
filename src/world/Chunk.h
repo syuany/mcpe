@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <memory>
 
+#include "common/SpatialTypes.h"
 #include "world/ChunkSection.h"
-#include "world/WorldTypes.h"
 
 namespace mcpe::world {
 

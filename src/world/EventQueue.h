@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-#include "world/WorldTypes.h"
+#include "common/SpatialTypes.h"
 
 namespace mcpe::world {
 

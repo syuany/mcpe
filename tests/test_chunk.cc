@@ -4,11 +4,11 @@
 #include <unordered_set>
 #include <vector>
 
+#include "common/SpatialTypes.h"
 #include "protocol/ChunkSerializer.h"
 #include "world/Chunk.h"
 #include "world/ChunkSection.h"
 #include "world/FlatWorldGenerator.h"
-#include "world/WorldTypes.h"
 
 using namespace mcpe;
 using namespace mcpe::world;
