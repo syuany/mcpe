@@ -253,6 +253,51 @@ def main():
 
     assert steve_saw_cmd, "Steve 未收到 /maps 指令的系统回复！"
 
+    # 6.5. 验证 /fly 临时飞行模式开启与关闭
+    print("\n[*] 验证阶段 4.5: /fly 飞行权限与能力包 (0x2C) 切换验证...")
+    steve.send_chat("/fly")
+
+    steve_got_fly_packet = False
+    steve_got_fly_msg = False
+    start = time.time()
+    while time.time() - start < 2.0:
+        try:
+            p_id, payload = read_packet(steve.sock)
+            if p_id == 0x2C:  # Player Abilities
+                flags = payload[0]
+                if flags & 0x04:  # Allow Flying
+                    steve_got_fly_packet = True
+                    print(f"[✔] Steve 收到 0x2C Player Abilities 飞行能力包: flags=0x{flags:02X}")
+            elif p_id == 0x0F:
+                chat_json = payload[1:-1].decode('utf-8', errors='ignore')
+                if "飞行模式已开启" in chat_json:
+                    steve_got_fly_msg = True
+                    print(f"[✔] Steve 收到飞行开启系统提示: {chat_json}")
+            if steve_got_fly_packet and steve_got_fly_msg:
+                break
+        except socket.timeout:
+            break
+
+    assert steve_got_fly_packet, "Steve 未收到 0x2C 开启飞行能力数据包！"
+    assert steve_got_fly_msg, "Steve 未收到飞行模式已开启系统提示！"
+
+    # 关闭飞行
+    steve.send_chat("/fly off")
+    steve_got_fly_off = False
+    start = time.time()
+    while time.time() - start < 2.0:
+        try:
+            p_id, payload = read_packet(steve.sock)
+            if p_id == 0x2C:
+                flags = payload[0]
+                if not (flags & 0x04):
+                    steve_got_fly_off = True
+                    print(f"[✔] Steve 收到 0x2C 关闭飞行能力包: flags=0x{flags:02X}")
+                    break
+        except socket.timeout:
+            break
+    assert steve_got_fly_off, "Steve 未收到 0x2C 关闭飞行能力数据包！"
+
     # 7. 验证退服销毁广播
     print("\n[*] 验证阶段 5: 玩家退服实体销毁广播 (0x32)...")
     steve.close()

@@ -33,11 +33,13 @@
 #include "common/ByteBuffer.h"
 #include "network/PacketFraming.h"
 #include "network/TcpSession.h"
+#include "protocol/ChatHandler.h"
 #include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
 #include "protocol/HandshakeHandler.h"
 #include "protocol/PacketRouter.h"
+#include "protocol/PlayHandler.h"
 #include "protocol/StatusHandler.h"
 
 using namespace mcpe;
@@ -732,4 +734,133 @@ TEST_F(PacketRouterTest, ClientManagerLifecycleAndBroadcast) {
   mgr.removeSession(session_);
   EXPECT_EQ(mgr.sessionCount(), 0);
   EXPECT_EQ(mgr.playerCount(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// 测试集 7：Player Abilities 协议包路由分发与飞行防作弊校验
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, PlayerAbilitiesPacketDispatchAndAntiCheat) {
+  session_->setState(ConnectionState::PLAY);
+  EXPECT_FALSE(session_->canFly());
+  EXPECT_FALSE(session_->isFlying());
+
+  // 1. 未授权客户端擅自发送 0x13（宣称正在飞行 0x02）
+  ByteBuffer hack_pkt;
+  hack_pkt.appendVarInt(ServerboundPacket::PlayerAbilities);
+  hack_pkt.appendByte(PlayerAbilitiesFlags::Flying);
+  hack_pkt.writeBe<float>(0.05f);
+  hack_pkt.writeBe<float>(0.1f);
+
+  PacketRouter::dispatch(session_, ConnectionState::PLAY, std::move(hack_pkt));
+
+  // 状态未被篡改
+  EXPECT_FALSE(session_->isFlying());
+
+  // 服务端必须立刻回发修正包 0x2C (Invulnerable only)，拉回地面
+  auto resp = receivePacket();
+  ASSERT_TRUE(resp.has_value());
+  auto pid = resp->readVarInt();
+  ASSERT_TRUE(pid.has_value());
+  EXPECT_EQ(*pid, ClientboundPacket::PlayerAbilities);
+  auto flags = resp->readBe<uint8_t>();
+  ASSERT_TRUE(flags.has_value());
+  EXPECT_EQ(*flags, PlayerAbilitiesFlags::Invulnerable);
+
+  // 2. 授权后允许正常更新飞行状态
+  session_->setCanFly(true);
+  ByteBuffer legit_pkt;
+  legit_pkt.appendVarInt(ServerboundPacket::PlayerAbilities);
+  legit_pkt.appendByte(PlayerAbilitiesFlags::Flying);
+  legit_pkt.writeBe<float>(0.05f);
+  legit_pkt.writeBe<float>(0.1f);
+
+  PacketRouter::dispatch(session_, ConnectionState::PLAY, std::move(legit_pkt));
+  EXPECT_TRUE(session_->isFlying());
+
+  // 客户端双击空格落地
+  ByteBuffer land_pkt;
+  land_pkt.appendVarInt(ServerboundPacket::PlayerAbilities);
+  land_pkt.appendByte(0x00);
+  PacketRouter::dispatch(session_, ConnectionState::PLAY, std::move(land_pkt));
+  EXPECT_FALSE(session_->isFlying());
+}
+
+// ---------------------------------------------------------------------------
+// 测试集 8：/fly 快捷指令状态切换与私发回显校验
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, FlyCommandRoutingAndAbilitiesSync) {
+  session_->setState(ConnectionState::PLAY);
+  session_->setUsername("TestFlyer");
+
+  auto client_mgr = std::make_shared<ClientManager>();
+  client_mgr->addSession(session_);
+
+  ChatHandler chat;
+  chat.setClientManager(client_mgr);
+  chat.setSenders(
+      [client_mgr](uint64_t sid, ByteBuffer pkt) {
+        client_mgr->sendPacketTo(sid, std::move(pkt));
+      },
+      [client_mgr](ByteBuffer pkt) {
+        client_mgr->broadcast(std::move(pkt));
+      }
+  );
+
+  // 1. 发送 /fly 开启飞行
+  chat.handleMessage(session_->sessionId(), "TestFlyer", "/fly");
+
+  EXPECT_TRUE(session_->canFly());
+  EXPECT_TRUE(session_->isFlying());
+
+  // 验证收到 0x2C 开启能力包与 0x0F 系统提示
+  bool got_abilities = false;
+  bool got_sys_msg = false;
+
+  for (int i = 0; i < 2; ++i) {
+    auto pkt = receivePacket();
+    ASSERT_TRUE(pkt.has_value());
+    auto pid = pkt->readVarInt();
+    ASSERT_TRUE(pid.has_value());
+    if (*pid == ClientboundPacket::PlayerAbilities) {
+      got_abilities = true;
+      auto flags = pkt->readBe<uint8_t>();
+      ASSERT_TRUE(flags.has_value());
+      EXPECT_TRUE((*flags & PlayerAbilitiesFlags::AllowFlying) != 0);
+      EXPECT_TRUE((*flags & PlayerAbilitiesFlags::Flying) != 0);
+    } else if (*pid == ClientboundPacket::ChatMessage) {
+      got_sys_msg = true;
+      auto json = pkt->readString();
+      ASSERT_TRUE(json.has_value());
+      EXPECT_NE(json->find("飞行模式已开启"), std::string::npos);
+    }
+  }
+  EXPECT_TRUE(got_abilities);
+  EXPECT_TRUE(got_sys_msg);
+
+  // 2. 发送 /fly 关闭飞行
+  chat.handleMessage(session_->sessionId(), "TestFlyer", "/fly");
+  EXPECT_FALSE(session_->canFly());
+  EXPECT_FALSE(session_->isFlying());
+
+  got_abilities = false;
+  got_sys_msg = false;
+  for (int i = 0; i < 2; ++i) {
+    auto pkt = receivePacket();
+    ASSERT_TRUE(pkt.has_value());
+    auto pid = pkt->readVarInt();
+    ASSERT_TRUE(pid.has_value());
+    if (*pid == ClientboundPacket::PlayerAbilities) {
+      got_abilities = true;
+      auto flags = pkt->readBe<uint8_t>();
+      ASSERT_TRUE(flags.has_value());
+      EXPECT_FALSE((*flags & PlayerAbilitiesFlags::AllowFlying) != 0);
+    } else if (*pid == ClientboundPacket::ChatMessage) {
+      got_sys_msg = true;
+      auto json = pkt->readString();
+      ASSERT_TRUE(json.has_value());
+      EXPECT_NE(json->find("飞行模式已关闭"), std::string::npos);
+    }
+  }
+  EXPECT_TRUE(got_abilities);
+  EXPECT_TRUE(got_sys_msg);
 }
