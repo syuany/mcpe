@@ -9,6 +9,7 @@
 
 #include <asio.hpp>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 
 #include "network/TcpServer.h"
@@ -73,15 +74,32 @@ main() {
         }
     );
 
-    // 6. 初始化大厅世界并预加载浮空岛建筑蓝图
+    // 6. 初始化大厅世界并预加载原版世界存档或浮空岛建筑蓝图
     auto world = std::make_shared<World>();
-    if (world->loadLobbySchematic("assets/maps/lobby.schematic", BlockPos{0, 0, 0})) {
+    bool lobby_loaded = false;
+    if (std::filesystem::exists("assets/maps/lobby/world.zip")) {
+      size_t chunks = world->loadWorldFromZip("assets/maps/lobby/world.zip");
+      if (chunks > 0) {
+        lobby_loaded = true;
+        entity_manager->setDefaultSpawn(world->spawnPoint());
+        spdlog::info(
+            "[Main] Loaded Anvil world from assets/maps/lobby/world.zip ({} chunks), spawn set to ({:.1f}, {:.1f}, {:.1f})",
+            chunks,
+            world->spawnPoint().x,
+            world->spawnPoint().y,
+            world->spawnPoint().z
+        );
+      }
+    }
+    if (!lobby_loaded && world->loadLobbySchematic("assets/maps/lobby.schematic", BlockPos{0, 0, 0})) {
       // 96x48x96 浮空岛中心位于 (48, 48)，广场地面位于 Y=32，安全站立点位于 Y=34.0
       world->setSpawnPoint(Vector3d{48.5, 34.0, 48.5});
       entity_manager->setDefaultSpawn(world->spawnPoint());
+      lobby_loaded = true;
       spdlog::info("[Main] Loaded floating island lobby schematic, spawn set to (48.5, 34.0, 48.5)");
-    } else {
-      spdlog::warn("[Main] Failed to load lobby schematic, falling back to default flat world");
+    }
+    if (!lobby_loaded) {
+      spdlog::warn("[Main] Failed to load lobby map, falling back to default flat world");
     }
     PlayHandler::setWorld(world);
 
