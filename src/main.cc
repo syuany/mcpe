@@ -77,18 +77,25 @@ main() {
     // 6. 初始化大厅世界并预加载原版世界存档或浮空岛建筑蓝图
     auto world = std::make_shared<World>();
     bool lobby_loaded = false;
-    if (std::filesystem::exists("assets/maps/lobby/world.zip")) {
-      size_t chunks = world->loadWorldFromZip("assets/maps/lobby/world.zip");
-      if (chunks > 0) {
-        lobby_loaded = true;
-        entity_manager->setDefaultSpawn(world->spawnPoint());
-        spdlog::info(
-            "[Main] Loaded Anvil world from assets/maps/lobby/world.zip ({} chunks), spawn set to ({:.1f}, {:.1f}, {:.1f})",
-            chunks,
-            world->spawnPoint().x,
-            world->spawnPoint().y,
-            world->spawnPoint().z
-        );
+    const std::filesystem::path lobby_dir = "assets/maps/lobby";
+    if (std::filesystem::exists(lobby_dir) && std::filesystem::is_directory(lobby_dir)) {
+      for (const auto& entry : std::filesystem::directory_iterator(lobby_dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".zip") {
+          size_t chunks = world->loadWorldFromZip(entry.path());
+          if (chunks > 0) {
+            lobby_loaded = true;
+            entity_manager->setDefaultSpawn(world->spawnPoint());
+            spdlog::info(
+                "[Main] Loaded Anvil world from {} ({} chunks), spawn set to ({:.1f}, {:.1f}, {:.1f})",
+                entry.path().filename().string(),
+                chunks,
+                world->spawnPoint().x,
+                world->spawnPoint().y,
+                world->spawnPoint().z
+            );
+            break;
+          }
+        }
       }
     }
     if (!lobby_loaded && world->loadLobbySchematic("assets/maps/lobby.schematic", BlockPos{0, 0, 0})) {
