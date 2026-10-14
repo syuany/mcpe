@@ -9,7 +9,9 @@
 
 #include <asio.hpp>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 
 #include "network/TcpServer.h"
@@ -24,7 +26,68 @@
 
 namespace {
 constexpr uint16_t kServerPort = 25566;
+
+bool
+loadSpawnConfig(const std::filesystem::path& path, mcpe::Vector3d& pos, mcpe::Rotation& rot) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    return false;
+  }
+  std::string line;
+  bool has_x = false;
+  bool has_y = false;
+  bool has_z = false;
+  while (std::getline(file, line)) {
+    auto parse_field = [&](std::string_view key, auto& out_val) {
+      auto pos_key = line.find(key);
+      if (pos_key != std::string::npos) {
+        auto colon = line.find(':', pos_key + key.size());
+        if (colon != std::string::npos) {
+          char* end = nullptr;
+          const char* str_start = line.c_str() + colon + 1;
+          double v = std::strtod(str_start, &end);
+          if (end != str_start) {
+            out_val = static_cast<std::decay_t<decltype(out_val)>>(v);
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    if (parse_field("\"x\"", pos.x)) has_x = true;
+    if (parse_field("\"y\"", pos.y)) has_y = true;
+    if (parse_field("\"z\"", pos.z)) has_z = true;
+    parse_field("\"yaw\"", rot.yaw);
+    parse_field("\"pitch\"", rot.pitch);
+  }
+  return has_x && has_y && has_z;
 }
+
+bool
+saveSpawnConfig(const std::filesystem::path& path, const mcpe::Vector3d& pos, const mcpe::Rotation& rot) {
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::trunc);
+  if (!file.is_open()) {
+    return false;
+  }
+  file << std::format(
+      "{{\n"
+      "  \"x\": {:.2f},\n"
+      "  \"y\": {:.2f},\n"
+      "  \"z\": {:.2f},\n"
+      "  \"yaw\": {:.2f},\n"
+      "  \"pitch\": {:.2f}\n"
+      "}}\n",
+      pos.x,
+      pos.y,
+      pos.z,
+      rot.yaw,
+      rot.pitch
+  );
+  return true;
+}
+}  // namespace
 
 using namespace mcpe;
 using namespace mcpe::network;
@@ -85,9 +148,8 @@ main() {
           size_t chunks = world->loadWorldFromZip(entry.path());
           if (chunks > 0) {
             lobby_loaded = true;
-            entity_manager->setDefaultSpawn(world->spawnPoint());
             spdlog::info(
-                "[Main] Loaded Anvil world from {} ({} chunks), spawn set to ({:.1f}, {:.1f}, {:.1f})",
+                "[Main] Loaded Anvil world from {} ({} chunks), map spawn set to ({:.1f}, {:.1f}, {:.1f})",
                 entry.path().filename().string(),
                 chunks,
                 world->spawnPoint().x,
@@ -102,13 +164,48 @@ main() {
     if (!lobby_loaded && world->loadLobbySchematic("assets/maps/lobby.schematic", BlockPos{0, 0, 0})) {
       // 96x48x96 浮空岛中心位于 (48, 48)，广场地面位于 Y=32，安全站立点位于 Y=34.0
       world->setSpawnPoint(Vector3d{48.5, 34.0, 48.5});
-      entity_manager->setDefaultSpawn(world->spawnPoint());
       lobby_loaded = true;
-      spdlog::info("[Main] Loaded floating island lobby schematic, spawn set to (48.5, 34.0, 48.5)");
+      spdlog::info("[Main] Loaded floating island lobby schematic, default spawn set to (48.5, 34.0, 48.5)");
     }
     if (!lobby_loaded) {
       spdlog::warn("[Main] Failed to load lobby map, falling back to default flat world");
     }
+
+    // 检查并加载自定义持久化出生点 (spawn.json)
+    const std::filesystem::path spawn_cfg_path = "assets/maps/lobby/spawn.json";
+    Vector3d custom_spawn = world->spawnPoint();
+    Rotation custom_rot = world->spawnRotation();
+    if (loadSpawnConfig(spawn_cfg_path, custom_spawn, custom_rot)) {
+      world->setSpawnPoint(custom_spawn);
+      world->setSpawnRotation(custom_rot);
+      entity_manager->setDefaultSpawn(custom_spawn, custom_rot);
+      spdlog::info(
+          "[Main] Loaded custom spawn point from {}: ({:.2f}, {:.2f}, {:.2f}), yaw={:.1f}, pitch={:.1f}",
+          spawn_cfg_path.string(),
+          custom_spawn.x,
+          custom_spawn.y,
+          custom_spawn.z,
+          custom_rot.yaw,
+          custom_rot.pitch
+      );
+    } else {
+      entity_manager->setDefaultSpawn(world->spawnPoint(), world->spawnRotation());
+    }
+
+    // 注册 /setspawn 回调：动态更新 World、EntityManager 默认出生点并持久化写入 spawn.json
+    chat_handler->setSpawnCallback(
+        [world, entity_manager, spawn_cfg_path](const Vector3d& pos, const Rotation& rot) {
+          world->setSpawnPoint(pos);
+          world->setSpawnRotation(rot);
+          entity_manager->setDefaultSpawn(pos, rot);
+          if (saveSpawnConfig(spawn_cfg_path, pos, rot)) {
+            spdlog::info("[Main] Persisted custom spawn point to {}", spawn_cfg_path.string());
+          } else {
+            spdlog::error("[Main] Failed to persist custom spawn point to {}", spawn_cfg_path.string());
+          }
+        }
+    );
+
     PlayHandler::setWorld(world);
 
     // 7. 初始化并启动 20 TPS 物理主循环节拍器

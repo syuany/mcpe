@@ -29,10 +29,12 @@ class World {
   World() = default;
 
   /**
-   * @brief 设置/获取世界默认出生点
+   * @brief 设置/获取世界默认出生点坐标与朝向
    */
   void setSpawnPoint(const Vector3d& spawn) noexcept { spawn_point_ = spawn; }
+  void setSpawnRotation(const Rotation& rot) noexcept { spawn_rotation_ = rot; }
   [[nodiscard]] const Vector3d& spawnPoint() const noexcept { return spawn_point_; }
+  [[nodiscard]] const Rotation& spawnRotation() const noexcept { return spawn_rotation_; }
 
   /**
    * @brief 查询指定区块指针（不存在则返回 nullptr）
@@ -96,6 +98,7 @@ class World {
 
  private:
   Vector3d spawn_point_{0.5, 64.0, 0.5};
+  Rotation spawn_rotation_{0.0f, 0.0f};
   std::unordered_map<ChunkPos, std::unique_ptr<Chunk>> chunks_;
 };
 

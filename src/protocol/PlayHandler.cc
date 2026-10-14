@@ -34,9 +34,11 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   sendJoinGame(session, session->entityId());
 
   Vector3d spawn_pos{0.5, 4.0, 0.5};
+  Rotation spawn_rot{0.0f, 0.0f};
 
   if (g_world) {
     spawn_pos = g_world->spawnPoint();
+    spawn_rot = g_world->spawnRotation();
     const world::ChunkPos center_chunk = spawn_pos.toBlockPos().toChunkPos();
     constexpr int32_t kViewRadius = 5;  // 11x11 视距区块窗口（覆盖大厅全貌）
 
@@ -76,8 +78,8 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
 
   const int32_t teleport_id = session->nextTeleportId();
   session->setPosition(spawn_pos);
-  session->setRotation(Rotation{0.0f, 0.0f});
-  sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, 0.0f, 0.0f, 0x00, teleport_id);
+  session->setRotation(spawn_rot);
+  sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, spawn_rot.yaw, spawn_rot.pitch, 0x00, teleport_id);
   session->startKeepAliveTimer();
 
   // 投递玩家进服事件至世界任务队列（触发同屏实体生成与 Tab 列表更新）

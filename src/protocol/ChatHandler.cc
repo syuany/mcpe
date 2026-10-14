@@ -115,6 +115,7 @@ ChatHandler::handleSetSpawnCommand(uint64_t sender_sid) {
   auto world = PlayHandler::getWorld();
   if (world) {
     world->setSpawnPoint(pos);
+    world->setSpawnRotation(rot);
   }
 
   if (spawn_callback_) {
@@ -152,6 +153,7 @@ ChatHandler::handleSpawnCommand(uint64_t sender_sid) {
 
   auto world = PlayHandler::getWorld();
   const Vector3d target = world ? world->spawnPoint() : Vector3d{0.5, 4.0, 0.5};
+  const Rotation rot = world ? world->spawnRotation() : Rotation{0.0f, 0.0f};
 
   const int32_t tid = session->nextTeleportId();
   PlayHandler::sendPlayerPositionAndLook(
@@ -159,8 +161,8 @@ ChatHandler::handleSpawnCommand(uint64_t sender_sid) {
       target.x,
       target.y,
       target.z,
-      0.0f,
-      0.0f,
+      rot.yaw,
+      rot.pitch,
       0x00,
       tid
   );
