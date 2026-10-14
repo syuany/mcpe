@@ -80,8 +80,10 @@ void
 ChatHandler::handleCommand(uint64_t sender_sid, const std::string& cmd_line) {
   spdlog::info("[Command] SID {} executed: {}", sender_sid, cmd_line);
 
-  if (cmd_line == "/lobby" || cmd_line == "/spawn") {
+  if (cmd_line == "/spawn") {
     handleSpawnCommand(sender_sid);
+  } else if (cmd_line == "/lobby") {
+    sendSystemMessage(sender_sid, "§a[系统] 您已经在主大厅中！输入 /spawn 可传送至大厅出生点。");
   } else if (cmd_line == "/setspawn" || cmd_line == "/setworldspawn") {
     handleSetSpawnCommand(sender_sid);
   } else if (cmd_line == "/maps") {
