@@ -59,6 +59,7 @@ inline constexpr int32_t PlayerListItem = 0x2E;
 inline constexpr int32_t PlayerPositionAndLook = 0x2F;
 inline constexpr int32_t DestroyEntities = 0x32;
 inline constexpr int32_t SpawnPosition = 0x46;
+inline constexpr int32_t TimeUpdate = 0x47;
 inline constexpr int32_t EntityTeleport = 0x4C;
 }  // namespace ClientboundPacket
 

@@ -51,6 +51,13 @@ class PlayHandler {
       float fov_modifier = 0.1f
   );
 
+  /** @brief 下发 Time Update (0x47) 世界时间包（若 time_of_day 为负数则锁定昼夜更迭，保持永昼） */
+  static void sendTimeUpdate(
+      const std::shared_ptr<ClientSession>& session,
+      int64_t world_age = 6000LL,
+      int64_t time_of_day = -6000LL
+  );
+
   /** @brief 处理客户端发来的 Player Abilities (0x13) 飞行状态同步包 */
   static void handlePlayerAbilities(
       const std::shared_ptr<ClientSession>& session,

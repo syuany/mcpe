@@ -71,6 +71,9 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   // 0x2C Player Abilities: 默认下发无敌与禁用飞行（行走模式）
   sendPlayerAbilities(session, PlayerAbilitiesFlags::Invulnerable);
 
+  // 0x47 Time Update: 永久锁定正午太阳（世界年龄 6000，时间 -6000 冻结昼夜更替，保持大厅永昼晴朗）
+  sendTimeUpdate(session, 6000LL, -6000LL);
+
   const int32_t teleport_id = session->nextTeleportId();
   sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, 0.0f, 0.0f, 0x00, teleport_id);
   session->startKeepAliveTimer();
@@ -150,6 +153,24 @@ PlayHandler::sendPlayerAbilities(
       session->remoteAddress(),
       flags,
       flying_speed
+  );
+}
+
+void
+PlayHandler::sendTimeUpdate(
+    const std::shared_ptr<ClientSession>& session,
+    int64_t world_age,
+    int64_t time_of_day
+) {
+  network::PacketWriter writer(session, ClientboundPacket::TimeUpdate);
+  writer.writeBe<int64_t>(world_age);
+  writer.writeBe<int64_t>(time_of_day);
+
+  spdlog::debug(
+      "[PlayHandler] Sent Time Update (0x47) to {}, world_age={}, time_of_day={}",
+      session->remoteAddress(),
+      world_age,
+      time_of_day
   );
 }
 
