@@ -41,6 +41,7 @@
 #include "protocol/PacketRouter.h"
 #include "protocol/PlayHandler.h"
 #include "protocol/StatusHandler.h"
+#include "world/World.h"
 
 using namespace mcpe;
 using namespace mcpe::protocol;
@@ -888,4 +889,113 @@ TEST_F(PacketRouterTest, TimeUpdatePacketFormatAndFrozenNoon) {
   ASSERT_TRUE(time_of_day.has_value());
   EXPECT_EQ(*time_of_day, -6000LL);
   EXPECT_EQ(resp->readableBytes(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// 测试集 10：/setspawn 与 /spawn 指令处理与坐标持久化回调集成测试
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, SetSpawnAndSpawnCommands) {
+  auto client_mgr = std::make_shared<ClientManager>();
+  session_->setState(ConnectionState::PLAY);
+  session_->setUsername("TestPlayer");
+  client_mgr->addSession(session_);
+
+  auto world = std::make_shared<world::World>();
+  world->setSpawnPoint(Vector3d{10.0, 64.0, 10.0});
+  world->setSpawnRotation(Rotation{0.0f, 0.0f});
+  PlayHandler::setWorld(world);
+
+  ChatHandler chat;
+  chat.setClientManager(client_mgr);
+  chat.setSenders(
+      [client_mgr](uint64_t sid, ByteBuffer pkt) {
+        client_mgr->sendPacketTo(sid, std::move(pkt));
+      },
+      [client_mgr](ByteBuffer pkt) {
+        client_mgr->broadcast(std::move(pkt));
+      }
+  );
+
+  Vector3d saved_pos{};
+  Rotation saved_rot{};
+  bool callback_invoked = false;
+  chat.setSpawnCallback([&](const Vector3d& pos, const Rotation& rot) {
+    saved_pos = pos;
+    saved_rot = rot;
+    callback_invoked = true;
+  });
+
+  // 1. 设置玩家当前位姿为 (-56.0, 52.0, 8.0), yaw=90.0, pitch=15.0
+  const Vector3d player_pos{-56.0, 52.0, 8.0};
+  const Rotation player_rot{90.0f, 15.0f};
+  session_->setPosition(player_pos);
+  session_->setRotation(player_rot);
+
+  // 执行 /setspawn
+  chat.handleMessage(session_->sessionId(), "TestPlayer", "/setspawn");
+
+  EXPECT_TRUE(callback_invoked);
+  EXPECT_DOUBLE_EQ(saved_pos.x, -56.0);
+  EXPECT_DOUBLE_EQ(saved_pos.y, 52.0);
+  EXPECT_DOUBLE_EQ(saved_pos.z, 8.0);
+  EXPECT_FLOAT_EQ(saved_rot.yaw, 90.0f);
+  EXPECT_FLOAT_EQ(saved_rot.pitch, 15.0f);
+
+  EXPECT_DOUBLE_EQ(world->spawnPoint().x, -56.0);
+  EXPECT_DOUBLE_EQ(world->spawnPoint().y, 52.0);
+  EXPECT_DOUBLE_EQ(world->spawnPoint().z, 8.0);
+  EXPECT_FLOAT_EQ(world->spawnRotation().yaw, 90.0f);
+  EXPECT_FLOAT_EQ(world->spawnRotation().pitch, 15.0f);
+
+  // 接收系统反馈消息
+  auto pkt1 = receivePacket();
+  ASSERT_TRUE(pkt1.has_value());
+  auto pid1 = pkt1->readVarInt();
+  ASSERT_TRUE(pid1.has_value());
+  EXPECT_EQ(*pid1, ClientboundPacket::ChatMessage);
+  auto json1 = pkt1->readString();
+  ASSERT_TRUE(json1.has_value());
+  EXPECT_NE(json1->find("成功将大厅出生点更新为"), std::string::npos);
+
+  // 2. 模拟玩家移开至另外的坐标
+  session_->setPosition(Vector3d{100.0, 20.0, 100.0});
+
+  // 执行 /spawn 传送回出生点
+  chat.handleMessage(session_->sessionId(), "TestPlayer", "/spawn");
+
+  // 验证收到 0x2F Player Position And Look 与系统提示消息
+  bool got_teleport = false;
+  bool got_spawn_msg = false;
+
+  for (int i = 0; i < 2; ++i) {
+    auto pkt = receivePacket();
+    ASSERT_TRUE(pkt.has_value());
+    auto pid = pkt->readVarInt();
+    ASSERT_TRUE(pid.has_value());
+    if (*pid == ClientboundPacket::PlayerPositionAndLook) {
+      got_teleport = true;
+      auto x = pkt->readBe<double>();
+      auto y = pkt->readBe<double>();
+      auto z = pkt->readBe<double>();
+      auto yaw = pkt->readBe<float>();
+      auto pitch = pkt->readBe<float>();
+      auto flags = pkt->readBe<uint8_t>();
+      auto tid = pkt->readVarInt();
+      ASSERT_TRUE(x && y && z && yaw && pitch && flags && tid);
+      EXPECT_DOUBLE_EQ(*x, -56.0);
+      EXPECT_DOUBLE_EQ(*y, 52.0);
+      EXPECT_DOUBLE_EQ(*z, 8.0);
+      EXPECT_FLOAT_EQ(*yaw, 90.0f);
+      EXPECT_FLOAT_EQ(*pitch, 15.0f);
+      EXPECT_EQ(*flags, 0x00);
+    } else if (*pid == ClientboundPacket::ChatMessage) {
+      got_spawn_msg = true;
+      auto json = pkt->readString();
+      ASSERT_TRUE(json.has_value());
+      EXPECT_NE(json->find("已传送回大厅出生点"), std::string::npos);
+    }
+  }
+
+  EXPECT_TRUE(got_teleport);
+  EXPECT_TRUE(got_spawn_msg);
 }

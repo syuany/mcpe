@@ -298,6 +298,57 @@ def main():
             break
     assert steve_got_fly_off, "Steve 未收到 0x2C 关闭飞行能力数据包！"
 
+    # 6.6. 验证 /setspawn 与 /spawn 出生点重设与传送
+    print("\n[*] 验证阶段 4.6: /setspawn 与 /spawn 出生点更新与传送验证...")
+    # Steve 移动至目标出生点 (-56.0, 52.0, 8.0)
+    steve.send_move_and_look(-56.0, 52.0, 8.0, 90.0, 0.0)
+    time.sleep(0.05)
+    steve.send_chat("/setspawn")
+
+    steve_got_setspawn_msg = False
+    start = time.time()
+    while time.time() - start < 2.0:
+        try:
+            p_id, payload = read_packet(steve.sock)
+            if p_id == 0x0F:
+                chat_json = payload[1:-1].decode('utf-8', errors='ignore')
+                if "成功将大厅出生点更新为" in chat_json:
+                    steve_got_setspawn_msg = True
+                    print(f"[✔] Steve 收到 /setspawn 成功设置回显: {chat_json}")
+                    break
+        except socket.timeout:
+            break
+    assert steve_got_setspawn_msg, "Steve 未收到 /setspawn 成功设置回显！"
+
+    # Steve 移动走
+    steve.send_move_and_look(0.0, 60.0, 0.0, 0.0, 0.0)
+    time.sleep(0.05)
+
+    # Steve 执行 /spawn 传送回出生点
+    steve.send_chat("/spawn")
+    steve_got_teleport = False
+    steve_got_spawn_msg = False
+    start = time.time()
+    while time.time() - start < 2.0:
+        try:
+            p_id, payload = read_packet(steve.sock)
+            if p_id == 0x2F:  # Player Position And Look
+                tp_x, tp_y, tp_z = struct.unpack('>ddd', payload[0:24])
+                if abs(tp_x - (-56.0)) < 0.1 and abs(tp_y - 52.0) < 0.1 and abs(tp_z - 8.0) < 0.1:
+                    steve_got_teleport = True
+                    print(f"[✔] Steve 收到 0x2F 传送回大厅出生点 ({tp_x:.1f}, {tp_y:.1f}, {tp_z:.1f})")
+            elif p_id == 0x0F:
+                chat_json = payload[1:-1].decode('utf-8', errors='ignore')
+                if "已传送回大厅出生点" in chat_json:
+                    steve_got_spawn_msg = True
+                    print(f"[✔] Steve 收到 /spawn 传送成功提示: {chat_json}")
+            if steve_got_teleport and steve_got_spawn_msg:
+                break
+        except socket.timeout:
+            break
+    assert steve_got_teleport, "Steve 未收到 0x2F 传送回出生点数据包！"
+    assert steve_got_spawn_msg, "Steve 未收到 /spawn 成功提示！"
+
     # 7. 验证退服销毁广播
     print("\n[*] 验证阶段 5: 玩家退服实体销毁广播 (0x32)...")
     steve.close()
