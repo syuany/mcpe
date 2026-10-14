@@ -15,6 +15,7 @@
 #include <string>
 
 #include "common/ByteBuffer.h"
+#include "common/SpatialTypes.h"
 #include "network/SessionCallbacks.h"
 #include "protocol/ConnectionState.h"
 
@@ -161,6 +162,25 @@ class ClientSession : public network::SessionCallbacks,
     is_flying_ = is_flying;
   }
 
+  // --- 实时坐标与视线朝向 ---
+  const Vector3d&
+  position() const noexcept {
+    return position_;
+  }
+  void
+  setPosition(const Vector3d& pos) noexcept {
+    position_ = pos;
+  }
+
+  const Rotation&
+  rotation() const noexcept {
+    return rotation_;
+  }
+  void
+  setRotation(const Rotation& rot) noexcept {
+    rotation_ = rot;
+  }
+
   // --- 全局会话管理器关联 ---
   void
   setClientManager(std::weak_ptr<ClientManager> mgr) noexcept {
@@ -211,6 +231,9 @@ class ClientSession : public network::SessionCallbacks,
 
   bool can_fly_{false};
   bool is_flying_{false};
+
+  Vector3d position_{0.5, 4.0, 0.5};
+  Rotation rotation_{0.0f, 0.0f};
 };
 
 }  // namespace mcpe::protocol

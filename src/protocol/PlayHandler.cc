@@ -75,6 +75,8 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   sendTimeUpdate(session, 6000LL, -6000LL);
 
   const int32_t teleport_id = session->nextTeleportId();
+  session->setPosition(spawn_pos);
+  session->setRotation(Rotation{0.0f, 0.0f});
   sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, 0.0f, 0.0f, 0x00, teleport_id);
   session->startKeepAliveTimer();
 
@@ -348,6 +350,13 @@ PlayHandler::handlePlayerMovement(
   }
 
   payload.retrieveAll();
+
+  if (move_event.has_position) {
+    session->setPosition(move_event.position);
+  }
+  if (move_event.has_rotation) {
+    session->setRotation(move_event.rotation);
+  }
 
   // 商业大厅虚空跌落复位 (Fall Reset)
   // 正常行走跌入 Y < 20.0 触发复位；开启飞行模式的玩家在极端虚空 Y < 0.0 时触发复位，避免在岛屿底部漫游时误判
