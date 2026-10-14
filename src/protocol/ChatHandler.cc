@@ -13,6 +13,7 @@
 #include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
 #include "protocol/PlayHandler.h"
+#include "world/World.h"
 
 namespace mcpe::protocol {
 
@@ -34,6 +35,11 @@ ChatHandler::setSenders(SystemMessageSender sys_sender, MulticastSender multicas
 void
 ChatHandler::setClientManager(std::weak_ptr<ClientManager> client_manager) {
   client_manager_ = std::move(client_manager);
+}
+
+void
+ChatHandler::setSpawnCallback(SetSpawnCallback cb) {
+  spawn_callback_ = std::move(cb);
 }
 
 void
@@ -74,17 +80,92 @@ void
 ChatHandler::handleCommand(uint64_t sender_sid, const std::string& cmd_line) {
   spdlog::info("[Command] SID {} executed: {}", sender_sid, cmd_line);
 
-  if (cmd_line == "/lobby") {
-    sendSystemMessage(sender_sid, "§a[系统] 您已经在主大厅中！");
+  if (cmd_line == "/lobby" || cmd_line == "/spawn") {
+    handleSpawnCommand(sender_sid);
+  } else if (cmd_line == "/setspawn" || cmd_line == "/setworldspawn") {
+    handleSetSpawnCommand(sender_sid);
   } else if (cmd_line == "/maps") {
     sendSystemMessage(sender_sid, "§e[地图列表] 1. 新手跑酷 (输入 /join 1)  2. 螺旋跑酷 (输入 /join 2)");
   } else if (cmd_line == "/fly" || cmd_line.starts_with("/fly ")) {
     handleFlyCommand(sender_sid, cmd_line);
   } else if (cmd_line == "/help") {
-    sendSystemMessage(sender_sid, "§e[帮助] 支持指令: /lobby, /maps, /fly [on|off]");
+    sendSystemMessage(sender_sid, "§e[帮助] 支持指令: /spawn, /setspawn, /fly [on|off], /maps, /lobby");
   } else {
-    sendSystemMessage(sender_sid, "§c[错误] 未知指令，输入 /help 或 /maps 查看支持指令。");
+    sendSystemMessage(sender_sid, "§c[错误] 未知指令，输入 /help 查看支持指令。");
   }
+}
+
+void
+ChatHandler::handleSetSpawnCommand(uint64_t sender_sid) {
+  auto mgr = client_manager_.lock();
+  if (!mgr) {
+    sendSystemMessage(sender_sid, "§c[错误] 会话管理器未就绪");
+    return;
+  }
+
+  auto session = mgr->findSession(sender_sid);
+  if (!session || session->state() != ConnectionState::PLAY) {
+    sendSystemMessage(sender_sid, "§c[错误] 只能在游戏主世界中设置出生点");
+    return;
+  }
+
+  const Vector3d pos = session->position();
+  const Rotation rot = session->rotation();
+
+  auto world = PlayHandler::getWorld();
+  if (world) {
+    world->setSpawnPoint(pos);
+  }
+
+  if (spawn_callback_) {
+    spawn_callback_(pos, rot);
+  }
+
+  spdlog::info(
+      "[Command] Player {} (SID {}) updated lobby spawn point to ({:.2f}, {:.2f}, {:.2f})",
+      session->username(),
+      sender_sid,
+      pos.x,
+      pos.y,
+      pos.z
+  );
+
+  sendSystemMessage(
+      sender_sid,
+      std::format("§a[系统] 成功将大厅出生点更新为: ({:.1f}, {:.1f}, {:.1f})！已保存至配置文件。", pos.x, pos.y, pos.z)
+  );
+}
+
+void
+ChatHandler::handleSpawnCommand(uint64_t sender_sid) {
+  auto mgr = client_manager_.lock();
+  if (!mgr) {
+    sendSystemMessage(sender_sid, "§c[错误] 会话管理器未就绪");
+    return;
+  }
+
+  auto session = mgr->findSession(sender_sid);
+  if (!session || session->state() != ConnectionState::PLAY) {
+    sendSystemMessage(sender_sid, "§c[错误] 只能在游戏主世界中使用传送指令");
+    return;
+  }
+
+  auto world = PlayHandler::getWorld();
+  const Vector3d target = world ? world->spawnPoint() : Vector3d{0.5, 4.0, 0.5};
+
+  const int32_t tid = session->nextTeleportId();
+  PlayHandler::sendPlayerPositionAndLook(
+      session,
+      target.x,
+      target.y,
+      target.z,
+      0.0f,
+      0.0f,
+      0x00,
+      tid
+  );
+
+  sendSystemMessage(sender_sid, "§a[系统] 已传送回大厅出生点！");
 }
 
 void

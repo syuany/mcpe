@@ -12,6 +12,7 @@
 #include <string_view>
 
 #include "common/ByteBuffer.h"
+#include "common/SpatialTypes.h"
 #include "protocol/PacketTypes.h"
 
 namespace mcpe::protocol {
@@ -22,6 +23,7 @@ class ChatHandler {
  public:
   using SystemMessageSender = std::function<void(uint64_t session_id, ByteBuffer packet)>;
   using MulticastSender = std::function<void(ByteBuffer packet)>;
+  using SetSpawnCallback = std::function<void(const Vector3d& pos, const Rotation& rot)>;
 
   explicit ChatHandler(
       SystemMessageSender sys_sender = nullptr,
@@ -31,6 +33,7 @@ class ChatHandler {
 
   void setSenders(SystemMessageSender sys_sender, MulticastSender multicast_sender);
   void setClientManager(std::weak_ptr<ClientManager> client_manager);
+  void setSpawnCallback(SetSpawnCallback cb);
 
   /**
    * @brief 处理来自玩家的消息（区分普通公屏聊天与以 / 开头的快捷指令）
@@ -63,10 +66,13 @@ class ChatHandler {
 
  private:
   void handleFlyCommand(uint64_t sender_sid, const std::string& cmd_line);
+  void handleSetSpawnCommand(uint64_t sender_sid);
+  void handleSpawnCommand(uint64_t sender_sid);
 
   SystemMessageSender sys_sender_;
   MulticastSender multicast_sender_;
   std::weak_ptr<ClientManager> client_manager_;
+  SetSpawnCallback spawn_callback_;
 };
 
 }  // namespace mcpe::protocol
