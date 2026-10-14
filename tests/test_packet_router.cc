@@ -864,3 +864,28 @@ TEST_F(PacketRouterTest, FlyCommandRoutingAndAbilitiesSync) {
   EXPECT_TRUE(got_abilities);
   EXPECT_TRUE(got_sys_msg);
 }
+
+// ---------------------------------------------------------------------------
+// 测试集 9：Time Update (0x47) 协议包格式与永久正午（-6000LL）测试
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, TimeUpdatePacketFormatAndFrozenNoon) {
+  session_->setState(ConnectionState::PLAY);
+
+  // 下发正午时间包 (WorldAge=6000, TimeOfDay=-6000 锁定日出日落)
+  PlayHandler::sendTimeUpdate(session_, 6000LL, -6000LL);
+
+  auto resp = receivePacket();
+  ASSERT_TRUE(resp.has_value());
+  auto pid = resp->readVarInt();
+  ASSERT_TRUE(pid.has_value());
+  EXPECT_EQ(*pid, ClientboundPacket::TimeUpdate);
+
+  auto world_age = resp->readBe<int64_t>();
+  ASSERT_TRUE(world_age.has_value());
+  EXPECT_EQ(*world_age, 6000LL);
+
+  auto time_of_day = resp->readBe<int64_t>();
+  ASSERT_TRUE(time_of_day.has_value());
+  EXPECT_EQ(*time_of_day, -6000LL);
+  EXPECT_EQ(resp->readableBytes(), 0);
+}

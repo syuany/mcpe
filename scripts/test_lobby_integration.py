@@ -59,6 +59,7 @@ class LobbyClient:
         self.uuid = ""
         self.spawn_pos = None
         self.chunk_count = 0
+        self.time_of_day = None
 
     def login_and_spawn(self):
         # 1. Handshake (State=2 LOGIN)
@@ -92,6 +93,9 @@ class LobbyClient:
                 self.entity_id = struct.unpack('>i', payload[:4])[0]
             elif p_id == 0x20:  # Chunk Data
                 self.chunk_count += 1
+            elif p_id == 0x47:  # Time Update
+                world_age, tod = struct.unpack('>qq', payload[:16])
+                self.time_of_day = tod
             elif p_id == 0x2F:  # Player Position And Look
                 # double x, y, z, float yaw, pitch, byte flags, VarInt tp_id
                 x, y, z = struct.unpack('>ddd', payload[0:24])
@@ -151,7 +155,8 @@ def main():
     assert client_a.chunk_count >= 25, f"下发区块过少 ({client_a.chunk_count})，预期至少覆盖核心九宫格"
     spawn_x, spawn_y, spawn_z = client_a.spawn_pos
     assert spawn_y >= 20.0, f"出生点高度异常 ({spawn_y})，必须在安全地面上"
-    print(f"[✔] 测试 1 通过: 成功流式加载大厅区块并定位于安全出生点 ({spawn_x:.1f}, {spawn_y:.1f}, {spawn_z:.1f})！")
+    assert client_a.time_of_day == -6000, f"预期永久正午 (-6000)，实际为: {client_a.time_of_day}"
+    print(f"[✔] 测试 1 通过: 成功流式加载大厅区块、定位于安全出生点 ({spawn_x:.1f}, {spawn_y:.1f}, {spawn_z:.1f})，并永久锁定正午太阳 (TimeOfDay={client_a.time_of_day})！")
 
     # -------------------------------------------------------------
     # 测试 2: 虚空跌落保护 (Fall Reset)
