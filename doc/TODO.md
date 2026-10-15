@@ -1,6 +1,6 @@
 # TODO
 
-* [x] 协程 -> 回调函数与 Strand 统一调度
+* [x] 协程 -> 回调函数与 Strand 统一调度（Sprint 3.5 已完成ネットワーク层 C++20 无栈协程化）
 * [x] MPSC 双缓冲任务队列与 20 TPS 物理节拍器骨架
 * [x] 广播管线零拷贝共享改造：ByteBuffer::retainedSlice() 共享底层 Storage + COW 写时复制多播
 * [x] CMake 构建体系重构与目标精简（拆分为 root / cmake/Dependencies.cmake / src / tools / tests）
@@ -11,5 +11,8 @@
 * [x] Schematic 蓝图加载与浮空岛大厅世界流式加载
 * [x] 基于 ChunkPos 九宫格邻居差异集的空间 AOI 局部视界裁剪与进出广播
 * [x] 商业大厅虚空跌落平滑拉回复位机制 (Fall Reset)
+* [x] Sprint 4: 双层 INI 配置文件体系（`src/settings.ini` + `assets/maps/<map>.ini`，支持 `/setmaxplayers` 与 `/setspawn` 持久化）
+* [x] Sprint 4: 多实例并发 Actor 引擎（`src/game/IGameInstance` + `src/game/InstanceManager`，只读共享 `World` 区块内存 + 每实例独立 20 TPS 物理线程）
+* [x] Sprint 4: 大厅满员自动裂变分线（`lobby-1..N`）与 `LoginHandler` 全服总人数硬上限 `0x00 Disconnect` 准入拦截
+* [x] Sprint 4: 多人同赛道随进随跑跑酷小游戏（`src/game/parkour/ParkourInstance` 起点/检查点/终点 AABB 检测、个人毫秒计时、Fall Reset 拉回检查点与 `0x35 Respawn` 单连接无缝切世界）
 * [ ] 内存池按需评估恢复 PacketFraming::slicePacket（已归档于 archive/memory_pool/）
-* [ ] 每阶段重要技术选型分析补充

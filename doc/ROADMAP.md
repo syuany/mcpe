@@ -1,7 +1,7 @@
 # MCPE 全景研发路线图与敏捷里程碑看板 (Milestone Roadmap)
 
-> **项目定位**：基于 **C++23** 的高性能 Minecraft **集群大厅与多地图跑酷微服务引擎**（目标协议：**Minecraft 1.12.2 / Protocol 340**）。  
-> **核心设计哲学**：**敏捷迭代（Agile Iteration）**、**严格完成定义（Strict DoD）**、**单测驱动（Test Driven）**、**工业级现代化架构（Modern C++23 / Asio）**。
+> **项目定位**：基于 **C++23** 的高性能 Minecraft **集群大厅与多实例小游戏微服务引擎**（目标协议：**Minecraft 1.12.2 / Protocol 340**）。  
+> **核心设计哲学**：**敏捷迭代（Agile Iteration）**、**严格完成定义（Strict DoD）**、**单测驱动（Test Driven）**、**工业级现代化架构（Modern C++23 / Asio / Multi-Instance Actor）**。
 
 ---
 
@@ -15,9 +15,11 @@
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │ Sprint 2: 登录认证与区块下发 (Login 鉴权、离线 UUID、Join Game、5x5 紧凑区块下发)   [100% 已完成] │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ Sprint 3: 玩家移动同步与聊天系统 (0x0E/0x0F 移动消费、0x05/0x26 同屏广播、0x02 聊天) [进行中 20%] │
+│ Sprint 3: 玩家移动同步与聊天系统 (0x0E/0x0F 移动消费、0x05/0x26 同屏广播、0x02 聊天) [100% 已完成] │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│ Sprint 4: 多地图跑酷房间引擎 (Schematic 蓝图加载、0x35 无缝切世界、计时与 Fall Reset) [ 0% 待启动] │
+│ Sprint 3.5: 离线地图烘焙、九宫格 AOI 裁剪、商业大厅机制与 C++20 网络协程化        [100% 已完成] │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ Sprint 4: 双层 INI 配置、多实例大厅动态分线与跑酷小游戏引擎 (0x35 无缝切世界)      [100% 已完成] │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │ Sprint 5: BungeeCord 集群网关与交付 (IP穿透、0x18 跨服传送门、Docker 容器化、压测报告) [ 0% 待启动] │
 └────────────────────────────────────────────────────────────────────────────────────────┘
@@ -37,8 +39,8 @@
 
 ### [x] Sprint 1: 网络基座与列表探测 (Server List Ping) —— 【已完成】
 * **核心交付物**：
-  * `mcpe_network`：基于 Standalone Asio 的异步 TCP 服务器，带 Strand 串行调度与发送背压队列。
-  * `PacketFraming`：VarInt 定界拆包器，支持 `std::string_view` 零拷贝切片。
+  * `mcpe_network`：基于 Standalone Asio 的异步 TCP 服务器，带串行化发送背压队列。
+  * `PacketFraming`：VarInt 定界拆包器，支持零拷贝切片。
   * `HandshakeHandler` 与 `StatusHandler`：完整支持 1.12.2 官方客户端多人列表探测与 Ping/Pong 毫秒延迟回传。
 
 ---
@@ -48,60 +50,34 @@
   * `LoginHandler`：处理 `Login Start (0x00)`，生成离线 UUID 并下发 `Login Success (0x02)`。
   * `PlayHandler`：下发 `Join Game (0x23)`、`Spawn Position (0x46)`、`Player Position And Look (0x2F)` 并消费 `Teleport Confirm (0x00)`。
   * `mcpe_world` 空间底座：实现 `ChunkSection`（4096 方块调色板压缩编码）与 `0x20 Chunk Data` 序列化。
-  * **进服闭环**：官方客户端成功进入服务器，周围 5x5 区块稳定渲染，脚踏实体地面！
 
 ---
 
-### [ ] Sprint 3: 玩家移动同步与聊天系统 (工期: 3~4 天) —— 【进行中】
-* **核心目标**：实现多玩家同屏可见与跑跳移动同步，支持双向聊天广播与基础指令框架。
+### [x] Sprint 3: 玩家移动同步与聊天系统 —— 【已完成】
 * **核心交付物**：
-  * **移动数据包消费**：解析 `Player Position (0x0E)`、`Player Look (0x0F)`、`Player Position And Look (0x10)`。
-  * **实体生命周期同步**：
-    - 新玩家连入时，向同大厅其他玩家下发 `Spawn Player (0x05)`；
-    - 玩家移动时，按节拍广播 `Entity Relative Move (0x26)` 或 `Entity Look (0x28)`；
-    - 玩家下线或离开大厅时，下发 `Destroy Entities (0x32)`。
-  * **聊天系统闭环**：
-    - 消费客户端 `Chat Message (0x02)`；
-    - 解析以 `/` 开头的指令（如 `/maps`, `/lobby`, `/join`）；
-    - 普通聊天消息格式化为 JSON 富文本，通过客户端 `0x02 Chat` 多播给当前房间全体成员。
-* **完成定义 (DoD)**：开两个 1.12.2 客户端连入服务器，A 和 B 能够看到对方走动、跳跃，且聊天框发消息能互相实时接收。
+  * 跨线程 MPSC 双缓冲队列 `EventQueue` 与 20 TPS `WorldTicker` 物理节拍器。
+  * 实体生命周期同步（`0x2E Player List Item` -> `0x05 Spawn Player`、`0x26/0x27/0x28` 增量移动与 `0x4C` 8.0 格溢出降级、`0x32 Destroy Entities`）。
+  * 聊天富文本多播与快捷指令分流系统（`ChatHandler`）。
 
 ---
 
-### [ ] Sprint 4: 多地图跑酷房间引擎与无缝切世界 (工期: 4~5 天) —— 【待启动】
-* **核心目标**：实现开箱即用的多地图跑酷玩法，通过 0x35 协议在单进程内实现秒级切地图。
+### [x] Sprint 3.5: 离线地图烘焙、九宫格 AOI 裁剪与商业大厅机制 —— 【已完成】
 * **核心交付物**：
-  * **Schematic 建筑蓝图加载器**：解析 WorldEdit `.schematic` 格式文件（Gzip + NBT 方块三维数组），动态填充至内存 `Chunk`。
-  * **`RoomManager` 状态机**：管理 `LobbyRoom` 与多个 `ParkourRoom`（`WAITING` -> `COUNTDOWN` -> `PLAYING` -> `ENDED`）。
-  * **0x35 无缝切世界**：触发开局时，下发 `Respawn (0x35)` + 目标跑道 `0x20 Chunk Data` + 瞬移至起点，客户端无断连无缝切入。
-  * **跑酷游戏规则闭环**：
-    - 起点毫秒级高精度计时（`steady_clock`）；
-    - 掉落熔断保护（Fall Reset：当 $Y < \text{fall\_reset\_y}$ 自动拉回起点）；
-    - 终点 AABB 包围盒检测、排行榜结算与通报。
-* **完成定义 (DoD)**：玩家在大厅输入 `/join spiral` 或走入跑酷门，瞬间进入跑酷地图，掉下去自动复位，跑到终点广播通关成绩并自动带回大厅。
+  * `tools/map_baker` 离线地图烘焙工具链（剥离 `ZipArchive`、`NbtReader`、`AnvilLoader`、`SchematicLoader`），生成 `.mcpe_map` 实现线上 $<1\text{ms}$ 零解压冷启动。
+  * `SpatialGrid` 基于 `ChunkPos` 双向哈希桶与九宫格邻居差异集的局部 AOI 视界裁剪。
+  * 商业大厅机制（$11\times 11$ 视距区块下发、`0x47` 正午永昼锁定、`/fly` 权限防作弊、Fall Reset 虚空拉回状态闭环）。
+  * 网络层 C++20 无栈协程化（`asio::awaitable`）、`ByteBuffer::retainedSlice()` 真零拷贝多播与 `PacketBuilder` 统一封包。
+
+---
+
+### [x] Sprint 4: 双层 INI 配置、多实例大厅动态分线与跑酷小游戏引擎 —— 【已完成】
+* **核心交付物**：
+  * **双层 INI 配置持久化（`IniConfig`）**：`src/settings.ini` 管理全局与分线配额（支持 `/setmaxplayers` 写回），`assets/maps/<map>.ini` 管理出生点与跑酷碰撞盒（支持 `/setspawn` 写回）。
+  * **多实例并发 Actor 引擎（`src/game/`）**：`IGameInstance` 封装独立 `EventQueue` + `EntityManager` + `WorldTicker`（20 TPS 专属线程），静态地形 `World` 全局只读共享。
+  * **大厅弹性分线与全服满员拦截（`InstanceManager` & `LoginHandler`）**：全服超限在 `LoginHandler` 下发 `0x00 Disconnect`；单大厅满员自动裂变 `lobby-2..N` 分线，支持 `/lobby [id]` 与 `/lobbies`。
+  * **跑酷小游戏与 `0x35 Respawn` 无缝切世界（`ParkourInstance`）**：支持多人同赛道随进随跑、独立 `steady_clock` 毫秒级计时、起点/检查点/终点 AABB 检测、跌落拉回最近检查点、排行榜 `/top` 与完赛 3 秒自动切回大厅。
 
 ---
 
 ### [ ] Sprint 5: BungeeCord 集群网关与产品化交付 (工期: 3~4 天) —— 【待启动】
 * **核心目标**：提供企业级群组网关穿透与跨服传送门，完成 Docker 容器化打包与千人压测报告。
-* **核心交付物**：
-  * **BungeeCord IP Forwarding 穿透**：`HandshakeHandler` 支持解析 `host\0ip\0uuid` 格式，无缝提取玩家真实 IP 与 UUID。
-  * **`0x18 Plugin Message` 跨服传送门**：向玩家发送 `BungeeCord:Connect` 指令，实现玩家踩传送门自动跨服转入外部 Java 生存服。
-  * **配置与产品化包装**：提供清晰的 `config.toml` 配置与官方 `Dockerfile`。
-  * **极限压测与基准对比报告**：使用 Headless 机器人模拟 1000 连接，输出 CPU / 内存（对比 Java Paper 1.5GB vs C++ 25MB）/ 延迟压测报告。
-* **完成定义 (DoD)**：将编译后的二进制挂在现成的 BungeeCord 代理后即可作为生产级大厅使用；提供 Docker 镜像一键拉起。
-
----
-
-## 三、 核心文档导航索引
-
-| 序号 | 文档名称 | 定位与核心内容 | 状态 |
-| :---: | :--- | :--- | :---: |
-| **00** | [ROADMAP.md](ROADMAP.md) | **全景研发路线图与敏捷里程碑看板**（本文档） | `已更新` |
-| **01** | [01_PRD_需求与业务规约.md](01_PRD_需求与业务规约.md) | **产品需求规格说明书与业务合规边界 (v2.0)** | `已更新` |
-| **02** | [02_技术选型与系统架构设计.md](02_技术选型与系统架构设计.md) | **分层架构拓扑、现代 C++23/Asio/多世界选型** | `已更新` |
-| **03** | [03_网络通信与通信协议规范.md](03_网络通信与通信协议规范.md) | **Minecraft 1.12.2 (340) 协议帧、VarInt 与数据包物理详表** | `稳定` |
-| **04** | [04_数据存储与缓存架构设计.md](04_数据存储与缓存架构设计.md) | **Schematic 蓝图与紧凑 Section 存储设计** | `更新中` |
-| **05** | [05_房间状态机与状态同步设计.md](05_房间状态机与状态同步设计.md) | **连接生命周期、跑酷房间状态机与 0x35 切世界时序** | `已更新` |
-| **06** | [06_运维热更与监控压测方案.md](06_运维热更与监控压测方案.md) | **Docker 编排与千人压测对比方案** | `稳定` |
-| **07** | [07_项目学习资源与技术图谱.md](07_项目学习资源与技术图谱.md) | **C++23/网络/游戏全栈技能树与面试深度 QA 索引** | `稳定` |
