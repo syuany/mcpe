@@ -9,6 +9,7 @@
 #include <atomic>
 #include <utility>
 
+#include "game/InstanceManager.h"
 #include "network/PacketWriter.h"
 #include "network/TcpSession.h"
 #include "protocol/ClientManager.h"
@@ -60,7 +61,9 @@ ClientSession::onPacket(
 void
 ClientSession::onDisconnected(const std::shared_ptr<network::TcpSession>& /*session*/) {
   cancelKeepAlive();
-  if (auto q = event_queue_.lock()) {
+  if (auto inst_mgr = PlayHandler::getInstanceManager()) {
+    inst_mgr->onPlayerDisconnected(session_id_, entity_id_);
+  } else if (auto q = eventQueue()) {
     world::WorldEvent ev;
     ev.session_id = session_id_;
     ev.entity_id = entity_id_;
@@ -75,6 +78,7 @@ ClientSession::onDisconnected(const std::shared_ptr<network::TcpSession>& /*sess
 
 std::shared_ptr<world::EventQueue>
 ClientSession::eventQueue() const noexcept {
+  std::lock_guard<std::mutex> lock(instance_mutex_);
   return event_queue_.lock();
 }
 

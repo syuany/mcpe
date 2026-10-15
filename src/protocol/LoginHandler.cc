@@ -1,18 +1,23 @@
 #include "protocol/LoginHandler.h"
 
+#include <spdlog/spdlog.h>
+
 #include <cstdint>
+#include <format>
 
 #include "common/ByteBuffer.h"
 #include "network/PacketWriter.h"
 #include "protocol/AuthUtils.h"
+#include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
 #include "protocol/ConnectionState.h"
-#include "spdlog/spdlog.h"
+#include "protocol/GameTypes.h"
+#include "protocol/PacketTypes.h"
 
 namespace mcpe::protocol {
 
 void
-LoginHandler::handleLoginStart(const std::shared_ptr<ClientSession> &session, ByteBuffer &payload) {
+LoginHandler::handleLoginStart(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload) {
   auto username_res = payload.readString(16);
   if (!username_res) {
     spdlog::warn("[LoginHandler] Failed to read username from {}", session->remoteAddress());
@@ -30,6 +35,30 @@ LoginHandler::handleLoginStart(const std::shared_ptr<ClientSession> &session, By
     );
     session->stop();
     return;
+  }
+
+  // 全服总人数硬上限拦截（对标 src/settings.ini [Server] max_players）
+  if (auto mgr = session->clientManager()) {
+    const int32_t max_total = ServerConfig::defaultInstance().max_players;
+    const size_t current_online = mgr->playerCount();
+    if (max_total > 0 && static_cast<int32_t>(current_online) >= max_total) {
+      spdlog::warn(
+          "[LoginHandler] Server full ({}/{}), rejecting player '{}' from {}",
+          current_online,
+          max_total,
+          username,
+          session->remoteAddress()
+      );
+      network::PacketWriter disconnect_writer(session, ClientboundPacket::LoginDisconnect);
+      disconnect_writer.appendString(std::format(
+          R"({{"text":"§c服务器已满员 ({}/{})，请稍后再试！"}})",
+          current_online,
+          max_total
+      ));
+      disconnect_writer.flush();
+      session->stop();
+      return;
+    }
   }
 
   const std::string uuid_str = AuthUtils::generateOfflineUuid(username);

@@ -44,9 +44,11 @@ inline constexpr int32_t UseItem = 0x20;
  * @brief 服务端发往客户端的数据包 ID (Clientbound / Outbound)
  */
 namespace ClientboundPacket {
+inline constexpr int32_t LoginDisconnect = 0x00;
 inline constexpr int32_t SpawnGlobalEntity = 0x02;
 inline constexpr int32_t SpawnPlayer = 0x05;
 inline constexpr int32_t ChatMessage = 0x0F;
+inline constexpr int32_t PlayDisconnect = 0x1A;
 inline constexpr int32_t UnloadChunk = 0x1D;
 inline constexpr int32_t KeepAlive = 0x1F;
 inline constexpr int32_t ChunkData = 0x20;
@@ -58,8 +60,10 @@ inline constexpr int32_t PlayerAbilities = 0x2C;
 inline constexpr int32_t PlayerListItem = 0x2E;
 inline constexpr int32_t PlayerPositionAndLook = 0x2F;
 inline constexpr int32_t DestroyEntities = 0x32;
+inline constexpr int32_t Respawn = 0x35;
 inline constexpr int32_t SpawnPosition = 0x46;
 inline constexpr int32_t TimeUpdate = 0x47;
+inline constexpr int32_t Title = 0x48;
 inline constexpr int32_t EntityTeleport = 0x4C;
 }  // namespace ClientboundPacket
 
@@ -85,7 +89,7 @@ enum class PlayerListItemAction : int32_t {
 };
 
 /**
- * @brief 0x02 Chat Message 显示位置枚举
+ * @brief 0x0F Chat Message 显示位置枚举
  */
 enum class ChatPosition : uint8_t {
   ChatBox = 0,        // 聊天框

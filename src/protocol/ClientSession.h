@@ -33,7 +33,7 @@ class ProtocolHandler;
  * @brief Minecraft 客户端业务会话（严格对标 Cuberite cClientHandle 架构设计）
  *
  * 核心架构定位：
- * 1. 业务层核心实体：内聚玩家状态、身份鉴权、世界传送与心跳保活
+ * 1. 业务层核心实体：内聚玩家状态、身份鉴权、所属实例路由、世界传送与心跳保活
  * 2. 实现 network::SessionCallbacks 纯虚接口，作为底层传输层（TcpSession）的直接事件监听器
  * 3. 弱引用关联底层 network::TcpSession，消除循环引用内存泄漏风险（DAG 拓扑）
  * 4. 彻底解耦网络传输层（纯 I/O 与粘包拆包）与 Minecraft 协议业务逻辑
@@ -113,9 +113,21 @@ class ClientSession : public network::SessionCallbacks,
     entity_id_ = id;
   }
 
-  // --- 世界任务队列关联 ---
+  // --- 多实例归属与任务队列关联 ---
+  std::string
+  currentInstanceId() const {
+    std::lock_guard<std::mutex> lock(instance_mutex_);
+    return current_instance_id_;
+  }
+  void
+  setCurrentInstanceId(std::string id) {
+    std::lock_guard<std::mutex> lock(instance_mutex_);
+    current_instance_id_ = std::move(id);
+  }
+
   void
   setEventQueue(std::weak_ptr<world::EventQueue> queue) noexcept {
+    std::lock_guard<std::mutex> lock(instance_mutex_);
     event_queue_ = std::move(queue);
   }
   std::shared_ptr<world::EventQueue> eventQueue() const noexcept;
@@ -211,7 +223,9 @@ class ClientSession : public network::SessionCallbacks,
  private:
   std::weak_ptr<network::TcpSession> tcp_session_;
   std::weak_ptr<ClientManager> client_manager_;
+  mutable std::mutex instance_mutex_;
   std::weak_ptr<world::EventQueue> event_queue_;
+  std::string current_instance_id_;
   std::string remote_address_;
   asio::steady_timer keep_alive_timer_;
   std::shared_ptr<ProtocolHandler> protocol_handler_;

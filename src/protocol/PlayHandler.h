@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 #include "common/ByteBuffer.h"
 #include "protocol/GameTypes.h"
@@ -11,24 +12,48 @@ namespace mcpe::world {
 class World;
 }
 
+namespace mcpe::game {
+class InstanceManager;
+}
+
 namespace mcpe::protocol {
 
 class ClientSession;
 
 class PlayHandler {
  public:
-  /** @brief 绑定全局世界实例（大厅/跑酷） */
+  /** @brief 绑定全局默认世界实例（兼容单实例模式） */
   static void setWorld(std::shared_ptr<world::World> world);
   static std::shared_ptr<world::World> getWorld();
 
-  /** @brief 玩家鉴权通过后调用：下发 Join Game、Player Position And Look 并启动保活心跳 */
+  /** @brief 绑定多实例并发调度中心（Sprint 4 多大厅分线与小游戏引擎） */
+  static void setInstanceManager(std::shared_ptr<game::InstanceManager> mgr);
+  static std::shared_ptr<game::InstanceManager> getInstanceManager();
+
+  /** @brief 玩家鉴权通过后调用：分配大厅分线、下发 Join Game、Chunk 流与出生点并启动心跳 */
   static void onPlayerJoin(const std::shared_ptr<ClientSession>& session);
 
-  /** @brief 下发 Join Game (0x23) 世界参数包（使用领域配置消除硬编码魔数） */
+  /** @brief 下发 Join Game (0x23) 世界参数包 */
   static void sendJoinGame(
       const std::shared_ptr<ClientSession>& session,
       int32_t entity_id,
       const ServerConfig& config = ServerConfig::defaultInstance()
+  );
+
+  /** @brief 下发 Respawn (0x35) 重生/切世界包（Dimension 严格为 4 字节大端 int32_t） */
+  static void sendRespawn(
+      const std::shared_ptr<ClientSession>& session,
+      Dimension dimension,
+      Difficulty difficulty = Difficulty::Peaceful,
+      GameMode gamemode = GameMode::Adventure,
+      std::string_view level_type = "flat"
+  );
+
+  /** @brief 单连接无缝切换玩家所处世界（双发 0x35 清空客户端区块缓存 -> 11x11 区块流 -> 0x2F 起点定位） */
+  static void switchPlayerWorld(
+      const std::shared_ptr<ClientSession>& session,
+      const world::World& target_world,
+      GameMode target_gamemode = GameMode::Adventure
   );
 
   /** @brief 下发 Player Position And Look (0x2F) 玩家位置与视线包 */
@@ -51,7 +76,7 @@ class PlayHandler {
       float fov_modifier = 0.1f
   );
 
-  /** @brief 下发 Time Update (0x47) 世界时间包（若 time_of_day 为负数则锁定昼夜更迭，保持永昼） */
+  /** @brief 下发 Time Update (0x47) 世界时间包（time_of_day 为负数则冻结昼夜，保持正午永昼） */
   static void sendTimeUpdate(
       const std::shared_ptr<ClientSession>& session,
       int64_t world_age = 6000LL,
@@ -71,26 +96,26 @@ class PlayHandler {
   /** @brief 处理客户端应答的 Keep Alive (0x0B) */
   static void handleKeepAlive(const std::shared_ptr<ClientSession>& session, ByteBuffer& payload);
 
-  /** @brief 处理客户端发来的移动包族 (0x0C, 0x0D, 0x0E, 0x0F) 并投递至 EventQueue */
+  /** @brief 处理客户端发来的移动包族 (0x0C, 0x0D, 0x0E, 0x0F) 并投递至当前实例 EventQueue */
   static void handlePlayerMovement(
       const std::shared_ptr<ClientSession>& session,
       int32_t packet_id,
       ByteBuffer& payload
   );
 
-  /** @brief 处理客户端发来的聊天信息 (0x02) 并投递至 EventQueue */
+  /** @brief 处理客户端发来的聊天信息 (0x02) 并投递至当前实例 EventQueue */
   static void handleChatMessage(
       const std::shared_ptr<ClientSession>& session,
       ByteBuffer& payload
   );
 
-  /** @brief 处理客户端发来的方块挖掘包 (0x14)：大厅保护环境下拒绝并静默消费 */
+  /** @brief 处理客户端发来的方块挖掘包 (0x14)：大厅与跑酷保护环境下拒绝并静默消费 */
   static void handlePlayerDigging(
       const std::shared_ptr<ClientSession>& session,
       ByteBuffer& payload
   );
 
-  /** @brief 处理客户端发来的方块放置包 (0x1F)：大厅保护环境下拒绝并静默消费 */
+  /** @brief 处理客户端发来的方块放置包 (0x1F)：大厅与跑酷保护环境下拒绝并静默消费 */
   static void handleBlockPlacement(
       const std::shared_ptr<ClientSession>& session,
       ByteBuffer& payload

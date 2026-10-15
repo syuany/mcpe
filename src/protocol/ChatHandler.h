@@ -1,12 +1,18 @@
 /**
  * @file ChatHandler.h
  * @brief 聊天多播与快捷指令路由系统（Protocol 协议层）
+ *
+ * 支持功能：
+ * 1. 按玩家当前所属实例（LobbyInstance / ParkourInstance）隔离公屏聊天多播；
+ * 2. 快捷指令路由：/join <map>, /lobby [id], /leave, /lobbies, /maps, /top [map],
+ *    /fly [on|off], /spawn, /setspawn, /setmaxplayers <server_max> [lobby_max], /help。
  */
 
 #ifndef MCPE_PROTOCOL_CHAT_HANDLER_H
 #define MCPE_PROTOCOL_CHAT_HANDLER_H
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -18,6 +24,10 @@
 
 namespace mcpe::world {
 class EntityManager;
+}
+
+namespace mcpe::game {
+class InstanceManager;
 }
 
 namespace mcpe::protocol {
@@ -39,6 +49,8 @@ class ChatHandler {
   void setSenders(SystemMessageSender sys_sender, MulticastSender multicast_sender);
   void setClientManager(std::weak_ptr<ClientManager> client_manager);
   void setEntityManager(std::weak_ptr<world::EntityManager> entity_manager);
+  void setInstanceManager(std::weak_ptr<game::InstanceManager> instance_manager);
+  void setSettingsPath(std::filesystem::path settings_path);
   void setSpawnCallback(SetSpawnCallback cb);
 
   /**
@@ -51,7 +63,7 @@ class ChatHandler {
   );
 
   /**
-   * @brief 处理以 / 开头的控制台/大厅快捷指令（绝不多播广播至公屏，仅私发系统回显）
+   * @brief 处理以 / 开头的控制台/大厅/跑酷快捷指令（绝不多播广播至公屏，仅私发系统回显）
    */
   void handleCommand(uint64_t sender_sid, const std::string& cmd_line);
 
@@ -74,11 +86,19 @@ class ChatHandler {
   void handleFlyCommand(uint64_t sender_sid, const std::string& cmd_line);
   void handleSetSpawnCommand(uint64_t sender_sid);
   void handleSpawnCommand(uint64_t sender_sid);
+  void handleJoinCommand(uint64_t sender_sid, std::string_view map_arg);
+  void handleLobbyCommand(uint64_t sender_sid, std::string_view shard_arg);
+  void handleLobbiesCommand(uint64_t sender_sid);
+  void handleMapsCommand(uint64_t sender_sid);
+  void handleTopCommand(uint64_t sender_sid, std::string_view map_arg);
+  void handleSetMaxPlayersCommand(uint64_t sender_sid, std::string_view args);
 
   SystemMessageSender sys_sender_;
   MulticastSender multicast_sender_;
   std::weak_ptr<ClientManager> client_manager_;
   std::weak_ptr<world::EntityManager> entity_manager_;
+  std::weak_ptr<game::InstanceManager> instance_manager_;
+  std::filesystem::path settings_path_{"src/settings.ini"};
   SetSpawnCallback spawn_callback_;
 };
 
