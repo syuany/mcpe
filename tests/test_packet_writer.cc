@@ -204,3 +204,28 @@ TEST(PacketWriterTest, ExplicitFlushSendsOnce) {
   EXPECT_EQ(*recv.readVarInt(), 0x10);
   EXPECT_EQ(*recv.readBe<int32_t>(), 42);
 }
+
+// 测试 5：PacketBuilder 无会话独立封包器测试
+TEST(PacketWriterTest, PacketBuilderStandaloneFraming) {
+  mcpe::network::PacketBuilder builder(0x0F);
+  builder.appendString(R"({"text":"Hello"})");
+  builder.appendByte(1);
+
+  ByteBuffer pkt = builder.build();
+  auto total_len = pkt.readVarInt();
+  ASSERT_TRUE(total_len.has_value());
+  EXPECT_EQ(*total_len, static_cast<int32_t>(pkt.readableBytes()));
+
+  auto pid = pkt.readVarInt();
+  ASSERT_TRUE(pid.has_value());
+  EXPECT_EQ(*pid, 0x0F);
+
+  auto text = pkt.readString();
+  ASSERT_TRUE(text.has_value());
+  EXPECT_EQ(*text, R"({"text":"Hello"})");
+
+  auto pos = pkt.readBe<uint8_t>();
+  ASSERT_TRUE(pos.has_value());
+  EXPECT_EQ(*pos, 1);
+  EXPECT_EQ(pkt.readableBytes(), 0u);
+}

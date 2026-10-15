@@ -10,7 +10,7 @@
 #include <filesystem>
 #include <vector>
 
-#include "common/ZipArchive.h"
+#include "ZipArchive.h"
 
 using namespace mcpe::common;
 

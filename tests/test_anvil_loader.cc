@@ -10,7 +10,7 @@
 #include <filesystem>
 #include <vector>
 
-#include "world/AnvilLoader.h"
+#include "AnvilLoader.h"
 #include "world/World.h"
 
 using namespace mcpe;

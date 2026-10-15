@@ -673,3 +673,31 @@ TEST(ByteBufferSliceTest, PrependTriggersCopyOnWriteWhenShared) {
   EXPECT_EQ(slice.toStringView(), "World");
   EXPECT_EQ(buf.retrieveAllAsString(), "Hello World");
 }
+
+
+TEST(ByteBufferSliceTest, RetainedSliceZeroCopyMulticastAndCOW) {
+  ByteBuffer packet;
+  packet.appendVarInt(0x26);
+  packet.writeBe<int16_t>(4096);
+  packet.prependVarInt(packet.readableBytes());
+
+  const size_t total_len = packet.readableBytes();
+  EXPECT_EQ(packet.useCount(), 1);
+
+  // 模拟向 3 个观察者零拷贝多播广播
+  ByteBuffer s1 = packet.retainedSlice();
+  ByteBuffer s2 = packet.retainedSlice();
+  ByteBuffer s3 = packet.retainedSlice();
+
+  EXPECT_EQ(packet.useCount(), 4);
+  EXPECT_EQ(s1.readableBytes(), total_len);
+  EXPECT_EQ(s2.readableBytes(), total_len);
+  EXPECT_EQ(s3.readableBytes(), total_len);
+  EXPECT_EQ(s1.peek(), packet.peek());
+  EXPECT_EQ(s2.peek(), packet.peek());
+
+  // 任一接收端消费游标不影响其他共享切片
+  auto len1 = s1.readVarInt();
+  ASSERT_TRUE(len1.has_value());
+  EXPECT_EQ(s2.readableBytes(), total_len);
+}
