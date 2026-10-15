@@ -6,13 +6,13 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/use_awaitable.hpp>
+#include <atomic>
 #include <utility>
 
 #include "network/PacketWriter.h"
 #include "network/TcpSession.h"
 #include "protocol/ClientManager.h"
 #include "protocol/PacketRouter.h"
-#include <atomic>
 #include "protocol/PlayHandler.h"
 #include "world/EventQueue.h"
 
@@ -102,16 +102,6 @@ ClientSession::isStopped() const noexcept {
 const std::string&
 ClientSession::remoteAddress() const noexcept {
   return remote_address_;
-}
-
-asio::ip::tcp::socket&
-ClientSession::socket() {
-  if (auto tcp = tcp_session_.lock()) {
-    return tcp->socket();
-  }
-  static asio::io_context dummy_ctx;
-  static asio::ip::tcp::socket dummy_socket(dummy_ctx);
-  return dummy_socket;
 }
 
 std::shared_ptr<network::TcpSession>

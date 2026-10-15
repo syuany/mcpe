@@ -8,12 +8,17 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 
 #include "common/ByteBuffer.h"
 #include "common/SpatialTypes.h"
 #include "protocol/PacketTypes.h"
+
+namespace mcpe::world {
+class EntityManager;
+}
 
 namespace mcpe::protocol {
 
@@ -33,6 +38,7 @@ class ChatHandler {
 
   void setSenders(SystemMessageSender sys_sender, MulticastSender multicast_sender);
   void setClientManager(std::weak_ptr<ClientManager> client_manager);
+  void setEntityManager(std::weak_ptr<world::EntityManager> entity_manager);
   void setSpawnCallback(SetSpawnCallback cb);
 
   /**
@@ -60,7 +66,7 @@ class ChatHandler {
   static std::string escapeJson(std::string_view text);
 
   /**
-   * @brief 构造 0x02 Chat Message (Clientbound) 协议包
+   * @brief 构造 0x0F Chat Message (Clientbound) 协议包
    */
   static ByteBuffer buildChatPacket(std::string_view json_text, ChatPosition pos);
 
@@ -72,6 +78,7 @@ class ChatHandler {
   SystemMessageSender sys_sender_;
   MulticastSender multicast_sender_;
   std::weak_ptr<ClientManager> client_manager_;
+  std::weak_ptr<world::EntityManager> entity_manager_;
   SetSpawnCallback spawn_callback_;
 };
 

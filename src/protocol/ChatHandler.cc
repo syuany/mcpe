@@ -10,9 +10,11 @@
 #include <format>
 #include <utility>
 
+#include "network/PacketWriter.h"
 #include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
 #include "protocol/PlayHandler.h"
+#include "world/EntityManager.h"
 #include "world/World.h"
 
 namespace mcpe::protocol {
@@ -35,6 +37,11 @@ ChatHandler::setSenders(SystemMessageSender sys_sender, MulticastSender multicas
 void
 ChatHandler::setClientManager(std::weak_ptr<ClientManager> client_manager) {
   client_manager_ = std::move(client_manager);
+}
+
+void
+ChatHandler::setEntityManager(std::weak_ptr<world::EntityManager> entity_manager) {
+  entity_manager_ = std::move(entity_manager);
 }
 
 void
@@ -87,7 +94,7 @@ ChatHandler::handleCommand(uint64_t sender_sid, const std::string& cmd_line) {
   } else if (cmd_line == "/setspawn" || cmd_line == "/setworldspawn") {
     handleSetSpawnCommand(sender_sid);
   } else if (cmd_line == "/maps") {
-    sendSystemMessage(sender_sid, "§e[地图列表] 1. 新手跑酷 (输入 /join 1)  2. 螺旋跑酷 (输入 /join 2)");
+    sendSystemMessage(sender_sid, "§e[地图列表] 当前常驻世界: 浮空岛主大厅 (使用 /spawn 返回出生点)");
   } else if (cmd_line == "/fly" || cmd_line.starts_with("/fly ")) {
     handleFlyCommand(sender_sid, cmd_line);
   } else if (cmd_line == "/help") {
@@ -111,8 +118,15 @@ ChatHandler::handleSetSpawnCommand(uint64_t sender_sid) {
     return;
   }
 
-  const Vector3d pos = session->position();
-  const Rotation rot = session->rotation();
+  // 优先从 20 TPS 物理主线程的 EntityManager 读取权威坐标（消除跨线程竞态），单测环境下优雅回退至 Session
+  Vector3d pos = session->position();
+  Rotation rot = session->rotation();
+  if (auto em = entity_manager_.lock()) {
+    if (const auto* player_ent = em->getPlayer(sender_sid)) {
+      pos = player_ent->position;
+      rot = player_ent->rotation;
+    }
+  }
 
   auto world = PlayHandler::getWorld();
   if (world) {
@@ -156,6 +170,12 @@ ChatHandler::handleSpawnCommand(uint64_t sender_sid) {
   auto world = PlayHandler::getWorld();
   const Vector3d target = world ? world->spawnPoint() : Vector3d{0.5, 4.0, 0.5};
   const Rotation rot = world ? world->spawnRotation() : Rotation{0.0f, 0.0f};
+
+  session->setPosition(target);
+  session->setRotation(rot);
+  if (auto em = entity_manager_.lock()) {
+    em->updatePlayerPosition(sender_sid, target, rot, true);
+  }
 
   const int32_t tid = session->nextTeleportId();
   PlayHandler::sendPlayerPositionAndLook(
@@ -264,13 +284,10 @@ ChatHandler::escapeJson(std::string_view text) {
 
 ByteBuffer
 ChatHandler::buildChatPacket(std::string_view json_text, ChatPosition pos) {
-  ByteBuffer buf;
-  buf.appendVarInt(ClientboundPacket::ChatMessage);
-  buf.appendString(json_text);
-  buf.appendByte(static_cast<uint8_t>(pos));
-
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  network::PacketBuilder builder(ClientboundPacket::ChatMessage);
+  builder.appendString(json_text);
+  builder.appendByte(static_cast<uint8_t>(pos));
+  return builder.build();
 }
 
 }  // namespace mcpe::protocol

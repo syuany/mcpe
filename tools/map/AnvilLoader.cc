@@ -3,7 +3,7 @@
  * @brief Minecraft 原版 Anvil (.mca) 与世界存档 (.zip / 文件夹) 加载器实现
  */
 
-#include "world/AnvilLoader.h"
+#include "AnvilLoader.h"
 
 #include <spdlog/spdlog.h>
 #include <zlib.h>
@@ -12,8 +12,8 @@
 #include <fstream>
 #include <regex>
 
-#include "common/NbtReader.h"
-#include "common/ZipArchive.h"
+#include "NbtReader.h"
+#include "ZipArchive.h"
 
 namespace mcpe::world {
 

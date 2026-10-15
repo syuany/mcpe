@@ -11,6 +11,8 @@
 #include <cstring>
 #include <utility>
 
+#include "network/PacketWriter.h"
+
 namespace mcpe::world {
 
 EntityManager::EntityManager(
@@ -87,8 +89,8 @@ EntityManager::addPlayer(
     const auto& other_player = other_it->second;
 
     if (sender_) {
-      sender_(other_sid, new_list_pkt.clone());
-      sender_(other_sid, new_spawn_pkt.clone());
+      sender_(other_sid, new_list_pkt.retainedSlice());
+      sender_(other_sid, new_spawn_pkt.retainedSlice());
 
       // 2. 向新玩家展示九宫格内既有邻居玩家的 0x2E 与 0x05
       sender_(
@@ -135,8 +137,8 @@ EntityManager::removePlayer(uint64_t session_id) {
   if (sender_) {
     for (uint64_t obs_sid : observers) {
       if (obs_sid == session_id) continue;
-      sender_(obs_sid, destroy_pkt.clone());
-      sender_(obs_sid, remove_list_pkt.clone());
+      sender_(obs_sid, destroy_pkt.retainedSlice());
+      sender_(obs_sid, remove_list_pkt.retainedSlice());
     }
   } else if (broadcast_except_) {
     broadcast_except_(session_id, std::move(destroy_pkt));
@@ -284,14 +286,14 @@ EntityManager::updateAndBroadcast() {
       pkt = buildEntityLookPacket(p.entity_id, p.rotation, p.on_ground);
     }
 
-    // 九宫格局部多播：仅向当前区块九宫格内的邻居投递
+    // 九宫格局部多播：仅向当前区块九宫格内的邻居投递（retainedSlice 零拷贝共享）
     const ChunkPos cur_chunk = grid_.getPlayerChunk(sid);
     const auto observers = grid_.getNearbyPlayers(cur_chunk, 1);
 
     if (sender_) {
       for (uint64_t obs_sid : observers) {
         if (obs_sid == sid) continue;
-        sender_(obs_sid, pkt.clone());
+        sender_(obs_sid, pkt.retainedSlice());
       }
     } else if (broadcast_except_) {
       broadcast_except_(sid, std::move(pkt));
@@ -331,55 +333,49 @@ EntityManager::buildPlayerListItemPacket(
     const PlayerEntity& player,
     protocol::PlayerListItemAction action
 ) {
-  ByteBuffer buf;
-  buf.appendVarInt(protocol::ClientboundPacket::PlayerListItem);
-  buf.appendVarInt(static_cast<int32_t>(action));
-  buf.appendVarInt(1);  // 1 player entry
+  network::PacketBuilder builder(protocol::ClientboundPacket::PlayerListItem);
+  builder.appendVarInt(static_cast<int32_t>(action));
+  builder.appendVarInt(1);  // 1 player entry
 
   if (action == protocol::PlayerListItemAction::AddPlayer) {
-    buf.append(player.uuid.data(), 16);
-    buf.appendString(player.username);
-    buf.appendVarInt(0);  // 0 properties
-    buf.appendVarInt(1);  // Gamemode: Creative
-    buf.appendVarInt(5);  // Ping: 5ms
-    buf.appendByte(0);    // Has Display Name: false
+    builder.append(player.uuid.data(), 16);
+    builder.appendString(player.username);
+    builder.appendVarInt(0);  // 0 properties
+    builder.appendVarInt(1);  // Gamemode: Creative
+    builder.appendVarInt(5);  // Ping: 5ms
+    builder.appendByte(0);    // Has Display Name: false
   } else if (action == protocol::PlayerListItemAction::RemovePlayer) {
-    buf.append(player.uuid.data(), 16);
+    builder.append(player.uuid.data(), 16);
   }
 
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  return builder.build();
 }
 
 ByteBuffer
 EntityManager::buildSpawnPlayerPacket(const PlayerEntity& player) {
-  ByteBuffer buf;
-  buf.appendVarInt(protocol::ClientboundPacket::SpawnPlayer);
-  buf.appendVarInt(player.entity_id);
-  buf.append(player.uuid.data(), 16);
-  buf.writeBe<double>(player.position.x);
-  buf.writeBe<double>(player.position.y);
-  buf.writeBe<double>(player.position.z);
-  buf.appendByte(player.rotation.toByteYaw());
-  buf.appendByte(player.rotation.toBytePitch());
-  buf.appendByte(0xFF);  // Metadata terminator
+  network::PacketBuilder builder(protocol::ClientboundPacket::SpawnPlayer);
+  builder.appendVarInt(player.entity_id);
+  builder.append(player.uuid.data(), 16);
+  builder.writeBe<double>(player.position.x);
+  builder.writeBe<double>(player.position.y);
+  builder.writeBe<double>(player.position.z);
+  builder.appendByte(player.rotation.toByteYaw());
+  builder.appendByte(player.rotation.toBytePitch());
+  builder.appendByte(0xFF);  // Metadata terminator
 
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  return builder.build();
 }
 
 ByteBuffer
 EntityManager::buildRelMovePacket(int32_t entity_id, const Vector3d& delta, bool on_ground) {
-  ByteBuffer buf;
-  buf.appendVarInt(protocol::ClientboundPacket::EntityRelativeMove);
-  buf.appendVarInt(entity_id);
-  buf.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.x * 4096.0)));
-  buf.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.y * 4096.0)));
-  buf.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.z * 4096.0)));
-  buf.appendByte(on_ground ? 1 : 0);
+  network::PacketBuilder builder(protocol::ClientboundPacket::EntityRelativeMove);
+  builder.appendVarInt(entity_id);
+  builder.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.x * 4096.0)));
+  builder.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.y * 4096.0)));
+  builder.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.z * 4096.0)));
+  builder.appendByte(on_ground ? 1 : 0);
 
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  return builder.build();
 }
 
 ByteBuffer
@@ -389,58 +385,50 @@ EntityManager::buildLookAndRelMovePacket(
     const Rotation& rot,
     bool on_ground
 ) {
-  ByteBuffer buf;
-  buf.appendVarInt(protocol::ClientboundPacket::EntityLookAndRelativeMove);
-  buf.appendVarInt(entity_id);
-  buf.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.x * 4096.0)));
-  buf.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.y * 4096.0)));
-  buf.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.z * 4096.0)));
-  buf.appendByte(rot.toByteYaw());
-  buf.appendByte(rot.toBytePitch());
-  buf.appendByte(on_ground ? 1 : 0);
+  network::PacketBuilder builder(protocol::ClientboundPacket::EntityLookAndRelativeMove);
+  builder.appendVarInt(entity_id);
+  builder.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.x * 4096.0)));
+  builder.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.y * 4096.0)));
+  builder.writeBe<int16_t>(static_cast<int16_t>(std::round(delta.z * 4096.0)));
+  builder.appendByte(rot.toByteYaw());
+  builder.appendByte(rot.toBytePitch());
+  builder.appendByte(on_ground ? 1 : 0);
 
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  return builder.build();
 }
 
 ByteBuffer
 EntityManager::buildEntityLookPacket(int32_t entity_id, const Rotation& rot, bool on_ground) {
-  ByteBuffer buf;
-  buf.appendVarInt(protocol::ClientboundPacket::EntityLook);
-  buf.appendVarInt(entity_id);
-  buf.appendByte(rot.toByteYaw());
-  buf.appendByte(rot.toBytePitch());
-  buf.appendByte(on_ground ? 1 : 0);
+  network::PacketBuilder builder(protocol::ClientboundPacket::EntityLook);
+  builder.appendVarInt(entity_id);
+  builder.appendByte(rot.toByteYaw());
+  builder.appendByte(rot.toBytePitch());
+  builder.appendByte(on_ground ? 1 : 0);
 
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  return builder.build();
 }
 
 ByteBuffer
 EntityManager::buildEntityTeleportPacket(const PlayerEntity& player) {
-  ByteBuffer buf;
-  buf.appendVarInt(protocol::ClientboundPacket::EntityTeleport);
-  buf.appendVarInt(player.entity_id);
-  buf.writeBe<double>(player.position.x);
-  buf.writeBe<double>(player.position.y);
-  buf.writeBe<double>(player.position.z);
-  buf.appendByte(player.rotation.toByteYaw());
-  buf.appendByte(player.rotation.toBytePitch());
-  buf.appendByte(player.on_ground ? 1 : 0);
+  network::PacketBuilder builder(protocol::ClientboundPacket::EntityTeleport);
+  builder.appendVarInt(player.entity_id);
+  builder.writeBe<double>(player.position.x);
+  builder.writeBe<double>(player.position.y);
+  builder.writeBe<double>(player.position.z);
+  builder.appendByte(player.rotation.toByteYaw());
+  builder.appendByte(player.rotation.toBytePitch());
+  builder.appendByte(player.on_ground ? 1 : 0);
 
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  return builder.build();
 }
 
 ByteBuffer
 EntityManager::buildDestroyEntitiesPacket(int32_t entity_id) {
-  ByteBuffer buf;
-  buf.appendVarInt(protocol::ClientboundPacket::DestroyEntities);
-  buf.appendVarInt(1);  // count = 1
-  buf.appendVarInt(entity_id);
+  network::PacketBuilder builder(protocol::ClientboundPacket::DestroyEntities);
+  builder.appendVarInt(1);  // count = 1
+  builder.appendVarInt(entity_id);
 
-  buf.prependVarInt(static_cast<int32_t>(buf.readableBytes()));
-  return buf;
+  return builder.build();
 }
 
 }  // namespace mcpe::world

@@ -7,9 +7,22 @@
 
 #include <spdlog/spdlog.h>
 
-#include "world/AnvilLoader.h"
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <format>
+#include <fstream>
+#include <string>
+#include <string_view>
 
 namespace mcpe::world {
+
+namespace {
+constexpr char kBakedMapMagic[4] = {'M', 'C', 'P', 'E'};
+constexpr uint32_t kBakedMapVersion = 1;
+}  // namespace
 
 const Chunk*
 World::getChunk(ChunkPos pos) const {
@@ -38,62 +51,223 @@ World::getOrCreateChunk(ChunkPos pos) {
   return *chunk_ptr;
 }
 
-void
-World::loadSchematic(const Schematic& schematic, const BlockPos& origin) {
-  if (!schematic.isValid()) {
-    spdlog::warn("[World] Attempted to load invalid schematic into world");
-    return;
-  }
-
-  const int32_t min_x = origin.x;
-  const int32_t max_x = origin.x + schematic.width - 1;
-  const int32_t min_z = origin.z;
-  const int32_t max_z = origin.z + schematic.length - 1;
-
-  const int32_t min_cx = min_x >> 4;
-  const int32_t max_cx = max_x >> 4;
-  const int32_t min_cz = min_z >> 4;
-  const int32_t max_cz = max_z >> 4;
-
-  spdlog::info(
-      "[World] Pasting schematic ({}x{}x{}) from Chunk ({}, {}) to ({}, {})",
-      schematic.width,
-      schematic.height,
-      schematic.length,
-      min_cx,
-      min_cz,
-      max_cx,
-      max_cz
-  );
-
-  for (int32_t cz = min_cz; cz <= max_cz; ++cz) {
-    for (int32_t cx = min_cx; cx <= max_cx; ++cx) {
-      Chunk& chunk = getOrCreateChunk(ChunkPos{cx, cz});
-      SchematicLoader::pasteToChunk(schematic, origin, chunk);
-    }
-  }
-}
-
 bool
-World::loadLobbySchematic(const std::filesystem::path& path, const BlockPos& origin) {
-  auto schem_opt = SchematicLoader::loadFromFile(path);
-  if (!schem_opt) {
-    spdlog::error("[World] Failed to load lobby schematic from {}", path.string());
+World::saveBakedMap(const std::filesystem::path& path) const {
+  std::error_code ec;
+  if (path.has_parent_path()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+  }
+
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out.is_open()) {
+    spdlog::error("[World] Failed to open '{}' for writing baked map", path.string());
     return false;
   }
 
-  loadSchematic(*schem_opt, origin);
+  const Vector3d sp = spawnPoint();
+  const Rotation rot = spawnRotation();
+  const uint32_t chunk_count = static_cast<uint32_t>(chunks_.size());
+
+  // 1. 写入文件头: Magic(4B) + Version(4B) + SpawnPoint(24B) + Rotation(8B) + ChunkCount(4B)
+  out.write(kBakedMapMagic, 4);
+  out.write(reinterpret_cast<const char*>(&kBakedMapVersion), sizeof(kBakedMapVersion));
+  out.write(reinterpret_cast<const char*>(&sp.x), sizeof(double));
+  out.write(reinterpret_cast<const char*>(&sp.y), sizeof(double));
+  out.write(reinterpret_cast<const char*>(&sp.z), sizeof(double));
+  out.write(reinterpret_cast<const char*>(&rot.yaw), sizeof(float));
+  out.write(reinterpret_cast<const char*>(&rot.pitch), sizeof(float));
+  out.write(reinterpret_cast<const char*>(&chunk_count), sizeof(chunk_count));
+
+  // 2. 写入每个 Chunk 的坐标、Section 掩码、Biomes 及非空 Section 连续方块数组
+  for (const auto& [cpos, chunk_ptr] : chunks_) {
+    if (!chunk_ptr) continue;
+    const int32_t cx = cpos.x;
+    const int32_t cz = cpos.z;
+    const uint16_t bitmask = chunk_ptr->primaryBitMask();
+
+    out.write(reinterpret_cast<const char*>(&cx), sizeof(cx));
+    out.write(reinterpret_cast<const char*>(&cz), sizeof(cz));
+    out.write(reinterpret_cast<const char*>(&bitmask), sizeof(bitmask));
+    out.write(
+        reinterpret_cast<const char*>(chunk_ptr->biomes().data()),
+        Chunk::kBiomeCount
+    );
+
+    for (size_t sec_idx = 0; sec_idx < Chunk::kSectionCount; ++sec_idx) {
+      if ((bitmask & (1U << sec_idx)) != 0) {
+        const ChunkSection* sec = chunk_ptr->getSection(sec_idx);
+        if (sec) {
+          out.write(
+              reinterpret_cast<const char*>(sec->blocks().data()),
+              ChunkSection::kBlockCount * sizeof(uint16_t)
+          );
+        }
+      }
+    }
+  }
+
+  return out.good();
+}
+
+size_t
+World::loadBakedMap(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    spdlog::warn("[World] Baked map file not found: {}", path.string());
+    return 0;
+  }
+
+  char magic[4]{};
+  uint32_t version = 0;
+  Vector3d sp{};
+  Rotation rot{};
+  uint32_t chunk_count = 0;
+
+  if (!in.read(magic, 4) || std::memcmp(magic, kBakedMapMagic, 4) != 0) {
+    spdlog::error("[World] Invalid magic header in baked map: {}", path.string());
+    return 0;
+  }
+
+  if (!in.read(reinterpret_cast<char*>(&version), sizeof(version)) ||
+      version != kBakedMapVersion) {
+    spdlog::error("[World] Unsupported baked map version {} in {}", version, path.string());
+    return 0;
+  }
+
+  if (!in.read(reinterpret_cast<char*>(&sp.x), sizeof(double)) ||
+      !in.read(reinterpret_cast<char*>(&sp.y), sizeof(double)) ||
+      !in.read(reinterpret_cast<char*>(&sp.z), sizeof(double)) ||
+      !in.read(reinterpret_cast<char*>(&rot.yaw), sizeof(float)) ||
+      !in.read(reinterpret_cast<char*>(&rot.pitch), sizeof(float)) ||
+      !in.read(reinterpret_cast<char*>(&chunk_count), sizeof(chunk_count))) {
+    spdlog::error("[World] Truncated header in baked map: {}", path.string());
+    return 0;
+  }
+
+  setSpawnPoint(sp);
+  setSpawnRotation(rot);
+  chunks_.clear();
+  chunks_.reserve(chunk_count);
+
+  std::array<uint8_t, Chunk::kBiomeCount> biomes_buf{};
+  std::array<uint16_t, ChunkSection::kBlockCount> blocks_buf{};
+
+  size_t loaded_chunks = 0;
+  for (uint32_t i = 0; i < chunk_count; ++i) {
+    int32_t cx = 0;
+    int32_t cz = 0;
+    uint16_t bitmask = 0;
+
+    if (!in.read(reinterpret_cast<char*>(&cx), sizeof(cx)) ||
+        !in.read(reinterpret_cast<char*>(&cz), sizeof(cz)) ||
+        !in.read(reinterpret_cast<char*>(&bitmask), sizeof(bitmask)) ||
+        !in.read(reinterpret_cast<char*>(biomes_buf.data()), Chunk::kBiomeCount)) {
+      spdlog::error("[World] Corrupted chunk header at index {} in {}", i, path.string());
+      break;
+    }
+
+    Chunk& chunk = getOrCreateChunk(ChunkPos{cx, cz});
+    chunk.setBiomes(biomes_buf);
+
+    for (size_t sec_idx = 0; sec_idx < Chunk::kSectionCount; ++sec_idx) {
+      if ((bitmask & (1U << sec_idx)) != 0) {
+        if (!in.read(
+                reinterpret_cast<char*>(blocks_buf.data()),
+                ChunkSection::kBlockCount * sizeof(uint16_t)
+            )) {
+          spdlog::error("[World] Corrupted section data in chunk ({}, {})", cx, cz);
+          return loaded_chunks;
+        }
+        chunk.getOrCreateSection(sec_idx).loadRawBlocks(blocks_buf);
+      }
+    }
+    ++loaded_chunks;
+  }
+
+  spdlog::info(
+      "[World] Loaded {} baked chunks from '{}', spawn=({:.1f}, {:.1f}, {:.1f})",
+      loaded_chunks,
+      path.string(),
+      sp.x,
+      sp.y,
+      sp.z
+  );
+  return loaded_chunks;
+}
+
+bool
+World::loadSpawnConfig(const std::filesystem::path& path) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    return false;
+  }
+
+  Vector3d pos = spawnPoint();
+  Rotation rot = spawnRotation();
+  std::string line;
+  bool has_x = false;
+  bool has_y = false;
+  bool has_z = false;
+
+  while (std::getline(file, line)) {
+    auto parse_field = [&](std::string_view key, auto& out_val) {
+      auto pos_key = line.find(key);
+      if (pos_key != std::string::npos) {
+        auto colon = line.find(':', pos_key + key.size());
+        if (colon != std::string::npos) {
+          char* end = nullptr;
+          const char* str_start = line.c_str() + colon + 1;
+          double v = std::strtod(str_start, &end);
+          if (end != str_start) {
+            out_val = static_cast<std::decay_t<decltype(out_val)>>(v);
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    if (parse_field("\"x\"", pos.x)) has_x = true;
+    if (parse_field("\"y\"", pos.y)) has_y = true;
+    if (parse_field("\"z\"", pos.z)) has_z = true;
+    parse_field("\"yaw\"", rot.yaw);
+    parse_field("\"pitch\"", rot.pitch);
+  }
+
+  if (has_x && has_y && has_z) {
+    setSpawnPoint(pos);
+    setSpawnRotation(rot);
+    return true;
+  }
+  return false;
+}
+
+bool
+World::saveSpawnConfig(const std::filesystem::path& path) const {
+  std::error_code ec;
+  if (path.has_parent_path()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+  }
+  std::ofstream file(path, std::ios::trunc);
+  if (!file.is_open()) {
+    return false;
+  }
+  const Vector3d pos = spawnPoint();
+  const Rotation rot = spawnRotation();
+  file << std::format(
+      "{{\n"
+      "  \"x\": {:.2f},\n"
+      "  \"y\": {:.2f},\n"
+      "  \"z\": {:.2f},\n"
+      "  \"yaw\": {:.2f},\n"
+      "  \"pitch\": {:.2f}\n"
+      "}}\n",
+      pos.x,
+      pos.y,
+      pos.z,
+      rot.yaw,
+      rot.pitch
+  );
   return true;
-}
-
-size_t
-World::loadWorldFromZip(const std::filesystem::path& path) {
-  return AnvilLoader::loadFromZip(path, *this);
-}
-
-size_t
-World::loadWorldFromDirectory(const std::filesystem::path& path) {
-  return AnvilLoader::loadFromDirectory(path, *this);
 }
 
 std::vector<ChunkPos>
@@ -128,17 +302,19 @@ World::adjustSpawnPointToSafeGround() {
     return;
   }
 
-  const int32_t target_x = static_cast<int32_t>(std::floor(spawn_point_.x));
-  const int32_t target_z = static_cast<int32_t>(std::floor(spawn_point_.z));
+  Vector3d current_spawn = spawnPoint();
+  const int32_t target_x = static_cast<int32_t>(std::floor(current_spawn.x));
+  const int32_t target_z = static_cast<int32_t>(std::floor(current_spawn.z));
 
   int32_t ground_y = getHighestBlockY(target_x, target_z);
   if (ground_y >= 0) {
-    spawn_point_.y = static_cast<double>(ground_y + 1);
+    current_spawn.y = static_cast<double>(ground_y + 1);
+    setSpawnPoint(current_spawn);
     spdlog::info(
         "[World] Adjusted spawn point to safe ground at ({:.1f}, {:.1f}, {:.1f})",
-        spawn_point_.x,
-        spawn_point_.y,
-        spawn_point_.z
+        current_spawn.x,
+        current_spawn.y,
+        current_spawn.z
     );
     return;
   }
@@ -151,12 +327,13 @@ World::adjustSpawnPointToSafeGround() {
         const int32_t wz = (cpos.z << 4) + lz;
         int32_t gy = getHighestBlockY(wx, wz);
         if (gy >= 0) {
-          spawn_point_ = Vector3d{wx + 0.5, static_cast<double>(gy + 1), wz + 0.5};
+          const Vector3d safe_pos{wx + 0.5, static_cast<double>(gy + 1), wz + 0.5};
+          setSpawnPoint(safe_pos);
           spdlog::info(
               "[World] Spawn was in void! Repositioned to nearest solid block at ({:.1f}, {:.1f}, {:.1f})",
-              spawn_point_.x,
-              spawn_point_.y,
-              spawn_point_.z
+              safe_pos.x,
+              safe_pos.y,
+              safe_pos.z
           );
           return;
         }

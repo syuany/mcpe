@@ -1,17 +1,14 @@
 #ifndef CLIENTSESSION_H
 #define CLIENTSESSION_H
 
-#include <asio/as_tuple.hpp>
 #include <asio/awaitable.hpp>
-#include <asio/co_spawn.hpp>
-#include <asio/detached.hpp>
-#include <asio/ip/tcp.hpp>
 #include <asio/steady_timer.hpp>
-#include <asio/use_awaitable.hpp>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "common/ByteBuffer.h"
@@ -59,17 +56,16 @@ class ClientSession : public network::SessionCallbacks,
   void stop();
   bool isStopped() const noexcept;
   const std::string& remoteAddress() const noexcept;
-  asio::ip::tcp::socket& socket();
   std::shared_ptr<network::TcpSession> tcpSession() const noexcept;
 
   // --- Minecraft 协议连接状态机 ---
   ConnectionState
   state() const noexcept {
-    return state_;
+    return state_.load(std::memory_order_acquire);
   }
   void
   setState(ConnectionState new_state) noexcept {
-    state_ = new_state;
+    state_.store(new_state, std::memory_order_release);
   }
 
   /// 鉴权成功后流转至 PLAY 阶段并触发玩家进服生命周期（彻底解耦 LoginHandler 与 PlayHandler）
@@ -127,57 +123,62 @@ class ClientSession : public network::SessionCallbacks,
   // --- 世界传送位置确认机制 ---
   int32_t
   nextTeleportId() noexcept {
-    pending_teleport_id_ = ++teleport_counter_;
-    return pending_teleport_id_;
+    const int32_t tid = teleport_counter_.fetch_add(1, std::memory_order_relaxed) + 1;
+    pending_teleport_id_.store(tid, std::memory_order_release);
+    return tid;
   }
   int32_t
   pendingTeleportId() const noexcept {
-    return pending_teleport_id_;
+    return pending_teleport_id_.load(std::memory_order_acquire);
   }
   void
   clearPendingTeleportId() noexcept {
-    pending_teleport_id_ = -1;
+    pending_teleport_id_.store(-1, std::memory_order_release);
   }
   void
   setPendingTeleportId(int32_t id) noexcept {
-    pending_teleport_id_ = id;
+    pending_teleport_id_.store(id, std::memory_order_release);
   }
 
-  // --- 飞行与能力状态 ---
+  // --- 飞行与能力状态（原子并发安全） ---
   bool
   canFly() const noexcept {
-    return can_fly_;
+    return can_fly_.load(std::memory_order_acquire);
   }
   void
   setCanFly(bool can_fly) noexcept {
-    can_fly_ = can_fly;
+    can_fly_.store(can_fly, std::memory_order_release);
   }
 
   bool
   isFlying() const noexcept {
-    return is_flying_;
+    return is_flying_.load(std::memory_order_acquire);
   }
   void
   setIsFlying(bool is_flying) noexcept {
-    is_flying_ = is_flying;
+    is_flying_.store(is_flying, std::memory_order_release);
   }
 
-  // --- 实时坐标与视线朝向 ---
-  const Vector3d&
+  // --- 实时坐标与视线朝向（互斥锁保护，防止跨线程访问 UB） ---
+  Vector3d
   position() const noexcept {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
     return position_;
   }
   void
   setPosition(const Vector3d& pos) noexcept {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
     position_ = pos;
   }
 
-  const Rotation&
+  Rotation
   rotation() const noexcept {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
     return rotation_;
   }
   void
   setRotation(const Rotation& rot) noexcept {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
     rotation_ = rot;
   }
 
@@ -215,23 +216,24 @@ class ClientSession : public network::SessionCallbacks,
   asio::steady_timer keep_alive_timer_;
   std::shared_ptr<ProtocolHandler> protocol_handler_;
 
-  ConnectionState state_{ConnectionState::HANDSHAKING};
+  std::atomic<ConnectionState> state_{ConnectionState::HANDSHAKING};
   uint64_t session_id_{0};
   std::string username_;
   std::string uuid_;
   std::array<uint8_t, 16> uuid_bytes_{};
   int32_t entity_id_{0};
 
-  int32_t teleport_counter_{0};
-  int32_t pending_teleport_id_{-1};
+  std::atomic<int32_t> teleport_counter_{0};
+  std::atomic<int32_t> pending_teleport_id_{-1};
 
   int64_t last_keep_alive_id_{0};
   std::chrono::steady_clock::time_point last_alive_time_;
   bool awaiting_keep_alive_{false};
 
-  bool can_fly_{false};
-  bool is_flying_{false};
+  std::atomic<bool> can_fly_{false};
+  std::atomic<bool> is_flying_{false};
 
+  mutable std::mutex pose_mutex_;
   Vector3d position_{0.5, 4.0, 0.5};
   Rotation rotation_{0.0f, 0.0f};
 };

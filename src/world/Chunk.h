@@ -1,9 +1,12 @@
 #ifndef MCPE_WORLD_CHUNK_H
 #define MCPE_WORLD_CHUNK_H
 
+#include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 
 #include "common/SpatialTypes.h"
 #include "world/ChunkSection.h"
@@ -46,10 +49,26 @@ class Chunk {
   /** @brief 获取特定索引的 Section 指针（可能为 nullptr） */
   [[nodiscard]] const ChunkSection* getSection(size_t index) const;
 
+  /** @brief 获取或创建指定索引的 Section（供预烘焙地图反序列化填充使用） */
+  ChunkSection&
+  getOrCreateSection(size_t index) {
+    assert(index < kSectionCount);
+    if (!sections_[index]) {
+      sections_[index] = std::make_unique<ChunkSection>();
+    }
+    return *sections_[index];
+  }
+
   /** @brief 获取生物群系数组只读引用 */
   [[nodiscard]] const std::array<uint8_t, kBiomeCount>&
   biomes() const noexcept {
     return biomes_;
+  }
+
+  /** @brief 批量设置生物群系数据 */
+  void
+  setBiomes(std::span<const uint8_t, kBiomeCount> biomes) noexcept {
+    std::copy(biomes.begin(), biomes.end(), biomes_.begin());
   }
 
  private:

@@ -1,16 +1,16 @@
 /**
  * @file SchematicLoader.h
- * @brief WorldEdit .schematic 经典建筑蓝图加载与解析器（Domain 领域层）
+ * @brief WorldEdit .schematic 经典建筑蓝图加载与解析器（Offline Map Baker 工具层）
  *
  * 核心规范：
- * 1. 支持标准 NBT (Gzip/Deflate) 格式解析；
+ * 1. 支持标准 NBT (Gzip/Deflate) 格式解析（复用统一 NbtReader，零重复实现）；
  * 2. 提取 Width, Height, Length 与 Blocks, Data (及可选 AddBlocks)；
  * 3. 严格遵循 1.12.2 全局方块状态编码 (block_id << 4 | meta)；
- * 4. 提供与 Chunk 空间包围盒求交的零浪费切片粘贴接口 (pasteToChunk)。
+ * 4. 提供与 Chunk 空间包围盒求交的零浪费切片粘贴接口 (pasteToChunk / pasteToWorld)。
  */
 
-#ifndef MCPE_WORLD_SCHEMATIC_LOADER_H
-#define MCPE_WORLD_SCHEMATIC_LOADER_H
+#ifndef MCPE_TOOLS_SCHEMATIC_LOADER_H
+#define MCPE_TOOLS_SCHEMATIC_LOADER_H
 
 #include <cstdint>
 #include <filesystem>
@@ -20,6 +20,7 @@
 
 #include "common/SpatialTypes.h"
 #include "world/Chunk.h"
+#include "world/World.h"
 
 namespace mcpe::world {
 
@@ -95,8 +96,26 @@ class SchematicLoader {
       const BlockPos& origin,
       Chunk& chunk
   );
+
+  /**
+   * @brief 将 Schematic 蓝图完整灌入目标 World 容器的所有覆盖区块中
+   */
+  static void pasteToWorld(
+      const Schematic& schematic,
+      const BlockPos& origin,
+      World& world
+  );
+
+  /**
+   * @brief 从磁盘加载 .schematic 蓝图文件并粘贴至目标 World
+   */
+  static bool loadIntoWorld(
+      const std::filesystem::path& file_path,
+      const BlockPos& origin,
+      World& world
+  );
 };
 
 }  // namespace mcpe::world
 
-#endif  // MCPE_WORLD_SCHEMATIC_LOADER_H
+#endif  // MCPE_TOOLS_SCHEMATIC_LOADER_H

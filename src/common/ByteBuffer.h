@@ -25,12 +25,10 @@ namespace mcpe {
  * 核心架构特性：
  * 1. Cheap Prepend（头部预留 8 字节）：允许在不重新分配和挪动内存的情况下，O(1) 原地前插协议包长
  * VarInt 前缀。
- * 2. Netty 风格零拷贝切片（slice / readSlice）：支持从大缓冲区中切分出共享底层内存的独立
- * ByteBuffer， 通过 std::shared_ptr 引用计数保证生命周期，彻底消灭二次堆内存分配与 memcpy
- * 拷贝开销。
+ * 2. Netty 风格零拷贝切片（slice / readSlice / retainedSlice）：支持从大缓冲区中切分出共享底层内存的独立
+ * ByteBuffer，通过 std::shared_ptr 引用计数保证生命周期，彻底消灭二次堆内存分配与 memcpy 拷贝开销。
  * 3. Copy-On-Write（写时复制安全隔离）：当父缓冲区需要扩容或移动内存时，若检测到底层 Storage
- * 正被活跃切片共享 （use_count >
- * 1），自动断开共享并重新分配独立存储，彻底消灭野指针与悬挂引用（Use-After-Free）。
+ * 正被活跃切片共享（use_count > 1），自动断开共享并重新分配独立存储，彻底消灭野指针与悬挂引用。
  * 4. 泛型大端数值读写：原生支持 int8_t~int64_t, uint8_t~uint64_t, float, double
  * 大端序列化与反序列化。
  * 5. 原生支持 Minecraft 协议类型：VarInt, VarLong, String。
@@ -64,7 +62,7 @@ class ByteBuffer {
     assert(prependableBytes() == kCheapPrepend);
   }
 
-  // Move-Only 契约：禁止隐式深拷贝（如需复制请显式调用 clone()）
+  // Move-Only 契约：禁止隐式深拷贝（如需深拷贝请显式调用 clone()，零拷贝共享请调用 retainedSlice()）
   ByteBuffer(const ByteBuffer&) = delete;
   ByteBuffer& operator=(const ByteBuffer&) = delete;
 
@@ -105,6 +103,14 @@ class ByteBuffer {
    * @param len 切片长度
    */
   [[nodiscard]] ByteBuffer slice(size_t len) const;
+
+  /**
+   * @brief 零拷贝共享当前全部可读区域的只读视图（用于多播广播，共享底层 Storage，零堆分配零 memcpy）
+   */
+  [[nodiscard]] ByteBuffer
+  retainedSlice() const {
+    return slice(readableBytes());
+  }
 
   /**
    * @brief 从当前读游标位置切出一个长度为 len 的共享切片，并同步推进父级读游标（对标 Netty

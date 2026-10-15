@@ -55,10 +55,11 @@ ClientManager::broadcast(ByteBuffer packet) {
 
   for (size_t i = 0; i < targets.size(); ++i) {
     if (i + 1 == targets.size()) {
-      // 最后一个目标直接移动，避免深拷贝
+      // 最后一个目标直接移动移交
       targets[i]->sendPacket(std::move(packet));
     } else {
-      targets[i]->sendPacket(packet.clone());
+      // 零拷贝共享底层 Storage 切片（配合 COW 保障绝对安全）
+      targets[i]->sendPacket(packet.retainedSlice());
     }
   }
 }
@@ -79,7 +80,7 @@ ClientManager::broadcastExcept(ByteBuffer packet, const std::shared_ptr<ClientSe
     if (i + 1 == targets.size()) {
       targets[i]->sendPacket(std::move(packet));
     } else {
-      targets[i]->sendPacket(packet.clone());
+      targets[i]->sendPacket(packet.retainedSlice());
     }
   }
 }
@@ -101,7 +102,7 @@ ClientManager::broadcastExceptSessionId(ByteBuffer packet, uint64_t except_sessi
     if (i + 1 == targets.size()) {
       targets[i]->sendPacket(std::move(packet));
     } else {
-      targets[i]->sendPacket(packet.clone());
+      targets[i]->sendPacket(packet.retainedSlice());
     }
   }
 }

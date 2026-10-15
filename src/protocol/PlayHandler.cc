@@ -1,7 +1,8 @@
 #include "protocol/PlayHandler.h"
 
-#include <cmath>
 #include <spdlog/spdlog.h>
+
+#include <cmath>
 
 #include "network/PacketWriter.h"
 #include "protocol/ChunkSerializer.h"
@@ -79,7 +80,16 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   const int32_t teleport_id = session->nextTeleportId();
   session->setPosition(spawn_pos);
   session->setRotation(spawn_rot);
-  sendPlayerPositionAndLook(session, spawn_pos.x, spawn_pos.y, spawn_pos.z, spawn_rot.yaw, spawn_rot.pitch, 0x00, teleport_id);
+  sendPlayerPositionAndLook(
+      session,
+      spawn_pos.x,
+      spawn_pos.y,
+      spawn_pos.z,
+      spawn_rot.yaw,
+      spawn_rot.pitch,
+      0x00,
+      teleport_id
+  );
   session->startKeepAliveTimer();
 
   // 投递玩家进服事件至世界任务队列（触发同屏实体生成与 Tab 列表更新）
@@ -353,26 +363,20 @@ PlayHandler::handlePlayerMovement(
 
   payload.retrieveAll();
 
-  if (move_event.has_position) {
-    session->setPosition(move_event.position);
-  }
-  if (move_event.has_rotation) {
-    session->setRotation(move_event.rotation);
-  }
-
   // 商业大厅虚空跌落复位 (Fall Reset)
-  // 正常行走跌入 Y < 20.0 触发复位；开启飞行模式的玩家在极端虚空 Y < 0.0 时触发复位，避免在岛屿底部漫游时误判
+  // 正常行走跌入 Y < 20.0 触发复位；开启飞行模式的玩家在极端虚空 Y < 0.0 时触发复位
   const double fall_threshold = session->canFly() ? 0.0 : 20.0;
   if (move_event.has_position && move_event.position.y < fall_threshold) {
     const Vector3d reset_pos = g_world ? g_world->spawnPoint() : Vector3d{0.5, 4.0, 0.5};
+    const Rotation reset_rot = g_world ? g_world->spawnRotation() : Rotation{0.0f, 0.0f};
     const int32_t tid = session->nextTeleportId();
     sendPlayerPositionAndLook(
         session,
         reset_pos.x,
         reset_pos.y,
         reset_pos.z,
-        0.0f,
-        0.0f,
+        reset_rot.yaw,
+        reset_rot.pitch,
         0x00,
         tid
     );
@@ -382,7 +386,18 @@ PlayHandler::handlePlayerMovement(
         move_event.position.y,
         session->canFly()
     );
-    return;
+    // 将复位后的坐标同步写入 move_event 并投递至 EventQueue，确保 EntityManager 与 SpatialGrid 状态一致
+    move_event.position = reset_pos;
+    move_event.rotation = reset_rot;
+    move_event.has_rotation = true;
+    move_event.on_ground = true;
+  }
+
+  if (move_event.has_position) {
+    session->setPosition(move_event.position);
+  }
+  if (move_event.has_rotation) {
+    session->setRotation(move_event.rotation);
   }
 
   if (auto q = session->eventQueue()) {

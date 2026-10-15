@@ -1,170 +1,26 @@
 /**
  * @file SchematicLoader.cc
- * @brief WorldEdit .schematic 经典建筑蓝图加载与解析器实现
+ * @brief WorldEdit .schematic 经典建筑蓝图加载与解析器实现（复用统一 NbtReader，消除 175 行重复代码）
  */
 
-#include "world/SchematicLoader.h"
+#include "SchematicLoader.h"
 
 #include <spdlog/spdlog.h>
 #include <zlib.h>
 
 #include <algorithm>
-#include <bit>
 #include <cstring>
 #include <fstream>
 #include <string_view>
+
+#include "NbtReader.h"
 
 namespace mcpe::world {
 
 namespace {
 
-enum class NbtTag : uint8_t {
-  End = 0,
-  Byte = 1,
-  Short = 2,
-  Int = 3,
-  Long = 4,
-  Float = 5,
-  Double = 6,
-  ByteArray = 7,
-  String = 8,
-  List = 9,
-  Compound = 10,
-  IntArray = 11,
-  LongArray = 12
-};
-
-class NbtReader {
- public:
-  explicit NbtReader(std::span<const uint8_t> data) : data_(data) {}
-
-  [[nodiscard]] bool
-  hasRemaining(size_t bytes) const noexcept {
-    return offset_ + bytes <= data_.size();
-  }
-
-  [[nodiscard]] size_t
-  remaining() const noexcept {
-    return data_.size() - offset_;
-  }
-
-  std::optional<uint8_t>
-  readU8() noexcept {
-    if (!hasRemaining(1)) return std::nullopt;
-    return data_[offset_++];
-  }
-
-  std::optional<int16_t>
-  readI16() noexcept {
-    if (!hasRemaining(2)) return std::nullopt;
-    uint16_t val = (static_cast<uint16_t>(data_[offset_]) << 8) |
-                   static_cast<uint16_t>(data_[offset_ + 1]);
-    offset_ += 2;
-    return static_cast<int16_t>(val);
-  }
-
-  std::optional<int32_t>
-  readI32() noexcept {
-    if (!hasRemaining(4)) return std::nullopt;
-    uint32_t val = (static_cast<uint32_t>(data_[offset_]) << 24) |
-                   (static_cast<uint32_t>(data_[offset_ + 1]) << 16) |
-                   (static_cast<uint32_t>(data_[offset_ + 2]) << 8) |
-                   static_cast<uint32_t>(data_[offset_ + 3]);
-    offset_ += 4;
-    return static_cast<int32_t>(val);
-  }
-
-  std::optional<std::string_view>
-  readString() noexcept {
-    auto len_opt = readI16();
-    if (!len_opt || *len_opt < 0) return std::nullopt;
-    const size_t len = static_cast<size_t>(*len_opt);
-    if (!hasRemaining(len)) return std::nullopt;
-    std::string_view sv(reinterpret_cast<const char*>(data_.data() + offset_), len);
-    offset_ += len;
-    return sv;
-  }
-
-  std::optional<std::span<const uint8_t>>
-  readByteArray() noexcept {
-    auto len_opt = readI32();
-    if (!len_opt || *len_opt < 0) return std::nullopt;
-    const size_t len = static_cast<size_t>(*len_opt);
-    if (!hasRemaining(len)) return std::nullopt;
-    std::span<const uint8_t> span(data_.data() + offset_, len);
-    offset_ += len;
-    return span;
-  }
-
-  bool
-  skip(size_t bytes) noexcept {
-    if (!hasRemaining(bytes)) return false;
-    offset_ += bytes;
-    return true;
-  }
-
-  bool
-  skipTag(NbtTag type) noexcept {
-    switch (type) {
-      case NbtTag::End:
-        return true;
-      case NbtTag::Byte:
-        return skip(1);
-      case NbtTag::Short:
-        return skip(2);
-      case NbtTag::Int:
-      case NbtTag::Float:
-        return skip(4);
-      case NbtTag::Long:
-      case NbtTag::Double:
-        return skip(8);
-      case NbtTag::ByteArray: {
-        auto len = readI32();
-        return len && *len >= 0 && skip(static_cast<size_t>(*len));
-      }
-      case NbtTag::String: {
-        auto len = readI16();
-        return len && *len >= 0 && skip(static_cast<size_t>(*len));
-      }
-      case NbtTag::List: {
-        auto elem_type_opt = readU8();
-        auto len_opt = readI32();
-        if (!elem_type_opt || !len_opt || *len_opt < 0) return false;
-        const auto elem_type = static_cast<NbtTag>(*elem_type_opt);
-        const int32_t count = *len_opt;
-        for (int32_t i = 0; i < count; ++i) {
-          if (!skipTag(elem_type)) return false;
-        }
-        return true;
-      }
-      case NbtTag::Compound: {
-        while (true) {
-          auto tag_type_opt = readU8();
-          if (!tag_type_opt) return false;
-          auto tag_type = static_cast<NbtTag>(*tag_type_opt);
-          if (tag_type == NbtTag::End) break;
-          auto name_opt = readString();
-          if (!name_opt || !skipTag(tag_type)) return false;
-        }
-        return true;
-      }
-      case NbtTag::IntArray: {
-        auto len = readI32();
-        return len && *len >= 0 && skip(static_cast<size_t>(*len) * 4);
-      }
-      case NbtTag::LongArray: {
-        auto len = readI32();
-        return len && *len >= 0 && skip(static_cast<size_t>(*len) * 8);
-      }
-      default:
-        return false;
-    }
-  }
-
- private:
-  std::span<const uint8_t> data_;
-  size_t offset_{0};
-};
+using common::NbtReader;
+using common::NbtTag;
 
 bool
 parseSchematicCompound(NbtReader& reader, Schematic& out_schematic) {
@@ -403,6 +259,62 @@ SchematicLoader::pasteToChunk(
       }
     }
   }
+}
+
+void
+SchematicLoader::pasteToWorld(
+    const Schematic& schematic,
+    const BlockPos& origin,
+    World& world
+) {
+  if (!schematic.isValid()) {
+    spdlog::warn("[SchematicLoader] Attempted to paste invalid schematic into world");
+    return;
+  }
+
+  const int32_t min_x = origin.x;
+  const int32_t max_x = origin.x + schematic.width - 1;
+  const int32_t min_z = origin.z;
+  const int32_t max_z = origin.z + schematic.length - 1;
+
+  const int32_t min_cx = min_x >> 4;
+  const int32_t max_cx = max_x >> 4;
+  const int32_t min_cz = min_z >> 4;
+  const int32_t max_cz = max_z >> 4;
+
+  spdlog::info(
+      "[SchematicLoader] Pasting schematic ({}x{}x{}) from Chunk ({}, {}) to ({}, {})",
+      schematic.width,
+      schematic.height,
+      schematic.length,
+      min_cx,
+      min_cz,
+      max_cx,
+      max_cz
+  );
+
+  for (int32_t cz = min_cz; cz <= max_cz; ++cz) {
+    for (int32_t cx = min_cx; cx <= max_cx; ++cx) {
+      Chunk& chunk = world.getOrCreateChunk(ChunkPos{cx, cz});
+      pasteToChunk(schematic, origin, chunk);
+    }
+  }
+}
+
+bool
+SchematicLoader::loadIntoWorld(
+    const std::filesystem::path& file_path,
+    const BlockPos& origin,
+    World& world
+) {
+  auto schem_opt = loadFromFile(file_path);
+  if (!schem_opt) {
+    spdlog::error("[SchematicLoader] Failed to load schematic from {}", file_path.string());
+    return false;
+  }
+
+  pasteToWorld(*schem_opt, origin, world);
+  return true;
 }
 
 }  // namespace mcpe::world

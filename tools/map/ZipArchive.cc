@@ -3,7 +3,7 @@
  * @brief 轻量级 ZIP 归档读取器实现（Foundations 基础层）
  */
 
-#include "common/ZipArchive.h"
+#include "ZipArchive.h"
 
 #include <spdlog/spdlog.h>
 #include <zlib.h>
