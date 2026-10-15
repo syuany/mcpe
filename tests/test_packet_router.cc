@@ -181,7 +181,7 @@ TEST_F(PacketRouterTest, MalformedPacketDisconnects) {
   ByteBuffer empty_buf;
   PacketRouter::dispatch(session_, ConnectionState::HANDSHAKING, std::move(empty_buf));
 
-  EXPECT_FALSE(session_->socket().is_open()) << "Malformed packet must close socket";
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open()) << "Malformed packet must close socket";
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos) << "Warn log expected";
 }
@@ -191,7 +191,7 @@ TEST_F(PacketRouterTest, IllegalPacketInHandshakingDisconnects) {
   auto packet = makePacket(0x01);
   PacketRouter::dispatch(session_, ConnectionState::HANDSHAKING, std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open()) << "Illegal packet in HANDSHAKING must disconnect";
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open()) << "Illegal packet in HANDSHAKING must disconnect";
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
   EXPECT_NE(log_stream_->str().find("Unknown packet in HANDSHAKING"), std::string::npos);
@@ -202,7 +202,7 @@ TEST_F(PacketRouterTest, IllegalPacketInStatusDisconnects) {
   auto packet = makePacket(0x02);
   PacketRouter::dispatch(session_, ConnectionState::STATUS, std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open()) << "Illegal packet in STATUS must disconnect";
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open()) << "Illegal packet in STATUS must disconnect";
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
   EXPECT_NE(log_stream_->str().find("Unknown packet in STATUS"), std::string::npos);
@@ -213,7 +213,7 @@ TEST_F(PacketRouterTest, IllegalPacketInLoginDisconnects) {
   auto packet = makePacket(0x00);
   PacketRouter::dispatch(session_, ConnectionState::LOGIN, std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open()) << "Unhandled packet in LOGIN must disconnect";
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open()) << "Unhandled packet in LOGIN must disconnect";
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
 }
@@ -223,7 +223,7 @@ TEST_F(PacketRouterTest, UnhandledPlayPacketDisconnects) {
   auto packet = makePacket(0xFF);
   PacketRouter::dispatch(session_, ConnectionState::PLAY, std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open()) << "Unhandled PLAY packet must disconnect";
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open()) << "Unhandled PLAY packet must disconnect";
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
   EXPECT_NE(log_stream_->str().find("Unhandled PLAY packet 0xFF"), std::string::npos);
@@ -234,7 +234,7 @@ TEST_F(PacketRouterTest, InvalidConnectionStateDisconnects) {
   auto packet = makePacket(0x00);
   PacketRouter::dispatch(session_, static_cast<ConnectionState>(99), std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open());
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open());
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
 }
@@ -277,7 +277,7 @@ TEST_P(RoutinePacketTest, WhitelistPacketShouldNotDisconnect) {
   PacketRouter::dispatch(session_, ConnectionState::PLAY, std::move(packet));
 
   // DoD 验收：白名单例行包绝不能被踢下线！
-  EXPECT_TRUE(session_->socket().is_open())
+  EXPECT_TRUE(session_->tcpSession()->socket().is_open())
       << "Routine packet 0x" << std::hex << packet_id << " should NOT disconnect client!";
   EXPECT_FALSE(session_->isStopped());
 
@@ -301,7 +301,7 @@ TEST_F(PacketRouterTest, LegalHandshakeTransitionToStatus) {
 
   PacketRouter::dispatch(session_, ConnectionState::HANDSHAKING, std::move(packet));
 
-  EXPECT_TRUE(session_->socket().is_open());
+  EXPECT_TRUE(session_->tcpSession()->socket().is_open());
   EXPECT_FALSE(session_->isStopped());
   EXPECT_EQ(session_->state(), ConnectionState::STATUS);
 }
@@ -319,7 +319,7 @@ TEST_F(PacketRouterTest, LegalStatusRequestRoutesSuccessfully) {
   PacketRouter::dispatch(session_, ConnectionState::STATUS, std::move(packet));
 
   // 3. Assert: 验证网络层连接状态良好
-  EXPECT_TRUE(session_->socket().is_open());
+  EXPECT_TRUE(session_->tcpSession()->socket().is_open());
   EXPECT_FALSE(session_->isStopped());
 
   // 4. DoD 验证: 客户端接收并校验 Status Response 响应包
@@ -389,7 +389,7 @@ TEST_F(PacketRouterTest, LegalPingRoutesSuccessfully) {
   PacketRouter::dispatch(session_, ConnectionState::STATUS, std::move(packet));
 
   // 3. Assert: 验证网络层连接保持正常
-  EXPECT_TRUE(session_->socket().is_open());
+  EXPECT_TRUE(session_->tcpSession()->socket().is_open());
   EXPECT_FALSE(session_->isStopped());
 
   // 4. DoD 验证: 客户端接收并校验 Pong 响应包
@@ -479,7 +479,7 @@ TEST_F(PacketRouterTest, MalformedPingEmptyPayloadDisconnects) {
 
   PacketRouter::dispatch(session_, ConnectionState::STATUS, std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open());
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open());
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
   EXPECT_NE(log_stream_->str().find("Malformed Ping packet"), std::string::npos);
@@ -496,7 +496,7 @@ TEST_F(PacketRouterTest, MalformedPingTruncated4BytesPayloadDisconnects) {
 
   PacketRouter::dispatch(session_, ConnectionState::STATUS, std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open());
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open());
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
   EXPECT_NE(log_stream_->str().find("Malformed Ping packet"), std::string::npos);
@@ -514,7 +514,7 @@ TEST_F(PacketRouterTest, MalformedPingTruncated7BytesPayloadDisconnects) {
 
   PacketRouter::dispatch(session_, ConnectionState::STATUS, std::move(packet));
 
-  EXPECT_FALSE(session_->socket().is_open());
+  EXPECT_FALSE(session_->tcpSession()->socket().is_open());
   EXPECT_TRUE(session_->isStopped());
   EXPECT_NE(log_stream_->str().find("[warning]"), std::string::npos);
   EXPECT_NE(log_stream_->str().find("Malformed Ping packet"), std::string::npos);
@@ -538,7 +538,7 @@ TEST_F(PacketRouterTest, FullServerListPingHandshakeFlow) {
 
   PacketRouter::dispatch(session_, ConnectionState::HANDSHAKING, std::move(handshake));
   EXPECT_EQ(session_->state(), ConnectionState::STATUS);
-  EXPECT_TRUE(session_->socket().is_open());
+  EXPECT_TRUE(session_->tcpSession()->socket().is_open());
 
   // 2. 客户端发送 Status Request 报文 (0x00)
   auto status_req = makePacket(0x00);
@@ -578,7 +578,7 @@ TEST_F(PacketRouterTest, FullServerListPingHandshakeFlow) {
   EXPECT_EQ(pong_resp->readableBytes(), 0);
 
   // 全流程顺利通过，无警告、无断开
-  EXPECT_TRUE(session_->socket().is_open());
+  EXPECT_TRUE(session_->tcpSession()->socket().is_open());
   EXPECT_FALSE(session_->isStopped());
   EXPECT_EQ(log_stream_->str().find("[warning]"), std::string::npos);
   EXPECT_EQ(log_stream_->str().find("[error]"), std::string::npos);
