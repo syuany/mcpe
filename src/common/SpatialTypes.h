@@ -3,7 +3,7 @@
  * @brief 全局空间几何、离散体素坐标与视角原语定义（Foundations 基础层）
  *
  * 作为全工程共享的叶子值类型（Leaf Value Types），纯数学与类型封装，
- * 供 Network, Protocol, World, Entity 各层无障碍复用，杜绝散装 double/float 基础类型偏执。
+ * 供 Network, Protocol, World, Entity, Game 各层无障碍复用，杜绝散装 double/float 基础类型偏执。
  */
 
 #ifndef MCPE_COMMON_SPATIAL_TYPES_H
@@ -204,6 +204,30 @@ struct Vector3d {
 };
 
 /**
+ * @brief 三维轴对齐包围盒 (Axis-Aligned Bounding Box) - 用于跑酷起点/检查点/终点碰撞检测
+ */
+struct AABB {
+  Vector3d min_pt{};
+  Vector3d max_pt{};
+
+  constexpr auto operator<=>(const AABB&) const = default;
+
+  [[nodiscard]] constexpr bool
+  contains(const Vector3d& p) const noexcept {
+    const double min_x = (min_pt.x <= max_pt.x) ? min_pt.x : max_pt.x;
+    const double max_x = (min_pt.x <= max_pt.x) ? max_pt.x : min_pt.x;
+    const double min_y = (min_pt.y <= max_pt.y) ? min_pt.y : max_pt.y;
+    const double max_y = (min_pt.y <= max_pt.y) ? max_pt.y : min_pt.y;
+    const double min_z = (min_pt.z <= max_pt.z) ? min_pt.z : max_pt.z;
+    const double max_z = (min_pt.z <= max_pt.z) ? max_pt.z : min_pt.z;
+
+    return (p.x >= min_x && p.x <= max_x) &&
+           (p.y >= min_y && p.y <= max_y) &&
+           (p.z >= min_z && p.z <= max_z);
+  }
+};
+
+/**
  * @brief 实体视角朝向原语 (Yaw, Pitch)
  */
 struct Rotation {
@@ -279,6 +303,7 @@ namespace world {
 using ChunkPos = mcpe::ChunkPos;
 using BlockPos = mcpe::BlockPos;
 using Vector3d = mcpe::Vector3d;
+using AABB = mcpe::AABB;
 using Rotation = mcpe::Rotation;
 using BlockFace = mcpe::BlockFace;
 using DigStatus = mcpe::DigStatus;

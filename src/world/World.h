@@ -5,8 +5,8 @@
  * 核心规范：
  * 1. 负责集中管理内存中的所有 Chunk 垂直柱；
  * 2. 支持预烘焙地图二进制镜像（.mcpe_map）的极速序列化与反序列化，彻底剥离 Zlib/NBT 运行时依赖；
- * 3. 线程安全地维护世界的 Spawn Point 出生点坐标与持久化配置（spawn.json）；
- * 4. 纯领域对象，与网络 Socket / TcpSession 完全解耦。
+ * 3. 线程安全地维护世界的 Spawn Point 出生点坐标、跌落阈值与持久化配置（<map>.ini / spawn.json）；
+ * 4. 纯领域对象，与网络 Socket / TcpSession 完全解耦，支持多实例只读共享。
  */
 
 #ifndef MCPE_WORLD_WORLD_H
@@ -29,7 +29,7 @@ class World {
   World() = default;
 
   /**
-   * @brief 线程安全地设置/获取世界默认出生点坐标与朝向
+   * @brief 线程安全地设置/获取世界默认出生点坐标、朝向与虚空跌落阈值
    */
   void
   setSpawnPoint(const Vector3d& spawn) noexcept {
@@ -43,6 +43,12 @@ class World {
     spawn_rotation_ = rot;
   }
 
+  void
+  setFallResetY(double y) noexcept {
+    std::lock_guard<std::mutex> lock(spawn_mutex_);
+    fall_reset_y_ = y;
+  }
+
   [[nodiscard]] Vector3d
   spawnPoint() const noexcept {
     std::lock_guard<std::mutex> lock(spawn_mutex_);
@@ -53,6 +59,12 @@ class World {
   spawnRotation() const noexcept {
     std::lock_guard<std::mutex> lock(spawn_mutex_);
     return spawn_rotation_;
+  }
+
+  [[nodiscard]] double
+  fallResetY() const noexcept {
+    std::lock_guard<std::mutex> lock(spawn_mutex_);
+    return fall_reset_y_;
   }
 
   /**
@@ -86,12 +98,12 @@ class World {
   size_t loadBakedMap(const std::filesystem::path& path);
 
   /**
-   * @brief 从 JSON 配置文件加载自定义出生点坐标与视角（例如 assets/maps/lobby/spawn.json）
+   * @brief 从配置文件加载自定义出生点坐标与视角（原生支持 .ini 与 .json 格式）
    */
   bool loadSpawnConfig(const std::filesystem::path& path);
 
   /**
-   * @brief 将当前世界出生点坐标与视角持久化写入 JSON 配置文件
+   * @brief 将当前世界出生点坐标与视角持久化写入配置文件（原生支持 .ini 与 .json 格式）
    */
   bool saveSpawnConfig(const std::filesystem::path& path) const;
 
@@ -118,6 +130,7 @@ class World {
   mutable std::mutex spawn_mutex_;
   Vector3d spawn_point_{0.5, 64.0, 0.5};
   Rotation spawn_rotation_{0.0f, 0.0f};
+  double fall_reset_y_{20.0};
   std::unordered_map<ChunkPos, std::unique_ptr<Chunk>> chunks_;
 };
 

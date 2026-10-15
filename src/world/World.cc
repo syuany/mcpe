@@ -17,6 +17,8 @@
 #include <string>
 #include <string_view>
 
+#include "common/IniConfig.h"
+
 namespace mcpe::world {
 
 namespace {
@@ -197,6 +199,30 @@ World::loadBakedMap(const std::filesystem::path& path) {
 
 bool
 World::loadSpawnConfig(const std::filesystem::path& path) {
+  if (path.extension() == ".ini") {
+    common::IniConfig ini;
+    if (!ini.loadFromFile(path)) {
+      return false;
+    }
+    if (!ini.hasKey("World", "spawn_x") || !ini.hasKey("World", "spawn_y") ||
+        !ini.hasKey("World", "spawn_z")) {
+      return false;
+    }
+    Vector3d pos = spawnPoint();
+    Rotation rot = spawnRotation();
+    pos.x = ini.getDouble("World", "spawn_x", pos.x);
+    pos.y = ini.getDouble("World", "spawn_y", pos.y);
+    pos.z = ini.getDouble("World", "spawn_z", pos.z);
+    rot.yaw = static_cast<float>(ini.getDouble("World", "spawn_yaw", rot.yaw));
+    rot.pitch = static_cast<float>(ini.getDouble("World", "spawn_pitch", rot.pitch));
+    setSpawnPoint(pos);
+    setSpawnRotation(rot);
+    if (ini.hasKey("World", "fall_reset_y")) {
+      setFallResetY(ini.getDouble("World", "fall_reset_y", fallResetY()));
+    }
+    return true;
+  }
+
   std::ifstream file(path);
   if (!file.is_open()) {
     return false;
@@ -243,6 +269,20 @@ World::loadSpawnConfig(const std::filesystem::path& path) {
 
 bool
 World::saveSpawnConfig(const std::filesystem::path& path) const {
+  if (path.extension() == ".ini") {
+    common::IniConfig ini;
+    (void)ini.loadFromFile(path);  // 保留文件中已有的其他 Section（如 [Parkour]）
+    const Vector3d pos = spawnPoint();
+    const Rotation rot = spawnRotation();
+    ini.setDouble("World", "spawn_x", pos.x);
+    ini.setDouble("World", "spawn_y", pos.y);
+    ini.setDouble("World", "spawn_z", pos.z);
+    ini.setDouble("World", "spawn_yaw", rot.yaw);
+    ini.setDouble("World", "spawn_pitch", rot.pitch);
+    ini.setDouble("World", "fall_reset_y", fallResetY());
+    return ini.saveToFile(path);
+  }
+
   std::error_code ec;
   if (path.has_parent_path()) {
     std::filesystem::create_directories(path.parent_path(), ec);

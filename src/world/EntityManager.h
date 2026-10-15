@@ -113,6 +113,7 @@ class EntityManager {
   [[nodiscard]] bool hasPlayer(uint64_t session_id) const;
   [[nodiscard]] size_t playerCount() const noexcept { return players_.size(); }
   [[nodiscard]] const PlayerEntity* getPlayer(uint64_t session_id) const;
+  [[nodiscard]] std::vector<uint64_t> getAllSessionIds() const;
 
   [[nodiscard]] const SpatialGrid& grid() const noexcept { return grid_; }
   [[nodiscard]] SpatialGrid& grid() noexcept { return grid_; }

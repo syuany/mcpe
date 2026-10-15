@@ -328,6 +328,16 @@ EntityManager::getPlayer(uint64_t session_id) const {
   return nullptr;
 }
 
+std::vector<uint64_t>
+EntityManager::getAllSessionIds() const {
+  std::vector<uint64_t> sids;
+  sids.reserve(players_.size());
+  for (const auto& [sid, _] : players_) {
+    sids.push_back(sid);
+  }
+  return sids;
+}
+
 ByteBuffer
 EntityManager::buildPlayerListItemPacket(
     const PlayerEntity& player,

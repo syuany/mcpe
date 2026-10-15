@@ -1,0 +1,99 @@
+/**
+ * @file ParkourInstance.h
+ * @brief 多人同赛道随进随跑跑酷实例（Game 玩法层 - parkour 子模块）
+ *
+ * 核心规则：
+ * 1. 支持多人随时加入同一跑酷赛道同屏竞跳（通过 EntityManager + SpatialGrid 局部九宫格互见）；
+ * 2. 每名玩家拥有完全独立的 steady_clock 毫秒级高精度计时器、激活检查点与完赛状态；
+ * 3. 踏入起点 AABB 开启/重置计时；踏入检查点 AABB 更新复位点；
+ * 4. 跌落 Y < fall_reset_y 时立即下发 0x2F 拉回最近检查点或起点（计时不中断，并同步更新 SpatialGrid）；
+ * 5. 踏入终点 AABB 通报毫秒级通关成绩、更新内存排行榜，并在 3 秒（60 Ticks）后自动触发切回大厅。
+ */
+
+#ifndef MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H
+#define MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H
+
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+#include "game/IGameInstance.h"
+#include "game/parkour/ParkourMapConfig.h"
+
+namespace mcpe::game::parkour {
+
+/**
+ * @brief 单名玩家在跑酷赛道中的实时竞速状态
+ */
+struct PlayerParkourState {
+  uint64_t session_id{0};
+  std::string username;
+  Vector3d respawn_pos{};
+  Rotation respawn_rot{};
+  int32_t current_checkpoint_idx{-1};  // -1 表示起点，0..K-1 表示已激活的检查点下标
+  bool running{false};
+  bool finished{false};
+  std::chrono::steady_clock::time_point start_time{};
+  std::chrono::steady_clock::time_point finish_time{};
+  uint32_t post_finish_ticks{0};
+  int64_t last_elapsed_ms{0};
+  int64_t best_elapsed_ms{0};
+  uint32_t fall_count{0};
+};
+
+/**
+ * @brief 跑酷赛道排行榜记录项
+ */
+struct LeaderboardEntry {
+  std::string username;
+  int64_t elapsed_ms{0};
+};
+
+class ParkourInstance final : public IGameInstance {
+ public:
+  static constexpr uint32_t kReturnLobbyDelayTicks = 60;  // 完赛后 60 Ticks (3.0s) 自动切回大厅
+
+  ParkourInstance(
+      std::string instance_id,
+      std::shared_ptr<world::World> world,
+      ParkourMapConfig map_cfg,
+      size_t max_players,
+      PacketUnicastFn unicast_fn
+  );
+
+  [[nodiscard]] const ParkourMapConfig& mapConfig() const noexcept { return cfg_; }
+  [[nodiscard]] const std::string& mapName() const noexcept { return cfg_.map_name; }
+
+  /**
+   * @brief 查询指定玩家的当前跑酷状态（供单元测试与指令查询使用）
+   */
+  [[nodiscard]] const PlayerParkourState* getRunnerState(uint64_t session_id) const noexcept;
+
+  /**
+   * @brief 获取当前赛道 Top 排行榜（按耗时升序排列）
+   */
+  [[nodiscard]] const std::vector<LeaderboardEntry>& leaderboard() const noexcept {
+    return leaderboard_;
+  }
+
+ protected:
+  void onPlayerJoined(uint64_t session_id, std::string_view username) override;
+  void onPlayerLeft(uint64_t session_id, std::string_view username) override;
+  void onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move_event) override;
+  void onTick() override;
+
+ private:
+  void recordLeaderboard(std::string_view username, int64_t elapsed_ms);
+
+  ParkourMapConfig cfg_;
+  uint64_t tick_counter_{0};
+  std::unordered_map<uint64_t, PlayerParkourState> runners_;
+  std::vector<LeaderboardEntry> leaderboard_;
+};
+
+}  // namespace mcpe::game::parkour
+
+#endif  // MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H

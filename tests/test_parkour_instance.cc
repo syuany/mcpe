@@ -1,0 +1,180 @@
+/**
+ * @file test_parkour_instance.cc
+ * @brief 跑酷小游戏实例（起点计时、多级检查点、虚空跌落拉回检查点、终点毫秒结算与 60 Ticks 自动回大厅）单元测试
+ */
+
+#include <gtest/gtest.h>
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "game/InstanceManager.h"
+#include "game/parkour/ParkourInstance.h"
+#include "game/parkour/ParkourMapConfig.h"
+#include "protocol/AuthUtils.h"
+#include "world/World.h"
+
+using namespace mcpe;
+using namespace mcpe::game;
+using namespace mcpe::game::parkour;
+using namespace mcpe::protocol;
+using namespace mcpe::world;
+
+TEST(ParkourInstanceTest, FullParkourLifecycleStartCheckpointFallResetAndFinish) {
+  auto pk_world = std::make_shared<World>();
+
+  ParkourMapConfig cfg;
+  cfg.map_name = "spiral";
+  cfg.spawn_point = Vector3d{32.5, 33.0, 32.5};
+  cfg.spawn_rotation = Rotation{0.0f, 0.0f};
+  cfg.fall_reset_y = 20.0;
+  cfg.start_box = AABB{Vector3d{30.5, 32.0, 34.0}, Vector3d{34.5, 36.0, 36.5}};
+
+  ParkourCheckpoint cp1;
+  cp1.box = AABB{Vector3d{34.0, 39.0, 21.0}, Vector3d{38.0, 43.0, 25.0}};
+  cp1.respawn_pos = Vector3d{36.0, 41.0, 23.0};
+  cp1.respawn_rot = Rotation{180.0f, 0.0f};
+  cfg.checkpoints.push_back(cp1);
+
+  cfg.finish_box = AABB{Vector3d{30.0, 50.0, 30.0}, Vector3d{35.0, 54.0, 35.0}};
+
+  std::vector<std::pair<uint64_t, Vector3d>> teleports;
+  uint64_t returned_to_lobby_sid = 0;
+
+  ParkourInstance parkour(
+      "parkour-spiral-1",
+      pk_world,
+      cfg,
+      25,
+      [](uint64_t /*sid*/, ByteBuffer /*pkt*/) {}
+  );
+
+  parkour.setTeleportCallback([&](uint64_t sid, const Vector3d& pos, const Rotation& /*rot*/) {
+    teleports.emplace_back(sid, pos);
+  });
+  parkour.setReturnToLobbyCallback([&](uint64_t sid) {
+    returned_to_lobby_sid = sid;
+  });
+
+  // 1. 玩家加入跑酷实例
+  WorldEvent join_ev;
+  join_ev.session_id = 1;
+  join_ev.entity_id = 101;
+  PlayerJoinEvent join_payload;
+  join_payload.setName("SpeedRunner");
+  join_payload.uuid = AuthUtils::generateOfflineUuidBytes("SpeedRunner");
+  join_ev.payload = join_payload;
+  parkour.pushEvent(std::move(join_ev));
+  parkour.stepTick();
+
+  const auto* st = parkour.getRunnerState(1);
+  ASSERT_NE(st, nullptr);
+  EXPECT_FALSE(st->running);
+  EXPECT_EQ(st->current_checkpoint_idx, -1);
+
+  // 2. 玩家踏入起点包围盒 (32.5, 33.0, 35.0) -> 计时自动启动！
+  auto push_move = [&](const Vector3d& pos) {
+    WorldEvent ev;
+    ev.session_id = 1;
+    ev.entity_id = 101;
+    PlayerMoveEvent mv;
+    mv.position = pos;
+    mv.has_position = true;
+    mv.on_ground = true;
+    ev.payload = mv;
+    parkour.pushEvent(std::move(ev));
+    parkour.stepTick();
+  };
+
+  push_move(Vector3d{32.5, 33.0, 35.0});
+  st = parkour.getRunnerState(1);
+  ASSERT_NE(st, nullptr);
+  EXPECT_TRUE(st->running);
+  EXPECT_FALSE(st->finished);
+
+  // 3. 玩家跳入第 1 号检查点包围盒 (36.0, 41.0, 23.0) -> 激活检查点 #0
+  push_move(Vector3d{36.0, 41.0, 23.0});
+  st = parkour.getRunnerState(1);
+  EXPECT_EQ(st->current_checkpoint_idx, 0);
+  EXPECT_DOUBLE_EQ(st->respawn_pos.x, 36.0);
+  EXPECT_DOUBLE_EQ(st->respawn_pos.y, 41.0);
+  EXPECT_DOUBLE_EQ(st->respawn_pos.z, 23.0);
+
+  // 4. 玩家失足从远端跌入虚空 (100.0, 10.0, 100.0, Y < 20.0)：
+  //    断言触发 Fall Reset 拉回第 1 号检查点 (36.0, 41.0, 23.0)，计时不中断，且 EntityManager 坐标同步！
+  push_move(Vector3d{100.0, 10.0, 100.0});
+  ASSERT_EQ(teleports.size(), 1u);
+  EXPECT_EQ(teleports[0].first, 1u);
+  EXPECT_DOUBLE_EQ(teleports[0].second.x, 36.0);
+  EXPECT_DOUBLE_EQ(teleports[0].second.y, 41.0);
+  EXPECT_DOUBLE_EQ(teleports[0].second.z, 23.0);
+
+  st = parkour.getRunnerState(1);
+  EXPECT_TRUE(st->running);
+  EXPECT_EQ(st->fall_count, 1u);
+
+  const auto* ent = parkour.entityManager().getPlayer(1);
+  ASSERT_NE(ent, nullptr);
+  EXPECT_DOUBLE_EQ(ent->position.x, 36.0);
+  EXPECT_DOUBLE_EQ(ent->position.y, 41.0);
+  EXPECT_DOUBLE_EQ(ent->position.z, 23.0);
+
+  // 5. 玩家冲入终点包围盒 (32.5, 51.0, 32.5) -> 完成比赛并写入排行榜！
+  push_move(Vector3d{32.5, 51.0, 32.5});
+  st = parkour.getRunnerState(1);
+  EXPECT_FALSE(st->running);
+  EXPECT_TRUE(st->finished);
+  EXPECT_GE(st->last_elapsed_ms, 1);
+  ASSERT_EQ(parkour.leaderboard().size(), 1u);
+  EXPECT_EQ(parkour.leaderboard()[0].username, "SpeedRunner");
+
+  // 6. 推进 60 个物理 Ticks (模拟 3 秒完赛展示期) -> 自动触发返回大厅回调！
+  for (uint32_t i = 0; i < ParkourInstance::kReturnLobbyDelayTicks; ++i) {
+    parkour.stepTick();
+  }
+  EXPECT_EQ(returned_to_lobby_sid, 1u);
+}
+
+TEST(ParkourInstanceTest, CrossInstanceSeamlessTransferBetweenLobbyAndParkour) {
+  auto lobby_world = std::make_shared<World>();
+  auto spiral_world = std::make_shared<World>();
+
+  InstanceManager mgr(lobby_world, 50, 5, 25, false);
+
+  ParkourMapConfig spiral_cfg;
+  spiral_cfg.map_name = "spiral";
+  mgr.registerParkourMap(spiral_cfg, spiral_world);
+
+  std::vector<std::string> switched_worlds;
+  mgr.setWorldSwitchCallback([&](uint64_t /*sid*/, const std::shared_ptr<IGameInstance>& target) {
+    switched_worlds.push_back(target->instanceId());
+  });
+
+  // 1. 玩家初始进入 lobby-1
+  auto lobby = mgr.acquireLobbyForPlayer(42);
+  ASSERT_NE(lobby, nullptr);
+  ASSERT_TRUE(mgr.transferPlayer(
+      42, 201, "Runner42", AuthUtils::generateOfflineUuidBytes("Runner42"), lobby
+  ));
+  lobby->stepTick();
+  EXPECT_TRUE(lobby->entityManager().hasPlayer(42));
+
+  // 2. 玩家执行 /join spiral 切入跑酷实例 parkour-spiral-1
+  auto pk_inst = mgr.acquireParkourForPlayer(42, "spiral");
+  ASSERT_NE(pk_inst, nullptr);
+  EXPECT_EQ(pk_inst->instanceId(), "parkour-spiral-1");
+
+  ASSERT_TRUE(mgr.transferPlayer(
+      42, 201, "Runner42", AuthUtils::generateOfflineUuidBytes("Runner42"), pk_inst
+  ));
+  lobby->stepTick();
+  pk_inst->stepTick();
+
+  // 验证旧大厅已销毁该实体，新跑酷实例已生成该实体！
+  EXPECT_FALSE(lobby->entityManager().hasPlayer(42));
+  EXPECT_TRUE(pk_inst->entityManager().hasPlayer(42));
+  ASSERT_EQ(switched_worlds.size(), 2u);
+  EXPECT_EQ(switched_worlds[0], "lobby-1");
+  EXPECT_EQ(switched_worlds[1], "parkour-spiral-1");
+}

@@ -89,10 +89,13 @@ WorldTicker::tick() {
   event_queue_.drain(events);
 
   // 2. 消费事件流水线
-  for (const auto& ev : events) {
+  for (auto& ev : events) {
     std::visit(
         Overloaded{
-            [this, &ev](const PlayerMoveEvent& move) {
+            [this, &ev](PlayerMoveEvent& move) {
+              if (move_filter_callback_) {
+                move_filter_callback_(ev.session_id, move);
+              }
               std::optional<Vector3d> pos;
               if (move.has_position) {
                 pos = move.position;
@@ -110,9 +113,16 @@ WorldTicker::tick() {
                   join.nameView(),
                   join.uuid
               );
+              if (join_leave_callback_) {
+                join_leave_callback_(ev.session_id, join.nameView(), true);
+              }
             },
             [this, &ev](const PlayerLeaveEvent&) {
+              const std::string name = entity_manager_.getPlayerName(ev.session_id);
               entity_manager_.removePlayer(ev.session_id);
+              if (join_leave_callback_) {
+                join_leave_callback_(ev.session_id, name, false);
+              }
             },
             [this, &ev](const PlayerChatEvent& chat) {
               if (chat_callback_) {
@@ -127,7 +137,12 @@ WorldTicker::tick() {
     );
   }
 
-  // 3. 调度实体管理器广播差分位移
+  // 3. 执行上层游戏实例自定义 Tick 钩子（如跑酷秒表刷新、倒计时推进与完赛自动回大厅）
+  if (tick_hook_callback_) {
+    tick_hook_callback_();
+  }
+
+  // 4. 调度实体管理器广播差分位移
   entity_manager_.updateAndBroadcast();
 }
 
