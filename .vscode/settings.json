@@ -21,6 +21,7 @@
     "clangd.path": "clangd",
     "clangd.arguments": [
         "--compile-commands-dir=${workspaceFolder}/build",
+        "--query-driver=**/g++,**/g++.exe,**/clang++,**/clang++.exe,**/c++,**/c++.exe",
         "--background-index",
         "--clang-tidy",
         "--fallback-style=Google"
