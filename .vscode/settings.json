@@ -7,16 +7,11 @@
     "**/lib/**": true
     },
 
-    // 2. 避免全局搜索和快速打开时扫描 build 目录
     "search.exclude": {
         "**/build": true,
         "**/*.o": true,
         "**/*.a": true
     },
-
-    // 3. 避免 Git 插件扫描大型构建产物
-    // "git.autorefresh": false,
-    "git.status.submodules": false,
 
     "clangd.path": "clangd",
     "clangd.arguments": [
@@ -33,29 +28,6 @@
         "*.cc": "cpp"
     },
     "editor.formatOnSave": true,
-
-    // --- Lua 语言服务与自动格式化配置 (sumneko.lua) ---
-    // "[lua]": {
-    //     "editor.defaultFormatter": "yinfei.luahelper",
-    //     "editor.formatOnSave": true,
-    //     "editor.tabSize": 4,
-    //     "editor.insertSpaces": true
-    // },
-    // "Lua.runtime.version": "Lua 5.4",
-    // "Lua.diagnostics.globals": [
-    //     "skynet"
-    // ],
-    // "Lua.workspace.library": [
-    //     "${workspaceFolder}/skynet/lualib",
-    //     "${workspaceFolder}/lualib"
-    // ],
-    // "Lua.workspace.checkThirdParty": false,
-    // "Lua.format.enable": true,
-    // "Lua.format.defaultConfig": {
-    //     "indent_style": "space",
-    //     "indent_size": "4",
-    //     "max_line_length": "120"
-    // },
 
     // --- Protobuf 语法与自动格式化配置 ---
     "[proto]": {
