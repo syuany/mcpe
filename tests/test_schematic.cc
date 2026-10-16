@@ -18,16 +18,23 @@ using namespace mcpe::world;
 
 namespace {
 std::filesystem::path findLobbyMap() {
-  if (std::filesystem::exists("assets/maps/lobby.mcpe_map")) {
-    return "assets/maps/lobby.mcpe_map";
+  const std::vector<std::string> candidates = {
+      "assets/maps/lobby/floating-island.mcpe_map",
+      "../assets/maps/lobby/floating-island.mcpe_map",
+      "../../assets/maps/lobby/floating-island.mcpe_map",
+      "assets/maps/baked/lobby.mcpe_map",
+      "../assets/maps/baked/lobby.mcpe_map",
+      "../../assets/maps/baked/lobby.mcpe_map",
+      "assets/maps/lobby.mcpe_map",
+      "../assets/maps/lobby.mcpe_map",
+      "../../assets/maps/lobby.mcpe_map",
+  };
+  for (const auto& path : candidates) {
+    if (std::filesystem::exists(path)) {
+      return path;
+    }
   }
-  if (std::filesystem::exists("../assets/maps/lobby.mcpe_map")) {
-    return "../assets/maps/lobby.mcpe_map";
-  }
-  if (std::filesystem::exists("../../assets/maps/lobby.mcpe_map")) {
-    return "../../assets/maps/lobby.mcpe_map";
-  }
-  return "assets/maps/lobby.mcpe_map";
+  return "assets/maps/lobby/floating-island.mcpe_map";
 }
 }  // namespace
 

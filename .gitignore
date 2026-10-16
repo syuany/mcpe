@@ -22,3 +22,7 @@ reference/
 archive/
 bak/
 .agents/
+
+# 预烘焙地图二进制镜像（由 map_baker 工具自动构建产生；保留默认大厅基准镜像）
+*.mcpe_map
+!assets/maps/lobby/floating-island.mcpe_map
