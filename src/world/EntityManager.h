@@ -124,6 +124,7 @@ class EntityManager {
       protocol::PlayerListItemAction action
   );
   static ByteBuffer buildSpawnPlayerPacket(const PlayerEntity& player);
+  static ByteBuffer buildEntityHeadLookPacket(int32_t entity_id, const Rotation& rot);
   static ByteBuffer buildRelMovePacket(int32_t entity_id, const Vector3d& delta, bool on_ground);
   static ByteBuffer buildLookAndRelMovePacket(
       int32_t entity_id,

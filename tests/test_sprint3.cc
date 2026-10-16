@@ -81,10 +81,10 @@ TEST(Sprint3Test, EntityManagerSpawnAndVisibilitySequence) {
   EXPECT_EQ(mgr.playerCount(), 2);
 
   // 期望触发双向可见性时序：
-  // 1. 给 Steve 发 Alex 的 0x2E 与 0x05
-  // 2. 给 Alex 发 Steve 的 0x2E 与 0x05
-  // 3. 给 Alex 发自身的 0x2E
-  EXPECT_EQ(sent_packets.size(), 5);
+  // 1. 给 Steve 发 Alex 的 0x2E, 0x05 与 0x36 (3 个)
+  // 2. 给 Alex 发 Steve 的 0x2E, 0x05 与 0x36 (3 个)
+  // 3. 给 Alex 发自身的 0x2E (1 个)
+  EXPECT_EQ(sent_packets.size(), 7);
 }
 
 TEST(Sprint3Test, DeltaMovementVsTeleportThreshold) {
@@ -110,20 +110,22 @@ TEST(Sprint3Test, DeltaMovementVsTeleportThreshold) {
   EXPECT_EQ(broadcast_packet_ids[0], ClientboundPacket::EntityRelativeMove);
   broadcast_packet_ids.clear();
 
-  // 2. 仅转头：触发 0x28 Entity Look
+  // 2. 仅转头：触发 0x28 Entity Look 与 0x36 Entity Head Look
   mgr.updatePlayerPosition(1, std::nullopt, Rotation{90.0f, 0.0f}, true);
   mgr.updateAndBroadcast();
 
-  ASSERT_EQ(broadcast_packet_ids.size(), 1);
+  ASSERT_EQ(broadcast_packet_ids.size(), 2);
   EXPECT_EQ(broadcast_packet_ids[0], ClientboundPacket::EntityLook);
+  EXPECT_EQ(broadcast_packet_ids[1], ClientboundPacket::EntityHeadLook);
   broadcast_packet_ids.clear();
 
-  // 3. 同时位移与转头：触发 0x27 Look And Relative Move
+  // 3. 同时位移与转头：触发 0x27 Look And Relative Move 与 0x36 Entity Head Look
   mgr.updatePlayerPosition(1, Vector3d{2.0, 64.0, 0.0}, Rotation{180.0f, 0.0f}, true);
   mgr.updateAndBroadcast();
 
-  ASSERT_EQ(broadcast_packet_ids.size(), 1);
+  ASSERT_EQ(broadcast_packet_ids.size(), 2);
   EXPECT_EQ(broadcast_packet_ids[0], ClientboundPacket::EntityLookAndRelativeMove);
+  EXPECT_EQ(broadcast_packet_ids[1], ClientboundPacket::EntityHeadLook);
   broadcast_packet_ids.clear();
 
   // 4. 超过 8.0 格大位移 (瞬移 10.0 格)：降级下发 0x4C Entity Teleport

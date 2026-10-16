@@ -81,6 +81,7 @@ EntityManager::addPlayer(
   auto new_list_pkt =
       buildPlayerListItemPacket(new_player, protocol::PlayerListItemAction::AddPlayer);
   auto new_spawn_pkt = buildSpawnPlayerPacket(new_player);
+  auto new_head_pkt = buildEntityHeadLookPacket(new_player.entity_id, new_player.rotation);
 
   for (uint64_t other_sid : nearby_sids) {
     if (other_sid == session_id) continue;
@@ -91,13 +92,15 @@ EntityManager::addPlayer(
     if (sender_) {
       sender_(other_sid, new_list_pkt.retainedSlice());
       sender_(other_sid, new_spawn_pkt.retainedSlice());
+      sender_(other_sid, new_head_pkt.retainedSlice());
 
-      // 2. 向新玩家展示九宫格内既有邻居玩家的 0x2E 与 0x05
+      // 2. 向新玩家展示九宫格内既有邻居玩家的 0x2E, 0x05 与 0x36
       sender_(
           session_id,
           buildPlayerListItemPacket(other_player, protocol::PlayerListItemAction::AddPlayer)
       );
       sender_(session_id, buildSpawnPlayerPacket(other_player));
+      sender_(session_id, buildEntityHeadLookPacket(other_player.entity_id, other_player.rotation));
     }
   }
 
@@ -196,6 +199,7 @@ EntityManager::updatePlayerPosition(
                   buildPlayerListItemPacket(player, protocol::PlayerListItemAction::AddPlayer)
               );
               sender_(other_sid, buildSpawnPlayerPacket(player));
+              sender_(other_sid, buildEntityHeadLookPacket(player.entity_id, player.rotation));
               sender_(
                   session_id,
                   buildPlayerListItemPacket(
@@ -204,6 +208,10 @@ EntityManager::updatePlayerPosition(
                   )
               );
               sender_(session_id, buildSpawnPlayerPacket(other_it->second));
+              sender_(
+                  session_id,
+                  buildEntityHeadLookPacket(other_it->second.entity_id, other_it->second.rotation)
+              );
             }
           }
         }
@@ -286,6 +294,11 @@ EntityManager::updateAndBroadcast() {
       pkt = buildEntityLookPacket(p.entity_id, p.rotation, p.on_ground);
     }
 
+    std::optional<ByteBuffer> head_pkt;
+    if (look_changed) {
+      head_pkt = buildEntityHeadLookPacket(p.entity_id, p.rotation);
+    }
+
     // 九宫格局部多播：仅向当前区块九宫格内的邻居投递（retainedSlice 零拷贝共享）
     const ChunkPos cur_chunk = grid_.getPlayerChunk(sid);
     const auto observers = grid_.getNearbyPlayers(cur_chunk, 1);
@@ -294,9 +307,15 @@ EntityManager::updateAndBroadcast() {
       for (uint64_t obs_sid : observers) {
         if (obs_sid == sid) continue;
         sender_(obs_sid, pkt.retainedSlice());
+        if (head_pkt) {
+          sender_(obs_sid, head_pkt->retainedSlice());
+        }
       }
     } else if (broadcast_except_) {
       broadcast_except_(sid, std::move(pkt));
+      if (head_pkt) {
+        broadcast_except_(sid, std::move(*head_pkt));
+      }
     }
 
     p.last_synced_pos = p.position;
@@ -372,6 +391,15 @@ EntityManager::buildSpawnPlayerPacket(const PlayerEntity& player) {
   builder.appendByte(player.rotation.toByteYaw());
   builder.appendByte(player.rotation.toBytePitch());
   builder.appendByte(0xFF);  // Metadata terminator
+
+  return builder.build();
+}
+
+ByteBuffer
+EntityManager::buildEntityHeadLookPacket(int32_t entity_id, const Rotation& rot) {
+  network::PacketBuilder builder(protocol::ClientboundPacket::EntityHeadLook);
+  builder.appendVarInt(entity_id);
+  builder.appendByte(rot.toByteYaw());
 
   return builder.build();
 }
