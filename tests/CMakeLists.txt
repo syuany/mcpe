@@ -13,7 +13,7 @@ endfunction()
 # 1. Foundations 基础层测试
 mcpe_add_test(test_bytebuffer       test_bytebuffer.cc       mcpe_common)
 mcpe_add_test(test_varint           test_varint.cc           mcpe_common)
-mcpe_add_test(test_ini_config       test_ini_config.cc       mcpe_common)
+mcpe_add_test(test_ini_config       test_ini_config.cc       mcpe_world mcpe_common)
 
 # 2. Network 网络层测试
 mcpe_add_test(test_tcp_session      test_tcp_session.cc      mcpe_network mcpe_common)
