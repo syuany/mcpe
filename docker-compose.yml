@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 1. MCPE 极轻量大厅/跑酷微服务引擎 (C++23 / Asio)
+  mcpe-lobby:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcpe-lobby
+    ports:
+      - "25566:25566"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # 2. 外部反向代理网关 (BungeeCord)
+  bungeecord:
+    image: itzg/bungeecord:latest
+    container_name: mcpe-bungee-proxy
+    ports:
+      - "25565:25565"
+    volumes:
+      - ./deploy/bungee_config.yml:/server/config.yml
+    depends_on:
+      - mcpe-lobby
+    restart: unless-stopped

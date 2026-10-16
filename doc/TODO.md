@@ -15,4 +15,7 @@
 * [x] Sprint 4: 多实例并发 Actor 引擎（`src/game/IGameInstance` + `src/game/InstanceManager`，只读共享 `World` 区块内存 + 每实例独立 20 TPS 物理线程）
 * [x] Sprint 4: 大厅满员自动裂变分线（`lobby-1..N`）与 `LoginHandler` 全服总人数硬上限 `0x00 Disconnect` 准入拦截
 * [x] Sprint 4: 多人同赛道随进随跑跑酷小游戏（`src/game/parkour/ParkourInstance` 起点/检查点/终点 AABB 检测、个人毫秒计时、Fall Reset 拉回检查点与 `0x35 Respawn` 单连接无缝切世界）
+* [x] Sprint 5: 生产级 Multi-Stage 极简 Dockerfile（<=30MB 镜像、非 root 用户运行）与 docker-compose.yml 一键集群编排
+* [x] Sprint 5: 千人无头 Bot 漫游发压套件（scripts/benchmark_swarm.py）与基准量化分析报告（doc/benchmark_report_sprint5.md）
+* [x] Sprint 5: 保姆级集群网关与交付实战教程（doc/tutorial/sprint5_cluster_gateway.md）
 * [ ] 内存池按需评估恢复 PacketFraming::slicePacket（已归档于 archive/memory_pool/）
