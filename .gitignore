@@ -11,6 +11,12 @@ examples/
 !doc/*.md
 !README.md
 
+# 忽略本地任务清单与待办事项 (TODO 不纳入 Git 跟踪)
+TODO.md
+TODO
+doc/TODO.md
+doc/TODO
+
 reference/
 /sprints/
 /tutorial/

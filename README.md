@@ -30,7 +30,6 @@
 
 1. **极致轻量大厅/挂机微服务 (Lobby/Limbo Gateway)**：
    - 相比传统 Java 服务端（Paper/Spigot 1.5GB+ 底噪），MCPE 实现了原生的 **$\le 25\text{MB}$ 极小内存常驻** 与 **$<20\text{ms}$ 毫秒级极速冷启动**；
-   - 原生支持商业反向代理网关（**BungeeCord / Velocity**）的 **IP Forwarding 协议穿透**，支持正版 UUID、皮肤披风带签名解析与 Bungee-Guard 安全防伪防直连；
    - 支持基于 **`0x18 Plugin Message (Channel: "BungeeCord")`** 的跨服传送门（Server Portals）与 `/server <name>` 指令，大厅玩家踩入传送门 AABB 包围盒瞬间无缝转交至外部生存/空岛子服。
 
 2. **多实例并发 Actor 跑酷引擎 (Multi-Instance Parkour Engine)**：
@@ -67,7 +66,7 @@
 │    * LoginHandler (离线 UUID / 全服硬上限 0x00 准入拦截 / 0x02 成功)   │
 │    * PlayHandler (0x23 Join, 0x20 Chunk, 0x2F PosLook, 0x35 切世界)   │
 │    * ChatHandler (富文本 JSON 多播与 /server, /lobby, /maps 路由)      │
-│    * BungeeCord (IP Forwarding \0 解析器 / UUID 格式化 / Token 鉴权)    │
+│    * BungeeCord (跨服信令通道协议与网关状态交互)                         │
 ├────────────────────────────────────────────────────────────────────────┤
 │ 2. Network 纯异步网络传输层 (src/network/)                             │
 │    * TcpServer (Asio 异步 Acceptor 监听引擎，跨平台 IOCP/epoll)       │
@@ -189,7 +188,7 @@ python scripts/benchmark_swarm.py --host 127.0.0.1 --port 25566 --bots 200 --rat
 - [x] **Sprint 3: 玩家移动同步与双向聊天**（跨线程 MPSC 双缓冲 `EventQueue`、20 TPS 单写入者物理节拍器、实体移动增量广播、富文本聊天）；
 - [x] **Sprint 3.5: 离线地图烘焙、九宫格 AOI 与网络协程化**（`map_baker` 二进制烘焙、`SpatialGrid` 空间桶视界裁剪、C++20 网络协程化、商业大厅永昼与 Fall Reset）；
 - [x] **Sprint 4: 双层 INI 配置、多实例大厅弹性分线与跑酷小游戏**（`settings.ini` 双层配额、`IGameInstance` 独立 20 TPS Actor 线程、大厅满员裂变分线、`0x35 Respawn` 无缝切世界、跑酷毫秒计时与排行榜）；
-- [x] **Sprint 5: BungeeCord 集群网关与生产级交付**（BungeeCord IP Forwarding 穿透、`0x18 Plugin Message` 跨服传送门、极简 Dockerfile 交付、1,000 无头 Bot 压测报告）。
+- [x] **Sprint 5: 集群微服务与生产级交付**（`0x18 Plugin Message` 跨服传送门、极简 Dockerfile 交付、1,000 无头 Bot 压测报告）。
 
 ---
 
