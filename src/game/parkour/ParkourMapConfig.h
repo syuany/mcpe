@@ -28,15 +28,15 @@ struct ParkourCheckpoint {
  * @brief 单张跑酷地图的完整配置项（对应 assets/maps/<map>.ini）
  */
 struct ParkourMapConfig {
-  std::string map_name{"spiral"};
-  std::filesystem::path baked_file{"assets/maps/spiral.mcpe_map"};
-  Vector3d spawn_point{32.5, 33.0, 32.5};
+  std::string map_name{"FLASH"};
+  std::filesystem::path baked_file{"assets/maps/parkour/FLASH.mcpe_map"};
+  Vector3d spawn_point{1568.5, 37.0, -278.5};
   Rotation spawn_rotation{0.0f, 0.0f};
   double fall_reset_y{20.0};
 
-  AABB start_box{Vector3d{30.5, 32.0, 34.0}, Vector3d{34.5, 36.0, 36.5}};
+  AABB start_box{Vector3d{1566.5, 37.0, -280.5}, Vector3d{1570.5, 40.0, -276.5}};
   std::vector<ParkourCheckpoint> checkpoints;
-  AABB finish_box{Vector3d{30.0, 50.0, 30.0}, Vector3d{35.0, 54.0, 35.0}};
+  AABB finish_box{Vector3d{0.0, 60.0, 0.0}, Vector3d{10.0, 70.0, 10.0}};
 
   /**
    * @brief 从指定 .ini 文件加载跑酷地图配置
@@ -45,6 +45,11 @@ struct ParkourMapConfig {
       std::string_view map_name,
       const std::filesystem::path& ini_path
   );
+
+  /**
+   * @brief 将当前赛道配置持久化写入对应伴生 .ini 文件
+   */
+  [[nodiscard]] bool saveToIni(const std::filesystem::path& ini_path) const;
 };
 
 }  // namespace mcpe::game::parkour

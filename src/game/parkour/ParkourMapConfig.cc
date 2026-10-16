@@ -23,11 +23,11 @@ ParkourMapConfig::loadFromIni(
 
   ParkourMapConfig cfg;
   cfg.map_name = std::string(map_name);
-  cfg.baked_file = ini.getString(
-      "World",
-      "baked_file",
-      std::format("assets/maps/{}.mcpe_map", map_name)
-  );
+  const std::string default_baked =
+      std::filesystem::exists(std::format("assets/maps/baked/{}.mcpe_map", map_name))
+          ? std::format("assets/maps/baked/{}.mcpe_map", map_name)
+          : std::format("assets/maps/{}.mcpe_map", map_name);
+  cfg.baked_file = ini.getString("World", "baked_file", default_baked);
   cfg.spawn_point.x = ini.getDouble("World", "spawn_x", cfg.spawn_point.x);
   cfg.spawn_point.y = ini.getDouble("World", "spawn_y", cfg.spawn_point.y);
   cfg.spawn_point.z = ini.getDouble("World", "spawn_z", cfg.spawn_point.z);
@@ -74,6 +74,50 @@ ParkourMapConfig::loadFromIni(
   }
 
   return cfg;
+}
+
+bool
+ParkourMapConfig::saveToIni(const std::filesystem::path& ini_path) const {
+  common::IniConfig ini;
+  (void)ini.loadFromFile(ini_path);
+
+  ini.setString("World", "baked_file", baked_file.generic_string());
+  ini.setDouble("World", "spawn_x", spawn_point.x);
+  ini.setDouble("World", "spawn_y", spawn_point.y);
+  ini.setDouble("World", "spawn_z", spawn_point.z);
+  ini.setDouble("World", "spawn_yaw", spawn_rotation.yaw);
+  ini.setDouble("World", "spawn_pitch", spawn_rotation.pitch);
+  ini.setDouble("World", "fall_reset_y", fall_reset_y);
+
+  ini.setAABB("Parkour", "start_min", "start_max", start_box);
+  ini.setAABB("Parkour", "finish_min", "finish_max", finish_box);
+
+  for (size_t i = 0; i < checkpoints.size(); ++i) {
+    const size_t idx = i + 1;
+    ini.setAABB(
+        "Parkour",
+        std::format("checkpoint_{}_min", idx),
+        std::format("checkpoint_{}_max", idx),
+        checkpoints[i].box
+    );
+    ini.setVector3d(
+        "Parkour",
+        std::format("checkpoint_{}_spawn", idx),
+        checkpoints[i].respawn_pos
+    );
+    ini.setDouble(
+        "Parkour",
+        std::format("checkpoint_{}_yaw", idx),
+        checkpoints[i].respawn_rot.yaw
+    );
+    ini.setDouble(
+        "Parkour",
+        std::format("checkpoint_{}_pitch", idx),
+        checkpoints[i].respawn_rot.pitch
+    );
+  }
+
+  return ini.saveToFile(ini_path);
 }
 
 }  // namespace mcpe::game::parkour

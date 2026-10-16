@@ -178,3 +178,73 @@ TEST(ParkourInstanceTest, CrossInstanceSeamlessTransferBetweenLobbyAndParkour) {
   EXPECT_EQ(switched_worlds[0], "lobby-1");
   EXPECT_EQ(switched_worlds[1], "parkour-spiral-1");
 }
+
+TEST(ParkourInstanceTest, DeveloperModeFlightAndConfigMutations) {
+  auto pk_world = std::make_shared<World>();
+  ParkourMapConfig cfg;
+  cfg.map_name = "test_dev_map";
+  cfg.spawn_point = Vector3d{10.0, 60.0, 10.0};
+  cfg.fall_reset_y = 20.0;
+
+  std::vector<Vector3d> teleports;
+  ParkourInstance parkour(
+      "parkour-dev-1",
+      pk_world,
+      cfg,
+      10,
+      [](uint64_t /*sid*/, ByteBuffer /*pkt*/) {}
+  );
+  parkour.setTeleportCallback([&](uint64_t /*sid*/, const Vector3d& pos, const Rotation& /*rot*/) {
+    teleports.push_back(pos);
+  });
+
+  // 1. 玩家加入并开启开发者模式
+  WorldEvent join_ev;
+  join_ev.session_id = 101;
+  join_ev.entity_id = 501;
+  PlayerJoinEvent join_payload;
+  join_payload.setName("DevBuilder");
+  join_payload.uuid = AuthUtils::generateOfflineUuidBytes("DevBuilder");
+  join_ev.payload = join_payload;
+  parkour.pushEvent(std::move(join_ev));
+  parkour.stepTick();
+  EXPECT_FALSE(parkour.isDeveloperMode(101));
+
+  parkour.setDeveloperMode(101, true);
+  EXPECT_TRUE(parkour.isDeveloperMode(101));
+
+  // 2. 开发者自由飞行至虚空 (Y = 5.0 < fall_reset_y = 20.0)，验证不会被跌落强行拉回
+  WorldEvent move_ev;
+  move_ev.session_id = 101;
+  move_ev.entity_id = 501;
+  PlayerMoveEvent mv;
+  mv.position = Vector3d{10.0, 5.0, 10.0};
+  mv.has_position = true;
+  mv.on_ground = true;
+  move_ev.payload = mv;
+  parkour.pushEvent(std::move(move_ev));
+  parkour.stepTick();
+  EXPECT_TRUE(teleports.empty());
+
+  // 3. 开发者在现场标定参数：设置出生点、起点、多级检查点与终点
+  EXPECT_TRUE(parkour.setSpawnPoint(101, Vector3d{15.0, 65.0, 15.0}, Rotation{90.0f, 0.0f}));
+  EXPECT_EQ(parkour.mapConfig().spawn_point.x, 15.0);
+
+  EXPECT_TRUE(parkour.setStartBox(101, Vector3d{15.0, 65.0, 15.0}));
+  EXPECT_TRUE(parkour.mapConfig().start_box.contains(Vector3d{15.0, 65.0, 15.0}));
+
+  EXPECT_TRUE(parkour.setCheckpoint(101, Vector3d{25.0, 70.0, 25.0}, Rotation{0.0f, 0.0f}, 1));
+  ASSERT_EQ(parkour.mapConfig().checkpoints.size(), 1u);
+  EXPECT_EQ(parkour.mapConfig().checkpoints[0].respawn_pos.x, 25.0);
+
+  EXPECT_TRUE(parkour.setFinishBox(101, Vector3d{50.0, 80.0, 50.0}));
+  EXPECT_TRUE(parkour.mapConfig().finish_box.contains(Vector3d{50.0, 80.0, 50.0}));
+
+  const std::string info = parkour.getCourseInfo();
+  EXPECT_NE(info.find("test_dev_map"), std::string::npos);
+  EXPECT_NE(info.find("检查点总数: 1 个"), std::string::npos);
+
+  // 清理测试生成的伴生 INI 文件
+  std::error_code ec;
+  std::filesystem::remove(parkour.companionIniPath(), ec);
+}

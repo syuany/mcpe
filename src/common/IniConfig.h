@@ -96,6 +96,12 @@ class IniConfig {
   void setDouble(std::string_view section, std::string_view key, double value);
   void setBool(std::string_view section, std::string_view key, bool value);
   void setVector3d(std::string_view section, std::string_view key, const Vector3d& vec);
+  void setAABB(
+      std::string_view section,
+      std::string_view min_key,
+      std::string_view max_key,
+      const AABB& box
+  );
 
   /**
    * @brief 工具函数：按逗号分隔字符串并去除首尾空白

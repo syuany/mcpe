@@ -42,6 +42,7 @@ struct PlayerParkourState {
   int64_t last_elapsed_ms{0};
   int64_t best_elapsed_ms{0};
   uint32_t fall_count{0};
+  bool dev_mode{false};
 };
 
 /**
@@ -78,6 +79,47 @@ class ParkourInstance final : public IGameInstance {
   [[nodiscard]] const std::vector<LeaderboardEntry>& leaderboard() const noexcept {
     return leaderboard_;
   }
+
+  /**
+   * @brief 查询玩家是否处于开发者建造与调试模式
+   */
+  [[nodiscard]] bool isDeveloperMode(uint64_t session_id) const noexcept;
+
+  /**
+   * @brief 开启或关闭指定玩家的开发者模式
+   */
+  void setDeveloperMode(uint64_t session_id, bool enable);
+
+  /**
+   * @brief 开发者指令：设置赛道默认出生点并持久化写入 .ini
+   */
+  bool setSpawnPoint(uint64_t session_id, const Vector3d& pos, const Rotation& rot);
+
+  /**
+   * @brief 开发者指令：将指定坐标设置为赛道起点并持久化写入 .ini
+   */
+  bool setStartBox(uint64_t session_id, const Vector3d& pos);
+
+  /**
+   * @brief 开发者指令：设置或追加赛道检查点并持久化写入 .ini
+   * @param index 1-based 序号，若 <= 0 则自动追加下一个检查点
+   */
+  bool setCheckpoint(uint64_t session_id, const Vector3d& pos, const Rotation& rot, int32_t index = -1);
+
+  /**
+   * @brief 开发者指令：将指定坐标设置为赛道终点并持久化写入 .ini
+   */
+  bool setFinishBox(uint64_t session_id, const Vector3d& pos);
+
+  /**
+   * @brief 开发者指令：格式化获取当前赛道参数与配置详情
+   */
+  [[nodiscard]] std::string getCourseInfo() const;
+
+  /**
+   * @brief 获取当前赛道伴生配置 INI 文件磁盘路径
+   */
+  [[nodiscard]] std::filesystem::path companionIniPath() const;
 
  protected:
   void onPlayerJoined(uint64_t session_id, std::string_view username) override;

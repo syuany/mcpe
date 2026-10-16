@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <format>
+#include <sstream>
 #include <utility>
 
 #include "network/PacketWriter.h"
@@ -93,6 +94,9 @@ ParkourInstance::onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move
     return;
   }
   auto& runner = it->second;
+  if (runner.dev_mode) {
+    return;
+  }
   const Vector3d& pos = move_event.position;
 
   // 1. 掉落熔断保护 (Fall Reset)：当 Y < fall_reset_y 时立即拉回最近激活的检查点或起点（计时不中断！）
@@ -263,6 +267,105 @@ ParkourInstance::recordLeaderboard(std::string_view username, int64_t elapsed_ms
   if (leaderboard_.size() > 10) {
     leaderboard_.resize(10);
   }
+}
+
+bool
+ParkourInstance::isDeveloperMode(uint64_t session_id) const noexcept {
+  auto it = runners_.find(session_id);
+  return (it != runners_.end()) ? it->second.dev_mode : false;
+}
+
+void
+ParkourInstance::setDeveloperMode(uint64_t session_id, bool enable) {
+  auto it = runners_.find(session_id);
+  if (it != runners_.end()) {
+    it->second.dev_mode = enable;
+    if (enable) {
+      it->second.running = false;
+      it->second.finished = false;
+    }
+  }
+}
+
+std::filesystem::path
+ParkourInstance::companionIniPath() const {
+  return std::filesystem::path("assets/maps") / (cfg_.map_name + ".ini");
+}
+
+bool
+ParkourInstance::setSpawnPoint(uint64_t /*session_id*/, const Vector3d& pos, const Rotation& rot) {
+  cfg_.spawn_point = pos;
+  cfg_.spawn_rotation = rot;
+  world_->setSpawnPoint(pos);
+  world_->setSpawnRotation(rot);
+  entity_manager_->setDefaultSpawn(pos, rot);
+  return cfg_.saveToIni(companionIniPath());
+}
+
+bool
+ParkourInstance::setStartBox(uint64_t /*session_id*/, const Vector3d& pos) {
+  cfg_.start_box = AABB{
+      Vector3d{pos.x - 1.5, pos.y - 0.5, pos.z - 1.5},
+      Vector3d{pos.x + 1.5, pos.y + 2.5, pos.z + 1.5}
+  };
+  return cfg_.saveToIni(companionIniPath());
+}
+
+bool
+ParkourInstance::setCheckpoint(
+    uint64_t /*session_id*/,
+    const Vector3d& pos,
+    const Rotation& rot,
+    int32_t index
+) {
+  ParkourCheckpoint cp;
+  cp.box = AABB{
+      Vector3d{pos.x - 1.5, pos.y - 0.5, pos.z - 1.5},
+      Vector3d{pos.x + 1.5, pos.y + 2.5, pos.z + 1.5}
+  };
+  cp.respawn_pos = pos;
+  cp.respawn_rot = rot;
+
+  if (index <= 0 || static_cast<size_t>(index) > cfg_.checkpoints.size() + 1) {
+    cfg_.checkpoints.push_back(cp);
+  } else {
+    const size_t zero_idx = static_cast<size_t>(index - 1);
+    if (zero_idx < cfg_.checkpoints.size()) {
+      cfg_.checkpoints[zero_idx] = cp;
+    } else {
+      cfg_.checkpoints.push_back(cp);
+    }
+  }
+
+  return cfg_.saveToIni(companionIniPath());
+}
+
+bool
+ParkourInstance::setFinishBox(uint64_t /*session_id*/, const Vector3d& pos) {
+  cfg_.finish_box = AABB{
+      Vector3d{pos.x - 1.5, pos.y - 0.5, pos.z - 1.5},
+      Vector3d{pos.x + 1.5, pos.y + 2.5, pos.z + 1.5}
+  };
+  return cfg_.saveToIni(companionIniPath());
+}
+
+std::string
+ParkourInstance::getCourseInfo() const {
+  std::ostringstream oss;
+  oss << std::format("§e[赛道详情 - {}] 配置文件: {}\n", cfg_.map_name, companionIniPath().generic_string());
+  oss << std::format("§7- 出生点: ({:.2f}, {:.2f}, {:.2f})\n", cfg_.spawn_point.x, cfg_.spawn_point.y, cfg_.spawn_point.z);
+  oss << std::format("§7- 起点 AABB: ({:.1f}, {:.1f}, {:.1f}) ~ ({:.1f}, {:.1f}, {:.1f})\n",
+                     cfg_.start_box.min_pt.x, cfg_.start_box.min_pt.y, cfg_.start_box.min_pt.z,
+                     cfg_.start_box.max_pt.x, cfg_.start_box.max_pt.y, cfg_.start_box.max_pt.z);
+  oss << std::format("§7- 检查点总数: {} 个\n", cfg_.checkpoints.size());
+  for (size_t i = 0; i < cfg_.checkpoints.size(); ++i) {
+    const auto& sp = cfg_.checkpoints[i].respawn_pos;
+    oss << std::format("  §b#{}§7 复位坐标: ({:.1f}, {:.1f}, {:.1f})\n", i + 1, sp.x, sp.y, sp.z);
+  }
+  oss << std::format("§7- 终点 AABB: ({:.1f}, {:.1f}, {:.1f}) ~ ({:.1f}, {:.1f}, {:.1f})",
+                     cfg_.finish_box.min_pt.x, cfg_.finish_box.min_pt.y, cfg_.finish_box.min_pt.z,
+                     cfg_.finish_box.max_pt.x, cfg_.finish_box.max_pt.y, cfg_.finish_box.max_pt.z);
+  return oss.str();
 }
 
 }  // namespace mcpe::game::parkour

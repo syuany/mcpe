@@ -270,4 +270,15 @@ IniConfig::setVector3d(std::string_view section, std::string_view key, const Vec
   setString(section, key, std::format("{:.2f}, {:.2f}, {:.2f}", vec.x, vec.y, vec.z));
 }
 
+void
+IniConfig::setAABB(
+    std::string_view section,
+    std::string_view min_key,
+    std::string_view max_key,
+    const AABB& box
+) {
+  setVector3d(section, min_key, box.min_pt);
+  setVector3d(section, max_key, box.max_pt);
+}
+
 }  // namespace mcpe::common
