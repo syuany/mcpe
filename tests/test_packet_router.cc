@@ -999,3 +999,87 @@ TEST_F(PacketRouterTest, SetSpawnAndSpawnCommands) {
   EXPECT_TRUE(got_teleport);
   EXPECT_TRUE(got_spawn_msg);
 }
+
+// ---------------------------------------------------------------------------
+// 测试集 11：跑酷开发者模式鉴权控制（白名单、动态口令提权、注销与全局熔断）
+// ---------------------------------------------------------------------------
+TEST_F(PacketRouterTest, ParkourDeveloperModeAuthenticationAndAccessControl) {
+  auto client_mgr = std::make_shared<ClientManager>();
+  session_->setState(ConnectionState::PLAY);
+  session_->setUsername("NormalPlayer");
+  session_->setUuid("11111111-2222-3333-4444-555555555555");
+  session_->setAdmin(false);
+  client_mgr->addSession(session_);
+
+  ChatHandler chat;
+  chat.setClientManager(client_mgr);
+  chat.setSenders(
+      [client_mgr](uint64_t sid, ByteBuffer pkt) {
+        client_mgr->sendPacketTo(sid, std::move(pkt));
+      },
+      [client_mgr](ByteBuffer pkt) {
+        client_mgr->broadcast(std::move(pkt));
+      }
+  );
+
+  auto& cfg = ServerConfig::mutableInstance();
+  cfg.dev_mode_enabled = true;
+  cfg.admins = "Notch, DevAdmin, 5627dd98-e6be-3c21-b8a8-e92344183641";
+  cfg.dev_secret = "test_secret_123";
+
+  auto readMsg = [&]() -> std::string {
+    auto pkt = receivePacket();
+    if (!pkt) return "";
+    auto pid = pkt->readVarInt();
+    if (!pid || *pid != ClientboundPacket::ChatMessage) return "";
+    auto str = pkt->readString();
+    return str.value_or("");
+  };
+
+  // 1. 普通未鉴权玩家尝试开启开发者模式 -> 提示权限不足
+  chat.handleMessage(session_->sessionId(), "NormalPlayer", "/pk dev on");
+  std::string msg1 = readMsg();
+  EXPECT_NE(msg1.find("权限不足"), std::string::npos);
+  EXPECT_FALSE(session_->isAdmin());
+
+  // 2. 尝试错误口令提权 -> 提示鉴权失败
+  chat.handleMessage(session_->sessionId(), "NormalPlayer", "/pk auth wrong_pass");
+  std::string msg2 = readMsg();
+  EXPECT_NE(msg2.find("鉴权失败"), std::string::npos);
+  EXPECT_FALSE(session_->isAdmin());
+
+  // 3. 使用正确口令提权 -> 鉴权成功
+  chat.handleMessage(session_->sessionId(), "NormalPlayer", "/pk auth test_secret_123");
+  std::string msg3 = readMsg();
+  EXPECT_NE(msg3.find("鉴权成功"), std::string::npos);
+  EXPECT_TRUE(session_->isAdmin());
+
+  // 4. 重复鉴权 -> 提示无需重复
+  chat.handleMessage(session_->sessionId(), "NormalPlayer", "/pk auth test_secret_123");
+  std::string msg4 = readMsg();
+  EXPECT_NE(msg4.find("无需重复鉴权"), std::string::npos);
+
+  // 5. 注销开发者权限 -> 权限清除
+  chat.handleMessage(session_->sessionId(), "NormalPlayer", "/pk deauth");
+  std::string msg5 = readMsg();
+  EXPECT_NE(msg5.find("已注销"), std::string::npos);
+  EXPECT_FALSE(session_->isAdmin());
+
+  // 6. 白名单用户自动鉴权校验 (按用户名 Notch)
+  session_->setUsername("Notch");
+  EXPECT_FALSE(session_->isAdmin());
+  chat.handleMessage(session_->sessionId(), "Notch", "/pk dev on");
+  EXPECT_TRUE(session_->isAdmin());  // isPlayerAdmin 自动赋予 admin 标记
+  std::string msg6 = readMsg();
+  // 已通过鉴权，由于未在跑酷房间内，预期提示进入跑酷房间
+  EXPECT_NE(msg6.find("仅支持在跑酷房间中使用"), std::string::npos);
+
+  // 7. 全局熔断开关 (dev_mode_enabled = false)
+  cfg.dev_mode_enabled = false;
+  chat.handleMessage(session_->sessionId(), "Notch", "/pk dev on");
+  std::string msg7 = readMsg();
+  EXPECT_NE(msg7.find("全局禁用"), std::string::npos);
+
+  // 恢复配置状态
+  cfg.dev_mode_enabled = true;
+}

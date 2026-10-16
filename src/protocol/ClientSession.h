@@ -171,6 +171,16 @@ class ClientSession : public network::SessionCallbacks,
     is_flying_.store(is_flying, std::memory_order_release);
   }
 
+  // --- 开发者/管理员鉴权状态（原子并发安全） ---
+  [[nodiscard]] bool
+  isAdmin() const noexcept {
+    return is_admin_.load(std::memory_order_acquire);
+  }
+  void
+  setAdmin(bool admin) noexcept {
+    is_admin_.store(admin, std::memory_order_release);
+  }
+
   // --- 实时坐标与视线朝向（互斥锁保护，防止跨线程访问 UB） ---
   Vector3d
   position() const noexcept {
@@ -246,6 +256,7 @@ class ClientSession : public network::SessionCallbacks,
 
   std::atomic<bool> can_fly_{false};
   std::atomic<bool> is_flying_{false};
+  std::atomic<bool> is_admin_{false};
 
   mutable std::mutex pose_mutex_;
   Vector3d position_{0.5, 4.0, 0.5};

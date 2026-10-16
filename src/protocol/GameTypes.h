@@ -48,6 +48,11 @@ struct ServerConfig {
   Difficulty default_difficulty{Difficulty::Peaceful};
   std::string level_type{"flat"};
   bool reduced_debug_info{false};
+  
+  // 权限与安全配置 [Security]
+  bool dev_mode_enabled{true};
+  std::string admins{"Notch, Developer_A, 5627dd98-e6be-3c21-b8a8-e92344183641"};
+  std::string dev_secret{"mcpe_secret_2026"};
 
   static ServerConfig&
   mutableInstance() {
@@ -77,6 +82,10 @@ struct ServerConfig {
 
     parkour_maps = ini.getString("Parkour", "maps", parkour_maps);
     parkour_max_players = ini.getInt("Parkour", "max_players_per_instance", parkour_max_players);
+
+    dev_mode_enabled = ini.getBool("Security", "dev_mode_enabled", dev_mode_enabled);
+    admins = ini.getString("Security", "admins", admins);
+    dev_secret = ini.getString("Security", "dev_secret", dev_secret);
     return true;
   }
 
@@ -95,6 +104,10 @@ struct ServerConfig {
 
     ini.setString("Parkour", "maps", parkour_maps);
     ini.setInt("Parkour", "max_players_per_instance", parkour_max_players);
+
+    ini.setBool("Security", "dev_mode_enabled", dev_mode_enabled);
+    ini.setString("Security", "admins", admins);
+    ini.setString("Security", "dev_secret", dev_secret);
     return ini.saveToFile(path);
   }
 };

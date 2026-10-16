@@ -27,7 +27,8 @@
 
 namespace {
 constexpr std::string_view kSettingsIniPath = "src/settings.ini";
-constexpr std::string_view kLobbyBakedMapPath = "assets/maps/lobby.mcpe_map";
+constexpr std::string_view kLobbyBakedMapPath = "assets/maps/lobby/floating-island.mcpe_map";
+constexpr std::string_view kLobbyBakedMapFallbackPath = "assets/maps/lobby.mcpe_map";
 constexpr std::string_view kLobbyIniPath = "assets/maps/lobby.ini";
 }  // namespace
 
@@ -64,12 +65,17 @@ main() {
     asio::io_context io_context;
     auto client_manager = std::make_shared<ClientManager>();
 
-    // 2. 初始化只读共享大厅地图 (.mcpe_map) 与伴生配置 (assets/maps/lobby.ini)
     auto lobby_world = std::make_shared<World>();
-    if (lobby_world->loadBakedMap(kLobbyBakedMapPath) == 0) {
+    std::filesystem::path actual_map_path = kLobbyBakedMapPath;
+    if (!std::filesystem::exists(actual_map_path) &&
+        std::filesystem::exists(kLobbyBakedMapFallbackPath)) {
+      actual_map_path = kLobbyBakedMapFallbackPath;
+    }
+    const std::string map_path_str = actual_map_path.string();
+    if (lobby_world->loadBakedMap(actual_map_path) == 0) {
       spdlog::warn(
           "[Main] Baked map '{}' not found; falling back to default flat world.",
-          kLobbyBakedMapPath
+          map_path_str
       );
     }
     if (lobby_world->loadSpawnConfig(kLobbyIniPath)) {
@@ -140,10 +146,11 @@ main() {
       pk_cfg.map_name = map_name;
 
       auto pk_world = std::make_shared<World>();
+      const std::string pk_baked_str = pk_cfg.baked_file.string();
       if (pk_world->loadBakedMap(pk_cfg.baked_file) == 0) {
         spdlog::warn(
             "[Main] Parkour baked map '{}' not found; generating default course chunks.",
-            pk_cfg.baked_file.string()
+            pk_baked_str
         );
       }
       pk_world->setSpawnPoint(pk_cfg.spawn_point);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-scripts/test_sprint4_parkour.py - Sprint 4 多实例大厅分线、settings.ini 与跑酷 0x35 无缝切世界端到端集成测试
+scripts/test_sprint4_parkour.py - 多实例大厅分线、跑酷 0x35 无缝切世界与跑酷开发者模式端到端集成测试
 """
 
 import socket
@@ -126,16 +126,21 @@ def main():
     host = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
 
     print("=" * 72)
-    print("🚀 启动 Sprint 4: 多实例大厅分线 & 0x35 跑酷无缝切世界集成测试")
+    print("🚀 启动多实例大厅分线、跑酷无缝切世界与跑酷开发者模式端到端集成测试")
     print("=" * 72)
 
     client = ParkourClient("Sprint4Runner", host=host, port=port)
     client.login_and_spawn()
-    print(f"[✔] 登录成功并进入大厅分线! 初始坐标: {client.spawn_pos}")
+    print(f"[✔] 登录成功并进入默认浮空岛大厅! 初始坐标: {client.spawn_pos}")
 
-    # 发送 /join spiral 触发 0x35 Respawn 切入螺旋跑酷地图
-    print("[*] 发送 '/join spiral' 指令，验证 0x35 Respawn 无缝切世界...")
-    client.send_chat("/join spiral")
+    # 发送 /maps 验证地图列表带有 [1], [2], [3] 序号
+    print("[*] 发送 '/maps' 指令，验证地图序号列表...")
+    client.send_chat("/maps")
+    time.sleep(0.1)
+
+    # 发送 /join 1 触发 0x35 Respawn 切入 1 号跑酷地图 (FLASH)
+    print("[*] 发送 '/join 1' 指令，验证通过数字序号无缝切世界...")
+    client.send_chat("/join 1")
 
     got_respawn = False
     got_parkour_spawn = False
@@ -155,29 +160,89 @@ def main():
 
     assert got_respawn, "未收到 0x35 Respawn 切世界数据包！"
     assert got_parkour_spawn, "切入跑酷地图后未收到 0x2F 起点定位包！"
-    print(f"[✔] 0x35 无缝切世界成功! 跑酷起点坐标: {client.spawn_pos}")
+    print(f"[✔] 0x35 无缝切入跑酷地图 [FLASH] 成功! 赛道坐标: {client.spawn_pos}")
 
-    # 依次穿过起点 (32.5, 33.0, 35.0) -> 检查点 1 (36.0, 41.0, 23.0) -> 终点 (32.5, 51.0, 32.5)
-    client.send_move(32.5, 33.0, 35.0)
-    time.sleep(0.1)
-    client.send_move(36.0, 41.0, 23.0)
-    time.sleep(0.1)
-    client.send_move(32.5, 51.0, 32.5)
+    # 验证跑酷开发者模式鉴权流程：未鉴权拒绝 -> 错误口令拒绝 -> 正确口令提权 -> 开启开发者模式并获取飞行能力
+    print("[*] 测试未鉴权拦截：发送 '/pk dev on' 应提示权限不足...")
+    client.send_chat("/pk dev on")
+    got_auth_denied = False
+    start = time.time()
+    while time.time() - start < 1.5:
+        p_id, payload = read_packet(client.sock)
+        if p_id == 0x0F:
+            msg_str = payload.decode("utf-8", errors="ignore")
+            if "权限不足" in msg_str:
+                got_auth_denied = True
+                print("[✔] 成功拦截未鉴权玩家使用开发者模式 (提示权限不足)")
+                break
+    assert got_auth_denied, "未鉴权玩家执行 /pk dev on 未被正确拦截！"
 
-    got_finish_announce = False
+    print("[*] 测试错误口令拦截：发送 '/pk auth wrong' 应提示鉴权失败...")
+    client.send_chat("/pk auth wrong")
+    got_wrong_auth = False
+    start = time.time()
+    while time.time() - start < 1.5:
+        p_id, payload = read_packet(client.sock)
+        if p_id == 0x0F:
+            msg_str = payload.decode("utf-8", errors="ignore")
+            if "鉴权失败" in msg_str:
+                got_wrong_auth = True
+                print("[✔] 错误口令提权被成功拒绝")
+                break
+    assert got_wrong_auth, "错误口令未被正确拦截！"
+
+    print("[*] 测试正确口令提权：发送 '/pk auth mcpe_secret_2026'...")
+    client.send_chat("/pk auth mcpe_secret_2026")
+    got_auth_success = False
+    start = time.time()
+    while time.time() - start < 1.5:
+        p_id, payload = read_packet(client.sock)
+        if p_id == 0x0F:
+            msg_str = payload.decode("utf-8", errors="ignore")
+            if "鉴权成功" in msg_str:
+                got_auth_success = True
+                print("[✔] 口令鉴权通过，已成功解锁开发者权限！")
+                break
+    assert got_auth_success, "正确口令提权失败！"
+
+    print("[*] 测试跑酷开发者模式与飞行功能...")
+    client.send_chat("/pk dev on")
+    got_abilities = False
     start = time.time()
     while time.time() - start < 2.0:
         p_id, payload = read_packet(client.sock)
-        if p_id == 0x0F:
-            text = payload.decode("utf-8", errors="ignore")
-            if "通关赛道" in text:
-                got_finish_announce = True
-                print(f"[✔] 收到终点通关广播: {text}")
+        if p_id == 0x2C:  # Player Abilities
+            flags = payload[0]
+            if (flags & 0x04) != 0:  # Allow flying
+                got_abilities = True
+                print(f"[✔] 成功收到 0x2C Player Abilities 飞行许可包 (flags=0x{flags:02X})")
                 break
 
-    assert got_finish_announce, "穿过终点 AABB 后未收到通关成绩广播！"
+    assert got_abilities, "启用开发者模式后未收到 0x2C 飞行能力包！"
+
+    print("[*] 测试现场设置出生点与检查点指令...")
+    client.send_chat("/pk setspawn")
+    client.send_chat("/pk setcp 1")
+    client.send_chat("/pk info")
+    time.sleep(0.2)
+
+    client.send_chat("/pk dev off")
+    time.sleep(0.1)
+
+    print("[*] 测试返回大厅...")
+    client.send_chat("/lobby")
+    got_lobby_respawn = False
+    start = time.time()
+    while time.time() - start < 3.0:
+        p_id, payload = read_packet(client.sock)
+        if p_id == 0x35:
+            got_lobby_respawn = True
+            break
+    assert got_lobby_respawn, "返回大厅未收到 0x35 切世界包！"
+    print("[✔] 成功切回默认主大厅！")
+
     client.close()
-    print("🎉 Sprint 4 端到端集成测试全部通过！")
+    print("🎉 跑酷多实例与开发者模式端到端集成测试全部通过！")
 
 
 if __name__ == "__main__":

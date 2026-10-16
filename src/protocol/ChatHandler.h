@@ -33,6 +33,7 @@ class InstanceManager;
 namespace mcpe::protocol {
 
 class ClientManager;
+class ClientSession;
 
 class ChatHandler {
  public:
@@ -92,6 +93,12 @@ class ChatHandler {
   void handleMapsCommand(uint64_t sender_sid);
   void handleTopCommand(uint64_t sender_sid, std::string_view map_arg);
   void handleSetMaxPlayersCommand(uint64_t sender_sid, std::string_view args);
+  void handleParkourDevCommand(
+      uint64_t sender_sid,
+      std::string_view sub_cmd,
+      std::string_view arg
+  );
+  [[nodiscard]] bool isPlayerAdmin(const std::shared_ptr<ClientSession>& session) const;
 
   SystemMessageSender sys_sender_;
   MulticastSender multicast_sender_;
