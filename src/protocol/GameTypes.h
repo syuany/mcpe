@@ -33,6 +33,7 @@ struct ServerConfig {
   std::string version_name{"1.12.2"};
   std::string motd{"§aA High Performance C++ Server §7[Asio/C++23]"};
   int32_t max_players{100};  // 全服总人数硬上限
+  int32_t keep_alive_timeout_seconds{45};  // 客户端心跳超时踢出阈值 (秒)
 
   // 大厅分线与小游戏实例配额
   std::string default_lobby_map{"lobby"};
@@ -74,6 +75,8 @@ struct ServerConfig {
     port = static_cast<uint16_t>(ini.getInt("Server", "port", port));
     max_players = ini.getInt("Server", "max_players", max_players);
     motd = ini.getString("Server", "motd", motd);
+    keep_alive_timeout_seconds =
+        ini.getInt("Server", "keep_alive_timeout_seconds", keep_alive_timeout_seconds);
 
     default_lobby_map = ini.getString("Lobby", "default_map", default_lobby_map);
     lobby_max_players = ini.getInt("Lobby", "max_players_per_instance", lobby_max_players);
@@ -96,6 +99,7 @@ struct ServerConfig {
     ini.setInt("Server", "port", port);
     ini.setInt("Server", "max_players", max_players);
     ini.setString("Server", "motd", motd);
+    ini.setInt("Server", "keep_alive_timeout_seconds", keep_alive_timeout_seconds);
 
     ini.setString("Lobby", "default_map", default_lobby_map);
     ini.setInt("Lobby", "max_players_per_instance", lobby_max_players);

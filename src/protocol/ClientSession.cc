@@ -148,11 +148,13 @@ ClientSession::keepAliveLoop() {
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::seconds>(now - last_alive_time_).count();
-    if (elapsed > 20) {
+    const auto timeout_sec = ServerConfig::defaultInstance().keep_alive_timeout_seconds;
+    if (elapsed > timeout_sec) {
       spdlog::warn(
-          "[ClientSession] Client {} keep-alive timeout ({}s > 20s), kicking!",
+          "[ClientSession] Client {} keep-alive timeout ({}s > {}s), kicking!",
           remoteAddress(),
-          elapsed
+          elapsed,
+          timeout_sec
       );
       stop();
       break;

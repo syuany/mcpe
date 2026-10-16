@@ -239,12 +239,12 @@ struct Rotation {
   /** @brief 转换为 Minecraft 协议 1 字节定步长 Angle (0~255) */
   [[nodiscard]] uint8_t
   toByteYaw() const noexcept {
-    return static_cast<uint8_t>((yaw / 360.0f) * 256.0f);
+    return static_cast<uint8_t>(static_cast<int32_t>(std::floor((yaw / 360.0f) * 256.0f)));
   }
 
   [[nodiscard]] uint8_t
   toBytePitch() const noexcept {
-    return static_cast<uint8_t>((pitch / 360.0f) * 256.0f);
+    return static_cast<uint8_t>(static_cast<int32_t>(std::floor((pitch / 360.0f) * 256.0f)));
   }
 };
 

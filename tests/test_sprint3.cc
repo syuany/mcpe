@@ -37,7 +37,7 @@ TEST(Sprint3Test, RelMoveDeltaMathAndAngleQuantization) {
 
   Rotation rot_north{0.0f, -90.0f};
   EXPECT_EQ(rot_north.toByteYaw(), 0);
-  EXPECT_EQ(rot_north.toBytePitch(), static_cast<uint8_t>((-90.0f / 360.0f) * 256.0f));
+  EXPECT_EQ(rot_north.toBytePitch(), static_cast<uint8_t>(static_cast<int32_t>((-90.0f / 360.0f) * 256.0f)));
 }
 
 TEST(Sprint3Test, BinaryUuidGenerationAndParsing) {
