@@ -16,3 +16,8 @@ target_link_libraries(mcpe_map_io PUBLIC mcpe_world mcpe_common ZLIB::ZLIB)
 # 离线地图烘焙器命令行工具 (bin/map_baker)
 add_executable(map_baker map/main.cc)
 target_link_libraries(map_baker PRIVATE mcpe_map_io mcpe_world mcpe_common ZLIB::ZLIB)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    target_compile_options(mcpe_map_io PRIVATE -Wno-dangling-reference)
+    target_compile_options(map_baker PRIVATE -Wno-dangling-reference)
+endif()

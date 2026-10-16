@@ -78,6 +78,17 @@ class AnvilLoader {
       const std::filesystem::path& dir_path,
       World& world
   );
+
+  /**
+   * @brief 从指定 RAR 压缩包（如跑酷地图 Gold vs Diamond 4.rar）解压并加载完整世界
+   * @param rar_path RAR 文件路径
+   * @param world 目标世界容器
+   * @return 成功加载的 Chunk 总数
+   */
+  static size_t loadFromRar(
+      const std::filesystem::path& rar_path,
+      World& world
+  );
 };
 
 }  // namespace mcpe::world

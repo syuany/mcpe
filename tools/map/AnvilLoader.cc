@@ -8,7 +8,10 @@
 #include <spdlog/spdlog.h>
 #include <zlib.h>
 
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <regex>
 
@@ -363,7 +366,8 @@ size_t
 AnvilLoader::loadFromZip(const std::filesystem::path& zip_path, World& world) {
   auto archive = common::ZipArchive::openFile(zip_path);
   if (!archive) {
-    spdlog::warn("[AnvilLoader] Failed to open ZIP archive: {}", zip_path.string());
+    const std::string zip_path_str = zip_path.string();
+    spdlog::warn("[AnvilLoader] Failed to open ZIP archive: {}", zip_path_str);
     return 0;
   }
 
@@ -413,10 +417,11 @@ AnvilLoader::loadFromZip(const std::filesystem::path& zip_path, World& world) {
   // 3. 自适应修正出生点至安全实体方块表面，杜绝虚空或凌空坠落
   world.adjustSpawnPointToSafeGround();
 
+  const std::string zip_filename_str = zip_path.filename().string();
   spdlog::info(
       "[AnvilLoader] Successfully loaded {} Chunks from ZIP: {}",
       total_chunks,
-      zip_path.filename().string()
+      zip_filename_str
   );
 
   return total_chunks;
@@ -425,12 +430,25 @@ AnvilLoader::loadFromZip(const std::filesystem::path& zip_path, World& world) {
 size_t
 AnvilLoader::loadFromDirectory(const std::filesystem::path& dir_path, World& world) {
   if (!std::filesystem::exists(dir_path) || !std::filesystem::is_directory(dir_path)) {
-    spdlog::warn("[AnvilLoader] Directory not found: {}", dir_path.string());
+    const std::string dir_str = dir_path.string();
+    spdlog::warn("[AnvilLoader] Directory not found: {}", dir_str);
     return 0;
   }
 
+  // 自适应深入检测嵌套世界目录 (例如解压工具解压出了同名单个根文件夹)
+  std::filesystem::path target_dir = dir_path;
+  if (!std::filesystem::exists(target_dir / "region")) {
+    for (const auto& entry : std::filesystem::directory_iterator(dir_path)) {
+      if (entry.is_directory() && (std::filesystem::exists(entry.path() / "region") ||
+                                   std::filesystem::exists(entry.path() / "level.dat"))) {
+        target_dir = entry.path();
+        break;
+      }
+    }
+  }
+
   // 1. 尝试加载 level.dat
-  const auto level_file = dir_path / "level.dat";
+  const auto level_file = target_dir / "level.dat";
   if (std::filesystem::exists(level_file)) {
     std::ifstream is(level_file, std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(is)), std::istreambuf_iterator<char>());
@@ -448,8 +466,10 @@ AnvilLoader::loadFromDirectory(const std::filesystem::path& dir_path, World& wor
   }
 
   // 2. 遍历 region 目录
-  const auto region_dir = dir_path / "region";
+  const auto region_dir = target_dir / "region";
   if (!std::filesystem::exists(region_dir)) {
+    const std::string target_dir_str = target_dir.string();
+    spdlog::warn("[AnvilLoader] Region directory not found in: {}", target_dir_str);
     return 0;
   }
 
@@ -466,12 +486,60 @@ AnvilLoader::loadFromDirectory(const std::filesystem::path& dir_path, World& wor
   // 3. 自适应修正出生点至安全实体方块表面
   world.adjustSpawnPointToSafeGround();
 
+  const std::string final_dir_str = target_dir.string();
   spdlog::info(
       "[AnvilLoader] Successfully loaded {} Chunks from directory: {}",
       total_chunks,
-      dir_path.string()
+      final_dir_str
   );
 
+  return total_chunks;
+}
+
+size_t
+AnvilLoader::loadFromRar(const std::filesystem::path& rar_path, World& world) {
+  if (!std::filesystem::exists(rar_path)) {
+    const std::string rar_str = rar_path.string();
+    spdlog::warn("[AnvilLoader] RAR file does not exist: {}", rar_str);
+    return 0;
+  }
+
+  const auto temp_dir =
+      std::filesystem::temp_directory_path() /
+      std::format("mcpe_rar_{}", std::chrono::steady_clock::now().time_since_epoch().count());
+  std::error_code ec;
+  std::filesystem::create_directories(temp_dir, ec);
+
+#ifdef _WIN32
+  constexpr std::string_view kNullRedirect = " > nul 2>&1";
+#else
+  constexpr std::string_view kNullRedirect = " > /dev/null 2>&1";
+#endif
+
+  const std::string temp_dir_str = temp_dir.string();
+  const std::string rar_path_str = rar_path.string();
+
+  // 优先尝试 7z 解压，次选 unrar
+  const std::string cmd_7z =
+      std::format("7z x -y -o\"{}\" \"{}\"{}", temp_dir_str, rar_path_str, kNullRedirect);
+  int ret = std::system(cmd_7z.c_str());
+  if (ret != 0) {
+    const std::string cmd_unrar =
+        std::format("unrar x -y \"{}\" \"{}\"{}", rar_path_str, temp_dir_str, kNullRedirect);
+    ret = std::system(cmd_unrar.c_str());
+  }
+
+  size_t total_chunks = 0;
+  if (ret == 0) {
+    total_chunks = loadFromDirectory(temp_dir, world);
+  } else {
+    spdlog::error(
+        "[AnvilLoader] Failed to extract RAR archive '{}'. Please ensure 7z or unrar is installed in PATH.",
+        rar_path_str
+    );
+  }
+
+  std::filesystem::remove_all(temp_dir, ec);
   return total_chunks;
 }
 
