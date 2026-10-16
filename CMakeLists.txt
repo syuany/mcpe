@@ -14,7 +14,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 if(MSVC)
     add_compile_options(/W4)
 else()
+    # 严格门禁：启用 -Wall -Wextra -Wpedantic，并隔离 GCC 13+ 对 fmt 模板实例化的 -Wdangling-reference 误报
     add_compile_options(-Wall -Wextra -Wpedantic)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        add_compile_options(-Wno-dangling-reference)
+    endif()
 endif()
 
 # 引入第三方依赖管理模块（Asio / spdlog / GoogleTest / Zlib）
