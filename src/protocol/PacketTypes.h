@@ -48,7 +48,6 @@ inline constexpr int32_t LoginDisconnect = 0x00;
 inline constexpr int32_t SpawnGlobalEntity = 0x02;
 inline constexpr int32_t SpawnPlayer = 0x05;
 inline constexpr int32_t ChatMessage = 0x0F;
-inline constexpr int32_t EntityVelocity = 0x12;
 inline constexpr int32_t PlayDisconnect = 0x1A;
 inline constexpr int32_t UnloadChunk = 0x1D;
 inline constexpr int32_t KeepAlive = 0x1F;
@@ -61,14 +60,16 @@ inline constexpr int32_t PlayerAbilities = 0x2C;
 inline constexpr int32_t PlayerListItem = 0x2E;
 inline constexpr int32_t PlayerPositionAndLook = 0x2F;
 inline constexpr int32_t DestroyEntities = 0x32;
+inline constexpr int32_t RemoveEntityEffect = 0x33;
 inline constexpr int32_t Respawn = 0x35;
 inline constexpr int32_t EntityHeadLook = 0x36;
+inline constexpr int32_t EntityVelocity = 0x3E;
 inline constexpr int32_t SpawnPosition = 0x46;
 inline constexpr int32_t TimeUpdate = 0x47;
 inline constexpr int32_t Title = 0x48;
 inline constexpr int32_t EntityTeleport = 0x4C;
-inline constexpr int32_t EntityEffect = 0x4E;
-inline constexpr int32_t RemoveEntityEffect = 0x4F;
+inline constexpr int32_t EntityProperties = 0x4E;
+inline constexpr int32_t EntityEffect = 0x4F;
 }  // namespace ClientboundPacket
 
 /**
