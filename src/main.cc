@@ -40,7 +40,7 @@ using namespace mcpe::game;
 
 int
 main() {
-  spdlog::set_level(spdlog::level::debug);
+  spdlog::set_level(spdlog::level::info);
   spdlog::info("============================================================");
   spdlog::info(" MCPE Server (Protocol 340 / MC 1.12.2 / Multi-Instance)    ");
   spdlog::info("============================================================");
