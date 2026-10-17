@@ -248,3 +248,119 @@ TEST(ParkourInstanceTest, DeveloperModeFlightAndConfigMutations) {
   std::error_code ec;
   std::filesystem::remove(parkour.companionIniPath(), ec);
 }
+
+TEST(ParkourInstanceTest, SpeedZonesAndPotionEffectAcceleration) {
+  auto pk_world = std::make_shared<World>();
+
+  ParkourMapConfig cfg;
+  cfg.map_name = "test_speed_course";
+  cfg.spawn_point = Vector3d{10.0, 30.0, 10.0};
+  cfg.fall_reset_y = 20.0;
+  cfg.start_box = AABB{Vector3d{9.0, 29.0, 9.0}, Vector3d{11.0, 33.0, 11.0}};
+  cfg.start_speed_amplifier = 0;  // 起跑即给 Speed I
+
+  ParkourSpeedZone z1;
+  z1.name = "zone_1";
+  z1.box = AABB{Vector3d{20.0, 29.0, 20.0}, Vector3d{24.0, 33.0, 24.0}};
+  z1.amplifier = 1;  // Speed II
+  cfg.speed_zones.push_back(z1);
+
+  ParkourSpeedZone z2;
+  z2.name = "zone_2";
+  z2.box = AABB{Vector3d{30.0, 29.0, 30.0}, Vector3d{34.0, 33.0, 34.0}};
+  z2.amplifier = 8;  // Speed IX
+  cfg.speed_zones.push_back(z2);
+
+  ParkourCheckpoint cp1;
+  cp1.box = AABB{Vector3d{40.0, 29.0, 40.0}, Vector3d{44.0, 33.0, 44.0}};
+  cp1.respawn_pos = Vector3d{42.0, 30.0, 42.0};
+  cp1.speed_amplifier = 2;  // Speed III
+  cfg.checkpoints.push_back(cp1);
+
+  cfg.finish_box = AABB{Vector3d{50.0, 29.0, 50.0}, Vector3d{54.0, 33.0, 54.0}};
+
+  std::vector<ByteBuffer> sent_packets;
+  ParkourInstance parkour(
+      "parkour-speed-test",
+      pk_world,
+      cfg,
+      10,
+      [&](uint64_t /*sid*/, ByteBuffer pkt) {
+        sent_packets.push_back(std::move(pkt));
+      }
+  );
+
+  // 1. 玩家加入
+  WorldEvent join_ev;
+  join_ev.session_id = 42;
+  join_ev.entity_id = 999;
+  PlayerJoinEvent join_payload;
+  join_payload.setName("FlashRunner");
+  join_payload.uuid = AuthUtils::generateOfflineUuidBytes("FlashRunner");
+  join_ev.payload = join_payload;
+  parkour.pushEvent(std::move(join_ev));
+  parkour.stepTick();
+
+  const auto* st = parkour.getRunnerState(42);
+  ASSERT_NE(st, nullptr);
+  EXPECT_EQ(st->current_speed_amplifier, -1);
+
+  auto push_move = [&](const Vector3d& pos) {
+    WorldEvent ev;
+    ev.session_id = 42;
+    ev.entity_id = 999;
+    PlayerMoveEvent mv;
+    mv.position = pos;
+    mv.has_position = true;
+    mv.on_ground = true;
+    ev.payload = mv;
+    parkour.pushEvent(std::move(ev));
+    parkour.stepTick();
+  };
+
+  // 2. 踩入起点 -> 触发起跑初始速度 Speed I (amplifier = 0)
+  push_move(Vector3d{10.0, 30.0, 10.0});
+  EXPECT_TRUE(st->running);
+  EXPECT_EQ(st->current_speed_amplifier, 0);
+
+  // 3. 踩入变速区 1 -> 自动切换到 Speed II (amplifier = 1)
+  push_move(Vector3d{22.0, 30.0, 22.0});
+  EXPECT_EQ(st->current_speed_amplifier, 1);
+  EXPECT_EQ(st->current_speed_zone_idx, 0);
+
+  // 4. 踩入变速区 2 -> 自动切换到 Speed IX (amplifier = 8)
+  push_move(Vector3d{32.0, 30.0, 32.0});
+  EXPECT_EQ(st->current_speed_amplifier, 8);
+  EXPECT_EQ(st->current_speed_zone_idx, 1);
+
+  // 5. 踩入第 1 号检查点 -> 设定检查点指定速度 Speed III (amplifier = 2)
+  push_move(Vector3d{42.0, 30.0, 42.0});
+  EXPECT_EQ(st->current_checkpoint_idx, 0);
+  EXPECT_EQ(st->current_speed_amplifier, 2);
+
+  // 6. 掉落虚空 (Y = 10.0 < fall_reset_y = 20.0) -> 复位并恢复该检查点速度 (amplifier = 2)
+  push_move(Vector3d{45.0, 10.0, 45.0});
+  EXPECT_EQ(st->fall_count, 1u);
+  EXPECT_EQ(st->current_speed_amplifier, 2);
+
+  // 7. 踩入终点 -> 完赛并清除速度状态
+  push_move(Vector3d{52.0, 30.0, 52.0});
+  EXPECT_TRUE(st->finished);
+  EXPECT_EQ(st->current_speed_amplifier, -1);
+
+  // 8. 验证 INI 存储与加载完整保留 speed_zones
+  std::error_code ec;
+  const auto temp_ini = std::filesystem::temp_directory_path() / "test_speed_cfg.ini";
+  EXPECT_TRUE(cfg.saveToIni(temp_ini));
+
+  auto loaded_cfg = ParkourMapConfig::loadFromIni("test_speed_course", temp_ini);
+  ASSERT_TRUE(loaded_cfg.has_value());
+  EXPECT_EQ(loaded_cfg->start_speed_amplifier, 0);
+  ASSERT_EQ(loaded_cfg->speed_zones.size(), 2u);
+  EXPECT_EQ(loaded_cfg->speed_zones[0].amplifier, 1);
+  EXPECT_EQ(loaded_cfg->speed_zones[1].amplifier, 8);
+  ASSERT_EQ(loaded_cfg->checkpoints.size(), 1u);
+  EXPECT_EQ(loaded_cfg->checkpoints[0].speed_amplifier, 2);
+
+  std::filesystem::remove(temp_ini, ec);
+}

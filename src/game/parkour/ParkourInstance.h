@@ -30,10 +30,14 @@ namespace mcpe::game::parkour {
  */
 struct PlayerParkourState {
   uint64_t session_id{0};
+  int32_t entity_id{0};
   std::string username;
   Vector3d respawn_pos{};
   Rotation respawn_rot{};
-  int32_t current_checkpoint_idx{-1};  // -1 表示起点，0..K-1 表示已激活的检查点下标
+  int32_t current_checkpoint_idx{-1};     // -1 表示起点，0..K-1 表示已激活的检查点下标
+  int16_t current_speed_amplifier{-1};    // -1 表示无速度药水，>=0 表示当前生效的速度等级
+  int32_t current_speed_zone_idx{-1};     // 当前触发的 speed_zone 下标，-1 表示不在任何区域
+  int16_t checkpoint_speed_amplifier{-1}; // 最近激活检查点或起点时的速度等级，供跌落复位时还原
   bool running{false};
   bool finished{false};
   std::chrono::steady_clock::time_point start_time{};

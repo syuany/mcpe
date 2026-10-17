@@ -50,10 +50,15 @@ void
 ParkourInstance::onPlayerJoined(uint64_t session_id, std::string_view username) {
   PlayerParkourState st;
   st.session_id = session_id;
+  const auto* ent = entity_manager_->getPlayer(session_id);
+  st.entity_id = ent ? ent->entity_id : static_cast<int32_t>(session_id);
   st.username = std::string(username);
   st.respawn_pos = cfg_.spawn_point;
   st.respawn_rot = cfg_.spawn_rotation;
   st.current_checkpoint_idx = -1;
+  st.current_speed_amplifier = -1;
+  st.current_speed_zone_idx = -1;
+  st.checkpoint_speed_amplifier = -1;
   runners_[session_id] = std::move(st);
 
   sendSystemMessage(
@@ -74,6 +79,10 @@ ParkourInstance::onPlayerJoined(uint64_t session_id, std::string_view username) 
 
 void
 ParkourInstance::onPlayerLeft(uint64_t session_id, std::string_view username) {
+  auto it = runners_.find(session_id);
+  if (it != runners_.end() && it->second.current_speed_amplifier >= 0) {
+    sendRemoveEntityEffect(session_id, it->second.entity_id, protocol::EffectId::Speed);
+  }
   runners_.erase(session_id);
   spdlog::info(
       "[ParkourInstance:{}] Player '{}' (SID {}) left parkour course",
@@ -110,6 +119,22 @@ ParkourInstance::onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move
     move_event.has_rotation = true;
     move_event.on_ground = true;
 
+    // 掉落复位时，将速度状态还原为该检查点（或起点）记录的速度等级
+    const int16_t target_speed = runner.checkpoint_speed_amplifier;
+    if (target_speed >= 0) {
+      runner.current_speed_amplifier = target_speed;
+      sendEntityEffect(
+          session_id,
+          runner.entity_id,
+          protocol::EffectId::Speed,
+          static_cast<uint8_t>(target_speed),
+          12000
+      );
+    } else if (runner.current_speed_amplifier >= 0) {
+      sendRemoveEntityEffect(session_id, runner.entity_id, protocol::EffectId::Speed);
+      runner.current_speed_amplifier = -1;
+    }
+
     sendActionBar(
         session_id,
         runner.current_checkpoint_idx >= 0
@@ -125,9 +150,29 @@ ParkourInstance::onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move
     runner.finished = false;
     runner.post_finish_ticks = 0;
     runner.current_checkpoint_idx = -1;
+    runner.current_speed_zone_idx = -1;
     runner.respawn_pos = cfg_.spawn_point;
     runner.respawn_rot = cfg_.spawn_rotation;
     runner.start_time = std::chrono::steady_clock::now();
+
+    // 起跑初始速度设置
+    if (cfg_.start_speed_amplifier >= 0) {
+      runner.current_speed_amplifier = cfg_.start_speed_amplifier;
+      runner.checkpoint_speed_amplifier = cfg_.start_speed_amplifier;
+      sendEntityEffect(
+          session_id,
+          runner.entity_id,
+          protocol::EffectId::Speed,
+          static_cast<uint8_t>(cfg_.start_speed_amplifier),
+          12000
+      );
+    } else {
+      runner.checkpoint_speed_amplifier = -1;
+      if (runner.current_speed_amplifier >= 0) {
+        sendRemoveEntityEffect(session_id, runner.entity_id, protocol::EffectId::Speed);
+        runner.current_speed_amplifier = -1;
+      }
+    }
 
     sendActionBar(session_id, "§e§l⏱ 计时开始！冲向终点！");
     spdlog::info(
@@ -149,6 +194,21 @@ ParkourInstance::onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move
       runner.current_checkpoint_idx = static_cast<int32_t>(i);
       runner.respawn_pos = cfg_.checkpoints[i].respawn_pos;
       runner.respawn_rot = cfg_.checkpoints[i].respawn_rot;
+
+      if (cfg_.checkpoints[i].speed_amplifier >= 0) {
+        runner.current_speed_amplifier = cfg_.checkpoints[i].speed_amplifier;
+        runner.checkpoint_speed_amplifier = cfg_.checkpoints[i].speed_amplifier;
+        sendEntityEffect(
+            session_id,
+            runner.entity_id,
+            protocol::EffectId::Speed,
+            static_cast<uint8_t>(cfg_.checkpoints[i].speed_amplifier),
+            12000
+        );
+      } else {
+        runner.checkpoint_speed_amplifier = runner.current_speed_amplifier;
+      }
+
       sendSystemMessage(
           session_id,
           std::format("§b[跑酷] 已激活第 {} 号检查点！", i + 1)
@@ -163,7 +223,44 @@ ParkourInstance::onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move
     }
   }
 
-  // 4. 终点 AABB 触发与毫秒级成绩结算
+  // 4. 空间通用变速区 (Speed Zone / Acceleration Trigger) 触发检测
+  for (size_t i = 0; i < cfg_.speed_zones.size(); ++i) {
+    if (cfg_.speed_zones[i].box.contains(pos)) {
+      if (runner.current_speed_zone_idx != static_cast<int32_t>(i)) {
+        runner.current_speed_zone_idx = static_cast<int32_t>(i);
+        const auto& zone = cfg_.speed_zones[i];
+        if (runner.current_speed_amplifier != static_cast<int16_t>(zone.amplifier)) {
+          runner.current_speed_amplifier = static_cast<int16_t>(zone.amplifier);
+          sendEntityEffect(
+              session_id,
+              runner.entity_id,
+              zone.effect_id,
+              zone.amplifier,
+              zone.duration_ticks
+          );
+          sendActionBar(
+              session_id,
+              std::format(
+                  "§b⚡ 进入变速区域: 速度等级 {} §7(Speed {})",
+                  zone.amplifier + 1,
+                  zone.amplifier + 1
+              )
+          );
+          spdlog::info(
+              "[ParkourInstance:{}] Player '{}' entered speed zone #{} ({}) amp={}",
+              instanceId(),
+              runner.username,
+              i + 1,
+              zone.name,
+              zone.amplifier
+          );
+        }
+      }
+      break;
+    }
+  }
+
+  // 5. 终点 AABB 触发与毫秒级成绩结算
   if (cfg_.finish_box.contains(pos)) {
     const auto now = std::chrono::steady_clock::now();
     const int64_t elapsed_ms = std::max<int64_t>(
@@ -179,6 +276,13 @@ ParkourInstance::onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move
     if (runner.best_elapsed_ms == 0 || elapsed_ms < runner.best_elapsed_ms) {
       runner.best_elapsed_ms = elapsed_ms;
     }
+
+    if (runner.current_speed_amplifier >= 0) {
+      sendRemoveEntityEffect(session_id, runner.entity_id, protocol::EffectId::Speed);
+      runner.current_speed_amplifier = -1;
+    }
+    runner.current_speed_zone_idx = -1;
+    runner.checkpoint_speed_amplifier = -1;
 
     recordLeaderboard(runner.username, elapsed_ms);
 
@@ -372,6 +476,21 @@ ParkourInstance::getCourseInfo() const {
   for (size_t i = 0; i < cfg_.checkpoints.size(); ++i) {
     const auto& sp = cfg_.checkpoints[i].respawn_pos;
     oss << std::format("  §b#{}§7 复位坐标: ({:.1f}, {:.1f}, {:.1f})\n", i + 1, sp.x, sp.y, sp.z);
+  }
+  oss << std::format("§7- 变速区域总数: {} 个\n", cfg_.speed_zones.size());
+  for (size_t i = 0; i < cfg_.speed_zones.size(); ++i) {
+    const auto& z = cfg_.speed_zones[i];
+    oss << std::format(
+        "  §6#{}§7 等级: Speed {} | 范围: ({:.1f}, {:.1f}, {:.1f}) ~ ({:.1f}, {:.1f}, {:.1f})\n",
+        i + 1,
+        z.amplifier + 1,
+        z.box.min_pt.x,
+        z.box.min_pt.y,
+        z.box.min_pt.z,
+        z.box.max_pt.x,
+        z.box.max_pt.y,
+        z.box.max_pt.z
+    );
   }
   oss << std::format("§7- 终点 AABB: ({:.1f}, {:.1f}, {:.1f}) ~ ({:.1f}, {:.1f}, {:.1f})",
                      cfg_.finish_box.min_pt.x, cfg_.finish_box.min_pt.y, cfg_.finish_box.min_pt.z,

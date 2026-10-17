@@ -48,6 +48,7 @@ inline constexpr int32_t LoginDisconnect = 0x00;
 inline constexpr int32_t SpawnGlobalEntity = 0x02;
 inline constexpr int32_t SpawnPlayer = 0x05;
 inline constexpr int32_t ChatMessage = 0x0F;
+inline constexpr int32_t EntityVelocity = 0x12;
 inline constexpr int32_t PlayDisconnect = 0x1A;
 inline constexpr int32_t UnloadChunk = 0x1D;
 inline constexpr int32_t KeepAlive = 0x1F;
@@ -66,7 +67,40 @@ inline constexpr int32_t SpawnPosition = 0x46;
 inline constexpr int32_t TimeUpdate = 0x47;
 inline constexpr int32_t Title = 0x48;
 inline constexpr int32_t EntityTeleport = 0x4C;
+inline constexpr int32_t EntityEffect = 0x4E;
+inline constexpr int32_t RemoveEntityEffect = 0x4F;
 }  // namespace ClientboundPacket
+
+/**
+ * @brief Minecraft 1.12.2 (Protocol 340) 原版状态效果 ID (Potion Effect IDs)
+ */
+namespace EffectId {
+inline constexpr uint8_t Speed = 1;            // 迅捷 (增加移动速度与拉大 FOV)
+inline constexpr uint8_t Slowness = 2;         // 缓慢
+inline constexpr uint8_t Haste = 3;            // 急迫
+inline constexpr uint8_t MiningFatigue = 4;    // 挖掘疲劳
+inline constexpr uint8_t Strength = 5;         // 力量
+inline constexpr uint8_t InstantHealth = 6;    // 瞬间治疗
+inline constexpr uint8_t InstantDamage = 7;    // 瞬间伤害
+inline constexpr uint8_t JumpBoost = 8;        // 跳跃提升
+inline constexpr uint8_t Nausea = 9;           // 反胃
+inline constexpr uint8_t Regeneration = 10;    // 生命恢复
+inline constexpr uint8_t Resistance = 11;      // 抗性提升
+inline constexpr uint8_t FireResistance = 12;  // 抗火
+inline constexpr uint8_t WaterBreathing = 13; // 水下呼吸
+inline constexpr uint8_t Invisibility = 14;    // 隐身
+inline constexpr uint8_t Blindness = 15;       // 失明
+inline constexpr uint8_t NightVision = 16;     // 夜视
+inline constexpr uint8_t Hunger = 17;          // 饥饿
+inline constexpr uint8_t Weakness = 18;        // 虚弱
+inline constexpr uint8_t Poison = 19;          // 中毒
+inline constexpr uint8_t Wither = 20;          // 凋零
+inline constexpr uint8_t HealthBoost = 21;     // 生命提升
+inline constexpr uint8_t Absorption = 22;      // 伤害吸收
+inline constexpr uint8_t Saturation = 23;      // 饱和
+inline constexpr uint8_t Glowing = 24;         // 发光
+inline constexpr uint8_t Levitation = 25;      // 飘浮
+}  // namespace EffectId
 
 /**
  * @brief 0x2C / 0x13 Player Abilities 标志位掩码 (Bit field)

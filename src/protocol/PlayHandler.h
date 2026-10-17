@@ -83,6 +83,55 @@ class PlayHandler {
       int64_t time_of_day = -6000LL
   );
 
+  /** @brief 构建 Entity Effect (0x4E) 实体药水状态包 */
+  static ByteBuffer buildEntityEffect(
+      int32_t entity_id,
+      uint8_t effect_id,
+      uint8_t amplifier,
+      int32_t duration_ticks,
+      uint8_t flags = 0x00
+  );
+
+  /** @brief 构建 Remove Entity Effect (0x4F) 移除实体药水状态包 */
+  static ByteBuffer buildRemoveEntityEffect(
+      int32_t entity_id,
+      uint8_t effect_id
+  );
+
+  /** @brief 构建 Entity Velocity (0x12) 实体运动冲量/弹跳包 */
+  static ByteBuffer buildEntityVelocity(
+      int32_t entity_id,
+      int16_t velocity_x,
+      int16_t velocity_y,
+      int16_t velocity_z
+  );
+
+  /** @brief 下发 Entity Effect (0x4E) 实体药水状态包 */
+  static void sendEntityEffect(
+      const std::shared_ptr<ClientSession>& session,
+      int32_t entity_id,
+      uint8_t effect_id,
+      uint8_t amplifier,
+      int32_t duration_ticks,
+      uint8_t flags = 0x00
+  );
+
+  /** @brief 下发 Remove Entity Effect (0x4F) 移除实体药水状态包 */
+  static void sendRemoveEntityEffect(
+      const std::shared_ptr<ClientSession>& session,
+      int32_t entity_id,
+      uint8_t effect_id
+  );
+
+  /** @brief 下发 Entity Velocity (0x12) 实体运动冲量/弹跳包 */
+  static void sendEntityVelocity(
+      const std::shared_ptr<ClientSession>& session,
+      int32_t entity_id,
+      int16_t velocity_x,
+      int16_t velocity_y,
+      int16_t velocity_z
+  );
+
   /** @brief 处理客户端发来的 Player Abilities (0x13) 飞行状态同步包 */
   static void handlePlayerAbilities(
       const std::shared_ptr<ClientSession>& session,

@@ -47,8 +47,12 @@ ParkourMapConfig::loadFromIni(
     cfg.finish_box = *finish_aabb;
   }
 
+  cfg.start_speed_amplifier = static_cast<int16_t>(
+      ini.getInt("Parkour", "start_speed_amplifier", cfg.start_speed_amplifier)
+  );
+
   // 自动按序号扫描 checkpoint_1, checkpoint_2, ...
-  for (int idx = 1; idx <= 32; ++idx) {
+  for (int idx = 1; idx <= 64; ++idx) {
     const std::string min_k = std::format("checkpoint_{}_min", idx);
     const std::string max_k = std::format("checkpoint_{}_max", idx);
     auto cp_aabb = ini.getAABB("Parkour", min_k, max_k);
@@ -73,7 +77,33 @@ ParkourMapConfig::loadFromIni(
     cp.respawn_rot.pitch = static_cast<float>(
         ini.getDouble("Parkour", std::format("checkpoint_{}_pitch", idx), 0.0)
     );
+    cp.speed_amplifier = static_cast<int16_t>(
+        ini.getInt("Parkour", std::format("checkpoint_{}_speed", idx), -1)
+    );
     cfg.checkpoints.push_back(cp);
+  }
+
+  // 扫描通用空间变速区 (speed_zone_1, speed_zone_2, ...)
+  for (int idx = 1; idx <= 128; ++idx) {
+    const std::string min_k = std::format("speed_zone_{}_min", idx);
+    const std::string max_k = std::format("speed_zone_{}_max", idx);
+    auto zone_aabb = ini.getAABB("Parkour", min_k, max_k);
+    if (!zone_aabb) {
+      break;
+    }
+
+    ParkourSpeedZone zone;
+    zone.name = std::format("speed_zone_{}", idx);
+    zone.box = *zone_aabb;
+    zone.effect_id = static_cast<uint8_t>(
+        ini.getInt("Parkour", std::format("speed_zone_{}_effect", idx), 1)
+    );
+    zone.amplifier = static_cast<uint8_t>(
+        ini.getInt("Parkour", std::format("speed_zone_{}_speed", idx), 0)
+    );
+    zone.duration_ticks =
+        ini.getInt("Parkour", std::format("speed_zone_{}_duration", idx), 12000);
+    cfg.speed_zones.push_back(zone);
   }
 
   return cfg;
@@ -93,6 +123,9 @@ ParkourMapConfig::saveToIni(const std::filesystem::path& ini_path) const {
   ini.setDouble("World", "fall_reset_y", fall_reset_y);
 
   ini.setAABB("Parkour", "start_min", "start_max", start_box);
+  if (start_speed_amplifier >= 0) {
+    ini.setInt("Parkour", "start_speed_amplifier", start_speed_amplifier);
+  }
   ini.setAABB("Parkour", "finish_min", "finish_max", finish_box);
 
   for (size_t i = 0; i < checkpoints.size(); ++i) {
@@ -118,6 +151,42 @@ ParkourMapConfig::saveToIni(const std::filesystem::path& ini_path) const {
         std::format("checkpoint_{}_pitch", idx),
         checkpoints[i].respawn_rot.pitch
     );
+    if (checkpoints[i].speed_amplifier >= 0) {
+      ini.setInt(
+          "Parkour",
+          std::format("checkpoint_{}_speed", idx),
+          checkpoints[i].speed_amplifier
+      );
+    }
+  }
+
+  for (size_t i = 0; i < speed_zones.size(); ++i) {
+    const size_t idx = i + 1;
+    ini.setAABB(
+        "Parkour",
+        std::format("speed_zone_{}_min", idx),
+        std::format("speed_zone_{}_max", idx),
+        speed_zones[i].box
+    );
+    ini.setInt(
+        "Parkour",
+        std::format("speed_zone_{}_speed", idx),
+        speed_zones[i].amplifier
+    );
+    if (speed_zones[i].effect_id != 1) {
+      ini.setInt(
+          "Parkour",
+          std::format("speed_zone_{}_effect", idx),
+          speed_zones[i].effect_id
+      );
+    }
+    if (speed_zones[i].duration_ticks != 12000) {
+      ini.setInt(
+          "Parkour",
+          std::format("speed_zone_{}_duration", idx),
+          speed_zones[i].duration_ticks
+      );
+    }
   }
 
   return ini.saveToFile(ini_path);

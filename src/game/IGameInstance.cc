@@ -184,6 +184,42 @@ IGameInstance::sendActionBar(uint64_t session_id, std::string_view text) {
 }
 
 void
+IGameInstance::sendEntityEffect(
+    uint64_t session_id,
+    int32_t entity_id,
+    uint8_t effect_id,
+    uint8_t amplifier,
+    int32_t duration_ticks,
+    uint8_t flags
+) {
+  if (!unicast_fn_) {
+    return;
+  }
+  network::PacketBuilder builder(protocol::ClientboundPacket::EntityEffect);
+  builder.appendVarInt(entity_id);
+  builder.appendByte(effect_id);
+  builder.appendByte(amplifier);
+  builder.appendVarInt(duration_ticks);
+  builder.appendByte(flags);
+  unicast_fn_(session_id, builder.build());
+}
+
+void
+IGameInstance::sendRemoveEntityEffect(
+    uint64_t session_id,
+    int32_t entity_id,
+    uint8_t effect_id
+) {
+  if (!unicast_fn_) {
+    return;
+  }
+  network::PacketBuilder builder(protocol::ClientboundPacket::RemoveEntityEffect);
+  builder.appendVarInt(entity_id);
+  builder.appendByte(effect_id);
+  unicast_fn_(session_id, builder.build());
+}
+
+void
 IGameInstance::setChatDispatchCallback(ChatDispatchFn fn) {
   chat_dispatch_fn_ = std::move(fn);
 }

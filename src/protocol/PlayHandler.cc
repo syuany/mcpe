@@ -284,6 +284,84 @@ PlayHandler::sendTimeUpdate(
   );
 }
 
+ByteBuffer
+PlayHandler::buildEntityEffect(
+    int32_t entity_id,
+    uint8_t effect_id,
+    uint8_t amplifier,
+    int32_t duration_ticks,
+    uint8_t flags
+) {
+  network::PacketBuilder builder(ClientboundPacket::EntityEffect);
+  builder.appendVarInt(entity_id);
+  builder.appendByte(effect_id);
+  builder.appendByte(amplifier);
+  builder.appendVarInt(duration_ticks);
+  builder.appendByte(flags);
+  return builder.build();
+}
+
+ByteBuffer
+PlayHandler::buildRemoveEntityEffect(
+    int32_t entity_id,
+    uint8_t effect_id
+) {
+  network::PacketBuilder builder(ClientboundPacket::RemoveEntityEffect);
+  builder.appendVarInt(entity_id);
+  builder.appendByte(effect_id);
+  return builder.build();
+}
+
+ByteBuffer
+PlayHandler::buildEntityVelocity(
+    int32_t entity_id,
+    int16_t velocity_x,
+    int16_t velocity_y,
+    int16_t velocity_z
+) {
+  network::PacketBuilder builder(ClientboundPacket::EntityVelocity);
+  builder.appendVarInt(entity_id);
+  builder.writeBe<int16_t>(velocity_x);
+  builder.writeBe<int16_t>(velocity_y);
+  builder.writeBe<int16_t>(velocity_z);
+  return builder.build();
+}
+
+void
+PlayHandler::sendEntityEffect(
+    const std::shared_ptr<ClientSession>& session,
+    int32_t entity_id,
+    uint8_t effect_id,
+    uint8_t amplifier,
+    int32_t duration_ticks,
+    uint8_t flags
+) {
+  if (!session) return;
+  session->sendPacket(buildEntityEffect(entity_id, effect_id, amplifier, duration_ticks, flags));
+}
+
+void
+PlayHandler::sendRemoveEntityEffect(
+    const std::shared_ptr<ClientSession>& session,
+    int32_t entity_id,
+    uint8_t effect_id
+) {
+  if (!session) return;
+  session->sendPacket(buildRemoveEntityEffect(entity_id, effect_id));
+}
+
+void
+PlayHandler::sendEntityVelocity(
+    const std::shared_ptr<ClientSession>& session,
+    int32_t entity_id,
+    int16_t velocity_x,
+    int16_t velocity_y,
+    int16_t velocity_z
+) {
+  if (!session) return;
+  session->sendPacket(buildEntityVelocity(entity_id, velocity_x, velocity_y, velocity_z));
+}
+
 void
 PlayHandler::handlePlayerAbilities(
     const std::shared_ptr<ClientSession>& session,

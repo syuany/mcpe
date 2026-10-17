@@ -103,6 +103,23 @@ class IGameInstance {
   /// 向指定玩家单播快捷栏上方动态提示 (Position = ActionBar)
   void sendActionBar(uint64_t session_id, std::string_view text);
 
+  /// 向指定玩家单播状态效果包 (0x4E Entity Effect)
+  void sendEntityEffect(
+      uint64_t session_id,
+      int32_t entity_id,
+      uint8_t effect_id,
+      uint8_t amplifier,
+      int32_t duration_ticks,
+      uint8_t flags = 0x00
+  );
+
+  /// 向指定玩家单播移除状态效果包 (0x4F Remove Entity Effect)
+  void sendRemoveEntityEffect(
+      uint64_t session_id,
+      int32_t entity_id,
+      uint8_t effect_id
+  );
+
   [[nodiscard]] const std::string& instanceId() const noexcept { return instance_id_; }
   [[nodiscard]] InstanceType type() const noexcept { return type_; }
   [[nodiscard]] InstanceState state() const noexcept {
