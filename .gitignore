@@ -34,3 +34,5 @@ bak/
 *.jar
 *.zip
 .cache/
+
+gost*.exe

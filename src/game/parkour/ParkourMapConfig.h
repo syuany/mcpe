@@ -30,6 +30,7 @@ struct ParkourCheckpoint {
 struct ParkourMapConfig {
   std::string map_name{"FLASH"};
   std::filesystem::path baked_file{"assets/maps/parkour/FLASH.mcpe_map"};
+  std::filesystem::path companion_ini_path{};
   Vector3d spawn_point{1568.5, 37.0, -278.5};
   Rotation spawn_rotation{0.0f, 0.0f};
   double fall_reset_y{20.0};

@@ -29,7 +29,8 @@ namespace {
 constexpr std::string_view kSettingsIniPath = "src/settings.ini";
 constexpr std::string_view kLobbyBakedMapPath = "assets/maps/lobby/floating-island.mcpe_map";
 constexpr std::string_view kLobbyBakedMapFallbackPath = "assets/maps/lobby.mcpe_map";
-constexpr std::string_view kLobbyIniPath = "assets/maps/lobby.ini";
+constexpr std::string_view kLobbyIniPath = "assets/maps/lobby/lobby.ini";
+constexpr std::string_view kLobbyIniFallbackPath = "assets/maps/lobby.ini";
 }  // namespace
 
 using namespace mcpe;
@@ -66,7 +67,24 @@ main() {
     auto client_manager = std::make_shared<ClientManager>();
 
     auto lobby_world = std::make_shared<World>();
+    std::filesystem::path lobby_ini_path = kLobbyIniPath;
+    if (!std::filesystem::exists(lobby_ini_path)) {
+      const auto named_ini = std::format("assets/maps/lobby/{}.ini", server_cfg.default_lobby_map);
+      if (std::filesystem::exists(named_ini)) {
+        lobby_ini_path = named_ini;
+      } else if (std::filesystem::exists(kLobbyIniFallbackPath)) {
+        lobby_ini_path = kLobbyIniFallbackPath;
+      }
+    }
+
     std::filesystem::path actual_map_path = kLobbyBakedMapPath;
+    common::IniConfig lobby_ini;
+    if (lobby_ini.loadFromFile(lobby_ini_path) && lobby_ini.hasKey("World", "baked_file")) {
+      const auto specified_baked = lobby_ini.getString("World", "baked_file");
+      if (std::filesystem::exists(specified_baked)) {
+        actual_map_path = specified_baked;
+      }
+    }
     if (!std::filesystem::exists(actual_map_path) &&
         std::filesystem::exists(kLobbyBakedMapFallbackPath)) {
       actual_map_path = kLobbyBakedMapFallbackPath;
@@ -78,16 +96,16 @@ main() {
           map_path_str
       );
     }
-    if (lobby_world->loadSpawnConfig(kLobbyIniPath)) {
+    if (lobby_world->loadSpawnConfig(lobby_ini_path)) {
       spdlog::info(
           "[Main] Loaded lobby spawn config from {}: ({:.2f}, {:.2f}, {:.2f})",
-          kLobbyIniPath,
+          lobby_ini_path.string(),
           lobby_world->spawnPoint().x,
           lobby_world->spawnPoint().y,
           lobby_world->spawnPoint().z
       );
     } else {
-      (void)lobby_world->saveSpawnConfig(kLobbyIniPath);
+      (void)lobby_world->saveSpawnConfig(lobby_ini_path);
     }
     PlayHandler::setWorld(lobby_world);
 
@@ -137,13 +155,22 @@ main() {
         }
     );
 
-    // 4. 自动扫描并加载 settings.ini 中配置的跑酷地图列表 (例如 spiral)
+    // 4. 自动扫描并加载 settings.ini 中配置的跑酷地图列表 (例如 FLASH, spiral)
     const auto parkour_map_names = common::IniConfig::splitCsv(server_cfg.parkour_maps);
     for (const auto& map_name : parkour_map_names) {
-      const std::filesystem::path ini_path = std::format("assets/maps/{}.ini", map_name);
+      std::filesystem::path ini_path = std::format("assets/maps/parkour/{}.ini", map_name);
+      if (!std::filesystem::exists(ini_path)) {
+        const auto fallback_ini = std::format("assets/maps/{}.ini", map_name);
+        if (std::filesystem::exists(fallback_ini)) {
+          ini_path = fallback_ini;
+        }
+      }
       auto pk_cfg_opt = parkour::ParkourMapConfig::loadFromIni(map_name, ini_path);
       parkour::ParkourMapConfig pk_cfg = pk_cfg_opt.value_or(parkour::ParkourMapConfig{});
       pk_cfg.map_name = map_name;
+      if (pk_cfg.companion_ini_path.empty()) {
+        pk_cfg.companion_ini_path = ini_path;
+      }
 
       auto pk_world = std::make_shared<World>();
       const std::string pk_baked_str = pk_cfg.baked_file.string();
@@ -175,11 +202,11 @@ main() {
           client_manager->broadcast(std::move(packet));
         }
     );
-    chat_handler->setSpawnCallback([lobby_world](const Vector3d& pos, const Rotation& rot) {
+    chat_handler->setSpawnCallback([lobby_world, lobby_ini_path](const Vector3d& pos, const Rotation& rot) {
       lobby_world->setSpawnPoint(pos);
       lobby_world->setSpawnRotation(rot);
-      if (lobby_world->saveSpawnConfig(kLobbyIniPath)) {
-        spdlog::info("[Main] Persisted custom lobby spawn point to {}", kLobbyIniPath);
+      if (lobby_world->saveSpawnConfig(lobby_ini_path)) {
+        spdlog::info("[Main] Persisted custom lobby spawn point to {}", lobby_ini_path.string());
       }
     });
 

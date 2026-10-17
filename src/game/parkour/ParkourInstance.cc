@@ -289,7 +289,18 @@ ParkourInstance::setDeveloperMode(uint64_t session_id, bool enable) {
 
 std::filesystem::path
 ParkourInstance::companionIniPath() const {
-  return std::filesystem::path("assets/maps") / (cfg_.map_name + ".ini");
+  if (!cfg_.companion_ini_path.empty()) {
+    return cfg_.companion_ini_path;
+  }
+  const auto parkour_path = std::filesystem::path("assets/maps/parkour") / (cfg_.map_name + ".ini");
+  if (std::filesystem::exists(parkour_path)) {
+    return parkour_path;
+  }
+  const auto fallback_path = std::filesystem::path("assets/maps") / (cfg_.map_name + ".ini");
+  if (std::filesystem::exists(fallback_path)) {
+    return fallback_path;
+  }
+  return parkour_path;
 }
 
 bool

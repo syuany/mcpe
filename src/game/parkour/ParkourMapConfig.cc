@@ -23,10 +23,13 @@ ParkourMapConfig::loadFromIni(
 
   ParkourMapConfig cfg;
   cfg.map_name = std::string(map_name);
+  cfg.companion_ini_path = ini_path;
   const std::string default_baked =
-      std::filesystem::exists(std::format("assets/maps/baked/{}.mcpe_map", map_name))
-          ? std::format("assets/maps/baked/{}.mcpe_map", map_name)
-          : std::format("assets/maps/{}.mcpe_map", map_name);
+      std::filesystem::exists(std::format("assets/maps/parkour/{}.mcpe_map", map_name))
+          ? std::format("assets/maps/parkour/{}.mcpe_map", map_name)
+          : (std::filesystem::exists(std::format("assets/maps/baked/{}.mcpe_map", map_name))
+                 ? std::format("assets/maps/baked/{}.mcpe_map", map_name)
+                 : std::format("assets/maps/{}.mcpe_map", map_name));
   cfg.baked_file = ini.getString("World", "baked_file", default_baked);
   cfg.spawn_point.x = ini.getDouble("World", "spawn_x", cfg.spawn_point.x);
   cfg.spawn_point.y = ini.getDouble("World", "spawn_y", cfg.spawn_point.y);
