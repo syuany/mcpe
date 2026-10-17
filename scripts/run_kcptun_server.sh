@@ -17,7 +17,7 @@ docker run -d \
   --restart=always \
   --net=host \
   ginuerzh/gost \
-  -L="kcp://:${LISTEN_PORT}/127.0.0.1:${TARGET_PORT}?mode=fast3&nodelay=1"
+  -L="relay+kcp://:${LISTEN_PORT}?mode=fast3&nodelay=1"
 
 echo "[+] KCP tunnel server is active and listening on UDP :${LISTEN_PORT}"
 docker ps --filter "name=${CONTAINER_NAME}"

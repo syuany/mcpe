@@ -43,6 +43,6 @@ if not exist "%~dp0%BIN_NAME%" (
 echo [+] Starting KCP client acceleration tunnel...
 echo [*] Connect your Minecraft 1.12.2 client to: 127.0.0.1:25566
 echo.
-"%~dp0%BIN_NAME%" -L="tcp://:25566/127.0.0.1:25566" -F="kcp://%REMOTE_HOST%:%REMOTE_PORT%?mode=fast3&nodelay=1"
+"%~dp0%BIN_NAME%" -L="tcp://:25566/127.0.0.1:25566" -F="relay+kcp://%REMOTE_HOST%:%REMOTE_PORT%?mode=fast3&nodelay=1"
 
 pause
