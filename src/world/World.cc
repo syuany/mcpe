@@ -345,6 +345,19 @@ World::adjustSpawnPointToSafeGround() {
   Vector3d current_spawn = spawnPoint();
   const int32_t target_x = static_cast<int32_t>(std::floor(current_spawn.x));
   const int32_t target_z = static_cast<int32_t>(std::floor(current_spawn.z));
+  const int32_t current_y = static_cast<int32_t>(std::floor(current_spawn.y));
+
+  // 1. 若当前出生点脚下有实体方块且站立空间为空，说明本身即为有效安全地面（如室内/赛道起点），无需抬升至楼顶
+  const ChunkPos cpos{target_x >> 4, target_z >> 4};
+  const Chunk* chunk = getChunk(cpos);
+  if (chunk && current_y > 0 && current_y < 255) {
+    const uint16_t below = chunk->getBlock(BlockPos{target_x, current_y - 1, target_z});
+    const uint16_t at_feet = chunk->getBlock(BlockPos{target_x, current_y, target_z});
+    const uint16_t at_head = chunk->getBlock(BlockPos{target_x, current_y + 1, target_z});
+    if (below != BlockStates::kAir && at_feet == BlockStates::kAir && at_head == BlockStates::kAir) {
+      return;
+    }
+  }
 
   int32_t ground_y = getHighestBlockY(target_x, target_z);
   if (ground_y >= 0) {
