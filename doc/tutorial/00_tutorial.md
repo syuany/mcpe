@@ -73,7 +73,7 @@ mcpe/
 │   ├── network/                # 2. 网络传输层：TcpServer, TcpSession, PacketFraming (纯网络无协议逻辑)
 │   ├── protocol/               # 3. 协议会话层：PacketRouter, HandshakeHandler, StatusHandler, LoginHandler, PlayHandler
 │   ├── world/                  # 4. 空间与世界层：Chunk, ChunkSection, World, SpatialGrid, EntityManager
-│   ├── game/                   # 5. 游戏分线层：InstanceManager, IGameInstance, LobbyInstance
+│   ├── lobby/                  # 4. 大厅分线层：LobbyManager, LobbyInstance
 │   └── main.cc                 # 启动入口与信号优雅退出
 └── tests/                      # 100% 覆盖率单元测试套件
 ```
@@ -100,7 +100,7 @@ mcpe/
               │                                                         │
               │   20 TPS 物理节拍器 (每 50ms 触发一次)                    │
               │   ├── 1. 消费所有客户端操作输入 (位移 / 聊天 / 切线)        │
-              │   ├── 2. 调度 InstanceManager 大厅动态分线与扩缩容        │
+              │   ├── 2. 调度 LobbyManager 大厅动态分线与扩缩容          │
               │   ├── 3. 空间判定 (传送门 AABB / Fall Reset 虚空掉落拉回)   │
               │   └── 4. 0x35 跨分线热切换 / 九宫格 AOI 实体多播 (COW 广播)│
               └────────────────────────┬────────────────────────────────┘
@@ -167,7 +167,7 @@ mcpe/
 #### 1. 目标定义（Definition of Done）
 * 落地双层 INI 配置持久化体系：`settings.ini`（全服与单分线配额、网络配置）与地图伴生 `assets/maps/<map>.ini`（出生点坐标、虚空跌落拉回高度）。
 * 全服总人数硬上限准入拦截：在 `LoginHandler` 阶段校验在线总人数，超限时发送 `0x00 Disconnect`，保障系统高可用。
-* 单大厅满员弹性裂变分线：`InstanceManager` 调度 `lobby-1..N` 分线，单分线满员自动创建新分线；所有分线共享同一个只读预烘焙 `World` 区块内存，单分线增量内存 $<16\text{KB}$。
+* 单大厅满员弹性裂变分线：`LobbyManager` 调度 `lobby-1..N` 分线，单分线满员自动创建新分线；所有分线共享同一个只读预烘焙 `World` 区块内存，单分线增量内存 $<16\text{KB}$。
 * 跨分线无缝热切换（`/lobby [id]`、`/lobbies`）：
   * 客户端屏幕黑屏刷新约 0.2 秒，**单 TCP 连接不中断**，通过 `0x35 Respawn (-1 -> 0)` 瞬间平滑切入新分线！
   * 虚空防坠落熔断（Fall Reset）：消费位移包时检测 $Y < \text{fall\_reset\_y}$，直接拉回大厅出生点并矫正九宫格 AOI 归属。
@@ -177,9 +177,9 @@ mcpe/
 1. **双层 INI 配置文件驱动 (`IniConfig`)**：
    * 采用轻量 INI 解析器，支持 section 字典与键值提取；
    * 管理员可通过 `/setmaxplayers` 与 `/setspawn` 指令实时更新内存并持久化写回磁盘。
-2. **多实例并发 Actor 线程模型 (`src/game/`)**：
-   * `IGameInstance` 抽象玩法空间，封装独立 `EventQueue` + `EntityManager` + `SpatialGrid` + 20 TPS `WorldTicker` 线程；
-   * `InstanceManager` 提供线程安全的大厅实例注册、查找、跨实例原子迁移（`transferPlayer`）与生命周期管理。
+2. **多实例并发 Actor 线程模型 (`src/lobby/`)**：
+   * `LobbyInstance` 封装单个大厅分线的独立 `EventQueue` + `EntityManager` + `SpatialGrid` + 20 TPS `WorldTicker` 线程；
+   * `LobbyManager` 提供线程安全的大厅分线注册、查找、跨分线原子迁移（`transferPlayer`）与生命周期管理。
 3. **0x35 无缝跨分线切换时序**：
    * 步骤 1：向原大厅分线投递 `PlayerLeaveEvent`，向原九宫格邻居广播 `0x32 DestroyEntities`；
    * 步骤 2：下发 `0x35 Respawn`（切换维度通知客户端清空当前世界渲染缓存）；
@@ -187,7 +187,7 @@ mcpe/
    * 步骤 4：下发 `0x2F Player Position And Look`（把玩家瞬移到新分线出生点）；
    * 步骤 5：收到客户端 `0x00 Teleport Confirm` 确认后，向目标分线投递 `PlayerJoinEvent` 激活实体双向感知。
 
-* **实战独立教程**：详见 [`doc/tutorial/sprint4_parkour_room.md`](sprint4_parkour_room.md)（含跑酷归档说明）。
+* **实战独立教程**：详见 [`doc/tutorial/sprint4_lobby_sharding.md`](sprint4_lobby_sharding.md)。
 
 ---
 

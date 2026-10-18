@@ -562,11 +562,11 @@ void ClientSession::connectServer(std::string_view target_server) {
 
 ### TASK-5.3: 大厅跨服传送门空间 AABB 路由与 `/server` 指令系统 (`PortalManager.h/.cc` & `LobbyInstance.cc`)
 
-#### 1. 传送门管理器契约 (`src/game/lobby/PortalManager.h`)
+#### 1. 传送门管理器契约 (`src/lobby/PortalManager.h`)
 
 ```cpp
-#ifndef MCPE_GAME_PORTAL_MANAGER_H
-#define MCPE_GAME_PORTAL_MANAGER_H
+#ifndef MCPE_LOBBY_PORTAL_MANAGER_H
+#define MCPE_LOBBY_PORTAL_MANAGER_H
 
 #include <chrono>
 #include <string>
@@ -576,7 +576,7 @@ void ClientSession::connectServer(std::string_view target_server) {
 
 #include "common/SpatialTypes.h"
 
-namespace mcpe::game {
+namespace mcpe::lobby {
 
 struct Portal {
   std::string name;          // 传送门唯一标识
@@ -609,12 +609,12 @@ class PortalManager {
   static constexpr auto kCooldown = std::chrono::seconds(3);
 };
 
-}  // namespace mcpe::game
+}  // namespace mcpe::lobby
 
-#endif  // MCPE_GAME_PORTAL_MANAGER_H
+#endif  // MCPE_LOBBY_PORTAL_MANAGER_H
 ```
 
-#### 2. 大厅位移管线挂载传送门检测 (`src/game/lobby/LobbyInstance.cc`)
+#### 2. 大厅位移管线挂载传送门检测 (`src/lobby/LobbyInstance.cc`)
 
 在 `LobbyInstance::onPlayerMoved` 玩家每次权威位移更新时执行空间碰撞测试：
 

@@ -1,9 +1,9 @@
 /**
- * @file IGameInstance.cc
- * @brief 游戏空间实例抽象基类实现
+ * @file LobbyInstance.cc
+ * @brief 大厅分线实例 Actor 实现
  */
 
-#include "game/IGameInstance.h"
+#include "lobby/LobbyInstance.h"
 
 #include <spdlog/spdlog.h>
 
@@ -12,19 +12,19 @@
 
 #include "network/PacketWriter.h"
 
-namespace mcpe::game {
+namespace mcpe::lobby {
 
-IGameInstance::IGameInstance(
+LobbyInstance::LobbyInstance(
     std::string instance_id,
-    InstanceType type,
     std::shared_ptr<world::World> world,
     size_t max_players,
+    double fall_reset_y,
     PacketUnicastFn unicast_fn
 )
     : instance_id_(std::move(instance_id)),
-      type_(type),
       world_(std::move(world)),
       max_players_(max_players),
+      fall_reset_y_(fall_reset_y),
       event_queue_(std::make_shared<world::EventQueue>()),
       entity_manager_(std::make_shared<world::EntityManager>()),
       unicast_fn_(std::move(unicast_fn)) {
@@ -58,7 +58,21 @@ IGameInstance::IGameInstance(
   );
 
   ticker_->setMoveFilterCallback([this](uint64_t sid, world::PlayerMoveEvent& move_ev) {
-    onPlayerMoved(sid, move_ev);
+    if (!move_ev.has_position) {
+      return;
+    }
+    // 虚空跌落保护 (Fall Reset)
+    if (move_ev.position.y < fall_reset_y_) {
+      const Vector3d reset_pos = world_->spawnPoint();
+      const Rotation reset_rot = world_->spawnRotation();
+      if (teleport_fn_) {
+        teleport_fn_(sid, reset_pos, reset_rot);
+      }
+      move_ev.position = reset_pos;
+      move_ev.rotation = reset_rot;
+      move_ev.has_rotation = true;
+      move_ev.on_ground = true;
+    }
   });
 
   ticker_->setJoinLeaveCallback([this](uint64_t sid, std::string_view name, bool joined) {
@@ -67,28 +81,38 @@ IGameInstance::IGameInstance(
         std::lock_guard<std::mutex> lock(slot_mutex_);
         reserved_sessions_.insert(sid);
       }
-      onPlayerJoined(sid, name);
+      spdlog::info(
+          "[LobbyInstance:{}] Player '{}' (SID {}) entered lobby shard ({}/{})",
+          instance_id_,
+          name,
+          sid,
+          playerCount(),
+          maxPlayers()
+      );
     } else {
       releaseSlot(sid);
-      onPlayerLeft(sid, name);
+      spdlog::info(
+          "[LobbyInstance:{}] Player '{}' (SID {}) left lobby shard ({}/{})",
+          instance_id_,
+          name,
+          sid,
+          playerCount(),
+          maxPlayers()
+      );
     }
-  });
-
-  ticker_->setTickHookCallback([this]() {
-    onTick();
   });
 }
 
-IGameInstance::~IGameInstance() {
+LobbyInstance::~LobbyInstance() {
   stop();
 }
 
 void
-IGameInstance::start() {
+LobbyInstance::start() {
   if (ticker_) {
     ticker_->start();
     spdlog::info(
-        "[IGameInstance] Started 20 TPS actor instance '{}' (max_players={})",
+        "[LobbyInstance] Started 20 TPS actor instance '{}' (max_players={})",
         instance_id_,
         maxPlayers()
     );
@@ -96,21 +120,21 @@ IGameInstance::start() {
 }
 
 void
-IGameInstance::stop() {
+LobbyInstance::stop() {
   if (ticker_) {
     ticker_->stop();
   }
 }
 
 void
-IGameInstance::stepTick() {
+LobbyInstance::stepTick() {
   if (ticker_) {
     ticker_->tick();
   }
 }
 
 bool
-IGameInstance::tryReserveSlot(uint64_t session_id) {
+LobbyInstance::tryReserveSlot(uint64_t session_id) {
   std::lock_guard<std::mutex> lock(slot_mutex_);
   if (reserved_sessions_.contains(session_id)) {
     return true;
@@ -123,32 +147,32 @@ IGameInstance::tryReserveSlot(uint64_t session_id) {
 }
 
 void
-IGameInstance::releaseSlot(uint64_t session_id) {
+LobbyInstance::releaseSlot(uint64_t session_id) {
   std::lock_guard<std::mutex> lock(slot_mutex_);
   reserved_sessions_.erase(session_id);
 }
 
 bool
-IGameInstance::hasReservedSlot(uint64_t session_id) const {
+LobbyInstance::hasReservedSlot(uint64_t session_id) const {
   std::lock_guard<std::mutex> lock(slot_mutex_);
   return reserved_sessions_.contains(session_id);
 }
 
 size_t
-IGameInstance::playerCount() const noexcept {
+LobbyInstance::playerCount() const noexcept {
   std::lock_guard<std::mutex> lock(slot_mutex_);
   return reserved_sessions_.size();
 }
 
 void
-IGameInstance::pushEvent(world::WorldEvent event) {
+LobbyInstance::pushEvent(world::WorldEvent event) {
   if (event_queue_) {
     event_queue_->push(std::move(event));
   }
 }
 
 void
-IGameInstance::broadcastInInstance(const ByteBuffer& packet, uint64_t except_sid) {
+LobbyInstance::broadcastInInstance(const ByteBuffer& packet, uint64_t except_sid) {
   if (!unicast_fn_) {
     return;
   }
@@ -166,7 +190,7 @@ IGameInstance::broadcastInInstance(const ByteBuffer& packet, uint64_t except_sid
 }
 
 void
-IGameInstance::sendSystemMessage(uint64_t session_id, std::string_view text) {
+LobbyInstance::sendSystemMessage(uint64_t session_id, std::string_view text) {
   if (!unicast_fn_) {
     return;
   }
@@ -175,7 +199,7 @@ IGameInstance::sendSystemMessage(uint64_t session_id, std::string_view text) {
 }
 
 void
-IGameInstance::sendActionBar(uint64_t session_id, std::string_view text) {
+LobbyInstance::sendActionBar(uint64_t session_id, std::string_view text) {
   if (!unicast_fn_) {
     return;
   }
@@ -184,48 +208,12 @@ IGameInstance::sendActionBar(uint64_t session_id, std::string_view text) {
 }
 
 void
-IGameInstance::sendEntityEffect(
-    uint64_t session_id,
-    int32_t entity_id,
-    uint8_t effect_id,
-    uint8_t amplifier,
-    int32_t duration_ticks,
-    uint8_t flags
-) {
-  if (!unicast_fn_) {
-    return;
-  }
-  network::PacketBuilder builder(protocol::ClientboundPacket::EntityEffect);
-  builder.appendVarInt(entity_id);
-  builder.appendByte(effect_id);
-  builder.appendByte(amplifier);
-  builder.appendVarInt(duration_ticks);
-  builder.appendByte(flags);
-  unicast_fn_(session_id, builder.build());
-}
-
-void
-IGameInstance::sendRemoveEntityEffect(
-    uint64_t session_id,
-    int32_t entity_id,
-    uint8_t effect_id
-) {
-  if (!unicast_fn_) {
-    return;
-  }
-  network::PacketBuilder builder(protocol::ClientboundPacket::RemoveEntityEffect);
-  builder.appendVarInt(entity_id);
-  builder.appendByte(effect_id);
-  unicast_fn_(session_id, builder.build());
-}
-
-void
-IGameInstance::setChatDispatchCallback(ChatDispatchFn fn) {
+LobbyInstance::setChatDispatchCallback(ChatDispatchFn fn) {
   chat_dispatch_fn_ = std::move(fn);
 }
 
 std::string
-IGameInstance::escapeJsonText(std::string_view text) {
+LobbyInstance::escapeJsonText(std::string_view text) {
   std::string result;
   result.reserve(text.size() + 8);
   for (char c : text) {
@@ -262,11 +250,11 @@ IGameInstance::escapeJsonText(std::string_view text) {
 }
 
 ByteBuffer
-IGameInstance::buildChatPacket(std::string_view json_text, protocol::ChatPosition pos) {
+LobbyInstance::buildChatPacket(std::string_view json_text, protocol::ChatPosition pos) {
   network::PacketBuilder builder(protocol::ClientboundPacket::ChatMessage);
   builder.appendString(json_text);
   builder.appendByte(static_cast<uint8_t>(pos));
   return builder.build();
 }
 
-}  // namespace mcpe::game
+}  // namespace mcpe::lobby

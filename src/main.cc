@@ -3,7 +3,7 @@
  * @brief MCPE (Minecraft Java Edition 1.12.2 / Protocol 340) 服务端主程序入口
  *
  * 负责加载 settings.ini 与 <map>.ini 配置体系，极速装载预烘焙大厅地图镜像 (.mcpe_map)，
- * 启动多实例并发 Actor 引擎 (InstanceManager) 与 Asio 异步网络事件循环。
+ * 启动大厅多实例并发 Actor 引擎 (LobbyManager) 与 Asio 异步网络事件循环。
  */
 
 #include <spdlog/spdlog.h>
@@ -15,7 +15,7 @@
 #include <memory>
 
 #include "common/IniConfig.h"
-#include "game/InstanceManager.h"
+#include "lobby/LobbyManager.h"
 #include "network/TcpServer.h"
 #include "protocol/ChatHandler.h"
 #include "protocol/ClientManager.h"
@@ -36,7 +36,7 @@ using namespace mcpe;
 using namespace mcpe::network;
 using namespace mcpe::protocol;
 using namespace mcpe::world;
-using namespace mcpe::game;
+using namespace mcpe::lobby;
 
 int
 main() {
@@ -108,19 +108,19 @@ main() {
     }
     PlayHandler::setWorld(lobby_world);
 
-    // 3. 初始化多实例并发调度中心 (InstanceManager)
-    auto instance_manager = std::make_shared<InstanceManager>(
+    // 3. 初始化大厅多实例并发分线调度中心 (LobbyManager)
+    auto lobby_manager = std::make_shared<LobbyManager>(
         lobby_world,
         static_cast<size_t>(server_cfg.lobby_max_players),
         static_cast<size_t>(server_cfg.max_lobby_instances),
         true
     );
 
-    instance_manager->setUnicastCallback([client_manager](uint64_t sid, ByteBuffer packet) {
+    lobby_manager->setUnicastCallback([client_manager](uint64_t sid, ByteBuffer packet) {
       client_manager->sendPacketTo(sid, std::move(packet));
     });
 
-    instance_manager->setTeleportCallback(
+    lobby_manager->setTeleportCallback(
         [client_manager](uint64_t sid, const Vector3d& pos, const Rotation& rot) {
           if (auto session = client_manager->findSession(sid)) {
             session->setPosition(pos);
@@ -140,25 +140,25 @@ main() {
         }
     );
 
-    instance_manager->setWorldSwitchCallback(
-        [client_manager](uint64_t sid, const std::shared_ptr<IGameInstance>& target_inst) {
+    lobby_manager->setWorldSwitchCallback(
+        [client_manager](uint64_t sid, const std::shared_ptr<LobbyInstance>& target_lobby) {
           if (auto session = client_manager->findSession(sid)) {
-            const bool already_same = (session->currentInstanceId() == target_inst->instanceId());
-            session->setCurrentInstanceId(target_inst->instanceId());
-            session->setEventQueue(target_inst->eventQueuePtr());
+            const bool already_same = (session->currentInstanceId() == target_lobby->instanceId());
+            session->setCurrentInstanceId(target_lobby->instanceId());
+            session->setEventQueue(target_lobby->eventQueuePtr());
             if (!already_same) {
-              PlayHandler::switchPlayerWorld(session, target_inst->world(), GameMode::Adventure);
+              PlayHandler::switchPlayerWorld(session, target_lobby->world(), GameMode::Adventure);
             }
           }
         }
     );
 
-    PlayHandler::setInstanceManager(instance_manager);
+    PlayHandler::setLobbyManager(lobby_manager);
 
     // 4. 初始化聊天多播与快捷指令路由系统
     auto chat_handler = std::make_shared<ChatHandler>();
     chat_handler->setClientManager(client_manager);
-    chat_handler->setInstanceManager(instance_manager);
+    chat_handler->setLobbyManager(lobby_manager);
     chat_handler->setSettingsPath(kSettingsIniPath);
     chat_handler->setSenders(
         [client_manager](uint64_t session_id, ByteBuffer packet) {
@@ -176,7 +176,7 @@ main() {
       }
     });
 
-    instance_manager->setChatDispatchCallback(
+    lobby_manager->setChatDispatchCallback(
         [chat_handler](uint64_t sid, std::string_view name, const std::string& msg) {
           chat_handler->handleMessage(sid, name, msg);
         }
@@ -193,7 +193,7 @@ main() {
 
     server.start();
     io_context.run();
-    instance_manager->stopAll();
+    lobby_manager->stopAll();
   } catch (const std::exception& e) {
     spdlog::critical("Server fatal error: {}", e.what());
     return 1;

@@ -27,8 +27,8 @@ namespace mcpe::world {
 class EntityManager;
 }
 
-namespace mcpe::game {
-class InstanceManager;
+namespace mcpe::lobby {
+class LobbyManager;
 }
 
 namespace mcpe::protocol {
@@ -51,7 +51,7 @@ class ChatHandler {
   void setSenders(SystemMessageSender sys_sender, MulticastSender multicast_sender);
   void setClientManager(std::weak_ptr<ClientManager> client_manager);
   void setEntityManager(std::weak_ptr<world::EntityManager> entity_manager);
-  void setInstanceManager(std::weak_ptr<game::InstanceManager> instance_manager);
+  void setLobbyManager(std::weak_ptr<lobby::LobbyManager> lobby_manager);
   void setSettingsPath(std::filesystem::path settings_path);
   void setSpawnCallback(SetSpawnCallback cb);
 
@@ -103,7 +103,7 @@ class ChatHandler {
   MulticastSender multicast_sender_;
   std::weak_ptr<ClientManager> client_manager_;
   std::weak_ptr<world::EntityManager> entity_manager_;
-  std::weak_ptr<game::InstanceManager> instance_manager_;
+  std::weak_ptr<lobby::LobbyManager> lobby_manager_;
   std::filesystem::path settings_path_{"src/settings.ini"};
   SetSpawnCallback spawn_callback_;
 };

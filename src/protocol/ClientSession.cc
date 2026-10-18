@@ -9,7 +9,7 @@
 #include <atomic>
 #include <utility>
 
-#include "game/InstanceManager.h"
+#include "lobby/LobbyManager.h"
 #include "network/PacketWriter.h"
 #include "network/TcpSession.h"
 #include "protocol/ClientManager.h"
@@ -61,8 +61,8 @@ ClientSession::onPacket(
 void
 ClientSession::onDisconnected(const std::shared_ptr<network::TcpSession>& /*session*/) {
   cancelKeepAlive();
-  if (auto inst_mgr = PlayHandler::getInstanceManager()) {
-    inst_mgr->onPlayerDisconnected(session_id_, entity_id_);
+  if (auto lobby_mgr = PlayHandler::getLobbyManager()) {
+    lobby_mgr->onPlayerDisconnected(session_id_, entity_id_);
   } else if (auto q = eventQueue()) {
     world::WorldEvent ev;
     ev.session_id = session_id_;

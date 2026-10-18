@@ -10,14 +10,14 @@
 #include <string>
 #include <vector>
 
-#include "game/InstanceManager.h"
+#include "lobby/LobbyManager.h"
 #include "protocol/AuthUtils.h"
 #include "protocol/ChatHandler.h"
 #include "protocol/GameTypes.h"
 #include "world/World.h"
 
 using namespace mcpe;
-using namespace mcpe::game;
+using namespace mcpe::lobby;
 using namespace mcpe::protocol;
 using namespace mcpe::world;
 
@@ -27,7 +27,7 @@ TEST(LobbyShardingTest, AutoSpawnsNewLobbyShardWhenFullAndSharesWorldMemory) {
   shared_lobby_world->getOrCreateChunk(ChunkPos{3, 3}).setBlock(BlockPos{48, 33, 48}, BlockStates::kStone);
 
   // 设置单个大厅分线最多容纳 2 人，最多允许裂变 3 个分线，关闭后台线程使用单步确定性驱动
-  InstanceManager mgr(shared_lobby_world, /*lobby_max_players=*/2, /*max_lobby_instances=*/3, /*auto_start=*/false);
+  LobbyManager mgr(shared_lobby_world, /*lobby_max_players=*/2, /*max_lobby_instances=*/3, /*auto_start=*/false);
 
   // 初始仅存在常驻分线 lobby-1
   EXPECT_EQ(mgr.lobbyInstanceCount(), 1u);
@@ -75,10 +75,10 @@ TEST(LobbyShardingTest, InstanceIsolationForChatAndSetMaxPlayersPersistence) {
   const int32_t orig_lobby_max = ServerConfig::defaultInstance().lobby_max_players;
 
   auto world = std::make_shared<World>();
-  auto inst_mgr = std::make_shared<InstanceManager>(world, 2, 5, false);
+  auto lobby_mgr = std::make_shared<LobbyManager>(world, 2, 5, false);
 
   std::vector<std::pair<uint64_t, std::string>> received_packets;
-  inst_mgr->setUnicastCallback([&](uint64_t sid, ByteBuffer pkt) {
+  lobby_mgr->setUnicastCallback([&](uint64_t sid, ByteBuffer pkt) {
     auto len = pkt.readVarInt();
     auto pid = pkt.readVarInt();
     if (len && pid && *pid == ClientboundPacket::ChatMessage) {
@@ -90,20 +90,20 @@ TEST(LobbyShardingTest, InstanceIsolationForChatAndSetMaxPlayersPersistence) {
   });
 
   // 玩家 1, 2 在 lobby-1；玩家 3 在 lobby-2
-  auto lobby1 = inst_mgr->acquireLobbyForPlayer(1);
-  (void)inst_mgr->acquireLobbyForPlayer(2);
-  auto lobby2 = inst_mgr->acquireLobbyForPlayer(3);
+  auto lobby1 = lobby_mgr->acquireLobbyForPlayer(1);
+  (void)lobby_mgr->acquireLobbyForPlayer(2);
+  auto lobby2 = lobby_mgr->acquireLobbyForPlayer(3);
 
-  (void)inst_mgr->transferPlayer(1, 101, "Alice", AuthUtils::generateOfflineUuidBytes("Alice"), lobby1);
-  (void)inst_mgr->transferPlayer(2, 102, "Bob", AuthUtils::generateOfflineUuidBytes("Bob"), lobby1);
-  (void)inst_mgr->transferPlayer(3, 103, "Charlie", AuthUtils::generateOfflineUuidBytes("Charlie"), lobby2);
+  (void)lobby_mgr->transferPlayer(1, 101, "Alice", AuthUtils::generateOfflineUuidBytes("Alice"), lobby1);
+  (void)lobby_mgr->transferPlayer(2, 102, "Bob", AuthUtils::generateOfflineUuidBytes("Bob"), lobby1);
+  (void)lobby_mgr->transferPlayer(3, 103, "Charlie", AuthUtils::generateOfflineUuidBytes("Charlie"), lobby2);
 
   lobby1->stepTick();
   lobby2->stepTick();
   received_packets.clear();
 
   ChatHandler chat;
-  chat.setInstanceManager(inst_mgr);
+  chat.setLobbyManager(lobby_mgr);
   chat.setSettingsPath(tmp_settings);
   chat.setSenders(
       [&](uint64_t sid, ByteBuffer pkt) {
@@ -132,7 +132,7 @@ TEST(LobbyShardingTest, InstanceIsolationForChatAndSetMaxPlayersPersistence) {
   chat.handleMessage(1, "Alice", "/setmaxplayers 800 60");
   EXPECT_EQ(ServerConfig::defaultInstance().max_players, 800);
   EXPECT_EQ(ServerConfig::defaultInstance().lobby_max_players, 60);
-  EXPECT_EQ(inst_mgr->lobbyMaxPlayers(), 60u);
+  EXPECT_EQ(lobby_mgr->lobbyMaxPlayers(), 60u);
 
   ServerConfig verify_cfg;
   ASSERT_TRUE(verify_cfg.loadFromIni(tmp_settings));

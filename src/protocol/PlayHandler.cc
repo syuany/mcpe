@@ -5,7 +5,7 @@
 #include <cmath>
 #include <utility>
 
-#include "game/InstanceManager.h"
+#include "lobby/LobbyManager.h"
 #include "network/PacketWriter.h"
 #include "protocol/ChunkSerializer.h"
 #include "protocol/ClientSession.h"
@@ -20,7 +20,7 @@ namespace mcpe::protocol {
 
 namespace {
 std::shared_ptr<world::World> g_world = nullptr;
-std::shared_ptr<game::InstanceManager> g_instance_manager = nullptr;
+std::shared_ptr<lobby::LobbyManager> g_lobby_manager = nullptr;
 
 void
 streamWorldChunksAndEnvironment(
@@ -83,29 +83,29 @@ PlayHandler::getWorld() {
 }
 
 void
-PlayHandler::setInstanceManager(std::shared_ptr<game::InstanceManager> mgr) {
-  g_instance_manager = std::move(mgr);
+PlayHandler::setLobbyManager(std::shared_ptr<lobby::LobbyManager> mgr) {
+  g_lobby_manager = std::move(mgr);
 }
 
-std::shared_ptr<game::InstanceManager>
-PlayHandler::getInstanceManager() {
-  return g_instance_manager;
+std::shared_ptr<lobby::LobbyManager>
+PlayHandler::getLobbyManager() {
+  return g_lobby_manager;
 }
 
 void
 PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
   sendJoinGame(session, session->entityId());
 
-  // 若启用了多实例调度中心，自动分配未满员的大厅分线 (lobby-1, lobby-2, ...)
-  if (g_instance_manager) {
-    auto lobby = g_instance_manager->acquireLobbyForPlayer(session->sessionId());
+  // 若启用了大厅多实例分线调度中心，自动分配未满员的大厅分线 (lobby-1, lobby-2, ...)
+  if (g_lobby_manager) {
+    auto lobby = g_lobby_manager->acquireLobbyForPlayer(session->sessionId());
     if (lobby) {
       session->setCurrentInstanceId(lobby->instanceId());
       session->setEventQueue(lobby->eventQueuePtr());
       streamWorldChunksAndEnvironment(session, lobby->world());
       session->startKeepAliveTimer();
 
-      (void)g_instance_manager->transferPlayer(
+      (void)g_lobby_manager->transferPlayer(
           session->sessionId(),
           session->entityId(),
           session->username(),
@@ -535,9 +535,9 @@ PlayHandler::handlePlayerMovement(
 
   payload.retrieveAll();
 
-  // 当未启用多实例管理器（单世界兼容模式）时，在 PlayHandler 中执行大厅虚空拉回；
-  // 启用 InstanceManager 后，由各大厅实例专属的 20 TPS 物理线程钩子 (LobbyInstance) 精确判定。
-  if (!g_instance_manager) {
+  // 当未启用大厅分线管理器（单世界兼容模式）时，在 PlayHandler 中执行大厅虚空拉回；
+  // 启用 LobbyManager 后，由各大厅分线专属的 20 TPS 物理线程钩子 (LobbyInstance) 精确判定。
+  if (!g_lobby_manager) {
     const double fall_threshold = session->canFly() ? 0.0 : 20.0;
     if (move_event.has_position && move_event.position.y < fall_threshold) {
       const Vector3d reset_pos = g_world ? g_world->spawnPoint() : Vector3d{0.5, 4.0, 0.5};

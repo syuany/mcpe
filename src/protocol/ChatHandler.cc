@@ -14,7 +14,7 @@
 #include <utility>
 
 #include "common/IniConfig.h"
-#include "game/InstanceManager.h"
+#include "lobby/LobbyManager.h"
 #include "network/PacketWriter.h"
 #include "protocol/ClientManager.h"
 #include "protocol/ClientSession.h"
@@ -51,8 +51,8 @@ ChatHandler::setEntityManager(std::weak_ptr<world::EntityManager> entity_manager
 }
 
 void
-ChatHandler::setInstanceManager(std::weak_ptr<game::InstanceManager> instance_manager) {
-  instance_manager_ = std::move(instance_manager);
+ChatHandler::setLobbyManager(std::weak_ptr<lobby::LobbyManager> lobby_manager) {
+  lobby_manager_ = std::move(lobby_manager);
 }
 
 void
@@ -93,10 +93,10 @@ ChatHandler::handleMessage(
 
   auto chat_packet = buildChatPacket(json_chat, ChatPosition::ChatBox);
 
-  // 3. 若绑定了 InstanceManager，按玩家当前所在实例隔离广播；否则回退至全局广播
-  if (auto inst_mgr = instance_manager_.lock()) {
-    if (auto inst = inst_mgr->getPlayerInstance(sender_sid)) {
-      inst->broadcastInInstance(chat_packet, 0);
+  // 3. 若绑定了 LobbyManager，按玩家当前所在大厅分线隔离广播；否则回退至全局广播
+  if (auto lobby_mgr = lobby_manager_.lock()) {
+    if (auto lobby = lobby_mgr->getPlayerLobby(sender_sid)) {
+      lobby->broadcastInInstance(chat_packet, 0);
       return;
     }
   }
@@ -156,13 +156,13 @@ ChatHandler::handleCommand(uint64_t sender_sid, const std::string& cmd_line) {
 
 void
 ChatHandler::handleLobbiesCommand(uint64_t sender_sid) {
-  auto inst_mgr = instance_manager_.lock();
-  if (!inst_mgr) {
+  auto lobby_mgr = lobby_manager_.lock();
+  if (!lobby_mgr) {
     sendSystemMessage(sender_sid, "§e[大厅分线] 当前为单实例模式: lobby-1");
     return;
   }
 
-  const auto lobbies = inst_mgr->getLobbies();
+  const auto lobbies = lobby_mgr->getLobbies();
   std::ostringstream oss;
   oss << "§e[大厅分线列表] 共 " << lobbies.size() << " 条分线: ";
   for (size_t i = 0; i < lobbies.size(); ++i) {
@@ -184,9 +184,9 @@ ChatHandler::handleJoinCommand(uint64_t sender_sid, std::string_view shard_arg) 
 
 void
 ChatHandler::handleLobbyCommand(uint64_t sender_sid, std::string_view shard_arg) {
-  auto inst_mgr = instance_manager_.lock();
+  auto lobby_mgr = lobby_manager_.lock();
   auto mgr = client_manager_.lock();
-  if (!inst_mgr || !mgr) {
+  if (!lobby_mgr || !mgr) {
     sendSystemMessage(sender_sid, "§a[系统] 您已经在主大厅中！输入 /spawn 可传送至大厅出生点。");
     return;
   }
@@ -197,14 +197,14 @@ ChatHandler::handleLobbyCommand(uint64_t sender_sid, std::string_view shard_arg)
     return;
   }
 
-  std::shared_ptr<game::IGameInstance> target_lobby;
+  std::shared_ptr<lobby::LobbyInstance> target_lobby;
   if (!shard_arg.empty()) {
     std::string target_id = std::string(shard_arg);
     if (!target_id.starts_with("lobby-")) {
       target_id = "lobby-" + target_id;
     }
-    target_lobby = inst_mgr->findInstance(target_id);
-    if (!target_lobby || target_lobby->type() != game::InstanceType::Lobby) {
+    target_lobby = lobby_mgr->findLobby(target_id);
+    if (!target_lobby) {
       sendSystemMessage(
           sender_sid,
           std::format("§c[错误] 大厅分线 '{}' 不存在！输入 /lobbies 查看活跃分线。", target_id)
@@ -222,16 +222,17 @@ ChatHandler::handleLobbyCommand(uint64_t sender_sid, std::string_view shard_arg)
       return;
     }
   } else {
-    auto cur_inst = inst_mgr->getPlayerInstance(sender_sid);
-    if (!cur_inst || cur_inst->type() == game::InstanceType::Lobby) {
-      sendSystemMessage(sender_sid, "§a[系统] 您已经在主大厅中！输入 /spawn 可传送至大厅出生点。");
-      return;
-    }
-    target_lobby = inst_mgr->acquireLobbyForPlayer(sender_sid);
+    auto cur_lobby = lobby_mgr->getPlayerLobby(sender_sid);
+    sendSystemMessage(
+        sender_sid,
+        std::format("§a[系统] 您当前处于 {} 分线！输入 /lobbies 查看所有分线。",
+                    cur_lobby ? cur_lobby->instanceId() : "主大厅")
+    );
+    return;
   }
 
   if (target_lobby &&
-      inst_mgr->transferPlayer(
+      lobby_mgr->transferPlayer(
           sender_sid,
           session->entityId(),
           session->username(),
@@ -290,8 +291,8 @@ ChatHandler::handleSetMaxPlayersCommand(uint64_t sender_sid, std::string_view ar
         std::from_chars(second_tok.data(), second_tok.data() + second_tok.size(), lobby_max);
     if (ec2 == std::errc{} && lobby_max > 0) {
       cfg.lobby_max_players = lobby_max;
-      if (auto inst_mgr = instance_manager_.lock()) {
-        inst_mgr->setLobbyMaxPlayers(static_cast<size_t>(lobby_max));
+      if (auto lobby_mgr = lobby_manager_.lock()) {
+        lobby_mgr->setLobbyMaxPlayers(static_cast<size_t>(lobby_max));
       }
     }
   }
@@ -325,15 +326,15 @@ ChatHandler::handleSetSpawnCommand(uint64_t sender_sid) {
   Vector3d pos = session->position();
   Rotation rot = session->rotation();
 
-  if (auto inst_mgr = instance_manager_.lock()) {
-    if (auto inst = inst_mgr->getPlayerInstance(sender_sid)) {
-      if (const auto* player_ent = inst->entityManager().getPlayer(sender_sid)) {
+  if (auto lobby_mgr = lobby_manager_.lock()) {
+    if (auto lobby = lobby_mgr->getPlayerLobby(sender_sid)) {
+      if (const auto* player_ent = lobby->entityManager().getPlayer(sender_sid)) {
         pos = player_ent->position;
         rot = player_ent->rotation;
       }
-      inst->worldPtr()->setSpawnPoint(pos);
-      inst->worldPtr()->setSpawnRotation(rot);
-      inst->entityManager().setDefaultSpawn(pos, rot);
+      lobby->worldPtr()->setSpawnPoint(pos);
+      lobby->worldPtr()->setSpawnRotation(rot);
+      lobby->entityManager().setDefaultSpawn(pos, rot);
     }
   } else if (auto em = entity_manager_.lock()) {
     if (const auto* player_ent = em->getPlayer(sender_sid)) {
@@ -388,10 +389,10 @@ ChatHandler::handleSpawnCommand(uint64_t sender_sid) {
 
   std::shared_ptr<world::World> world = PlayHandler::getWorld();
   std::shared_ptr<world::EntityManager> em = entity_manager_.lock();
-  if (auto inst_mgr = instance_manager_.lock()) {
-    if (auto inst = inst_mgr->getPlayerInstance(sender_sid)) {
-      world = inst->worldPtr();
-      em = inst->entityManagerPtr();
+  if (auto lobby_mgr = lobby_manager_.lock()) {
+    if (auto lobby = lobby_mgr->getPlayerLobby(sender_sid)) {
+      world = lobby->worldPtr();
+      em = lobby->entityManagerPtr();
     }
   }
 
@@ -483,12 +484,12 @@ ChatHandler::sendSystemMessage(uint64_t session_id, std::string_view message) {
 
 std::string
 ChatHandler::escapeJson(std::string_view text) {
-  return game::IGameInstance::escapeJsonText(text);
+  return lobby::LobbyInstance::escapeJsonText(text);
 }
 
 ByteBuffer
 ChatHandler::buildChatPacket(std::string_view json_text, ChatPosition pos) {
-  return game::IGameInstance::buildChatPacket(json_text, pos);
+  return lobby::LobbyInstance::buildChatPacket(json_text, pos);
 }
 
 bool

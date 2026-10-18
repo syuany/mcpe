@@ -73,8 +73,8 @@
 ### [x] Sprint 4: 双层 INI 配置体系与多实例大厅并发分线引擎 —— 【已完成】
 * **核心交付物**：
   * **双层 INI 配置持久化（`IniConfig`）**：`src/settings.ini` 管理全局网络与分线配额（支持管理员 `/setmaxplayers` 实时写回），`assets/maps/<map>.ini` 管理出生点与跌落拉回高度（支持 `/setspawn` 实时写回）。
-  * **多实例并发 Actor 引擎（`src/game/`）**：`IGameInstance` 抽象玩法空间，封装独立 `EventQueue` + `EntityManager` + `WorldTicker`（20 TPS 专属线程），静态地形 `World` 全局只读共享，单分线增量内存开销 $<16\text{KB}$。
-  * **大厅弹性分线与全服满员拦截（`InstanceManager` & `LoginHandler`）**：全服超限在 `LoginHandler` 下发 `0x00 Disconnect`；单大厅满员自动裂变 `lobby-2..N` 分线，支持跨分线原子切换（`/lobby [id]` 与 `/lobbies`）。
+  * **多实例并发 Actor 引擎（`src/lobby/`）**：`LobbyInstance` 封装单个大厅分线的独立 `EventQueue` + `EntityManager` + `WorldTicker`（20 TPS 专属线程），静态地形 `World` 全局只读共享，单分线增量内存开销 $<16\text{KB}$。
+  * **大厅弹性分线与全服满员拦截（`LobbyManager` & `LoginHandler`）**：全服超限在 `LoginHandler` 下发 `0x00 Disconnect`；单大厅满员自动裂变 `lobby-2..N` 分线，支持跨分线原子切换（`/lobby [id]` 与 `/lobbies`）。
   * **业务架构边界聚焦（跑酷解耦归档）**：因跑酷玩法深度依赖原版红石、压力板、活塞等物理机制，违背微服务极致轻量定位，已完全解耦并归档至 `archive/parkour/`，主工程全量聚焦高并发集群大厅与跨服路由网关。
 
 ---

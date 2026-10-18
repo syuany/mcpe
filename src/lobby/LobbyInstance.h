@@ -1,17 +1,16 @@
 /**
- * @file IGameInstance.h
- * @brief 游戏空间实例抽象基类（Game 玩法与实例调度层）
+ * @file LobbyInstance.h
+ * @brief 大厅分线实例 Actor（Lobby 微服务引擎核心空间层）
  *
- * 核心架构设计（对齐 Cuberite cWorld 与商业群组服 Actor 实例模型）：
+ * 核心架构定位：
  * 1. 静态地形共享：持有 std::shared_ptr<world::World>，多条大厅分线共享同一份只读区块内存；
- * 2. 动态状态隔离：每个实例独占一套 EventQueue + EntityManager (含 SpatialGrid) + WorldTicker (20 TPS 线程)；
- * 3. 原子席位预留：提供 tryReserveSlot / releaseSlot 保证高并发瞬时连入时的分线满员判定 100% 精确无竞态；
- * 4. 插件式扩展钩子：定义 Waiting -> Countdown -> Playing -> Ended 状态机与虚函数钩子，
- *    供 LobbyInstance 及未来新小游戏零侵入继承扩展。
+ * 2. 动态状态隔离：每个分线独占独立的 EventQueue + EntityManager (含 SpatialGrid) + WorldTicker (20 TPS 线程)；
+ * 3. 原子席位管理：提供 tryReserveSlot / releaseSlot 保证高并发连入时分线满员判定精确无竞态；
+ * 4. 空间与安全保障：在 20 TPS 物理节拍中执行虚空跌落拉回（Fall Reset）与九宫格 AOI 视界广播。
  */
 
-#ifndef MCPE_GAME_I_GAME_INSTANCE_H
-#define MCPE_GAME_I_GAME_INSTANCE_H
+#ifndef MCPE_LOBBY_LOBBY_INSTANCE_H
+#define MCPE_LOBBY_LOBBY_INSTANCE_H
 
 #include <atomic>
 #include <cstdint>
@@ -30,52 +29,33 @@
 #include "world/World.h"
 #include "world/WorldTicker.h"
 
-namespace mcpe::game {
+namespace mcpe::lobby {
 
-/**
- * @brief 通用房间/实例生命周期状态枚举
- */
-enum class InstanceState : uint8_t {
-  Waiting = 0,    // 等待玩家加入
-  Countdown = 1,  // 开局倒计时
-  Playing = 2,    // 正在进行中 (大厅常驻此状态)
-  Ended = 3       // 结算与回收中
-};
-
-/**
- * @brief 实例玩法类型枚举
- */
-enum class InstanceType : uint8_t {
-  Lobby = 0,
-  CustomMinigame = 1
-};
-
-class IGameInstance {
+class LobbyInstance final {
  public:
   using PacketUnicastFn = std::function<void(uint64_t session_id, ByteBuffer packet)>;
   using TeleportPlayerFn =
       std::function<void(uint64_t session_id, const Vector3d& pos, const Rotation& rot)>;
-  using ReturnToLobbyFn = std::function<void(uint64_t session_id)>;
   using ChatDispatchFn = std::function<
       void(uint64_t session_id, std::string_view sender_name, const std::string& msg)>;
 
-  IGameInstance(
+  LobbyInstance(
       std::string instance_id,
-      InstanceType type,
       std::shared_ptr<world::World> world,
       size_t max_players,
-      PacketUnicastFn unicast_fn
+      double fall_reset_y = 20.0,
+      PacketUnicastFn unicast_fn = nullptr
   );
 
-  virtual ~IGameInstance();
+  ~LobbyInstance();
 
-  IGameInstance(const IGameInstance&) = delete;
-  IGameInstance& operator=(const IGameInstance&) = delete;
+  LobbyInstance(const LobbyInstance&) = delete;
+  LobbyInstance& operator=(const LobbyInstance&) = delete;
 
-  /// 启动当前实例专属的 20 TPS 物理线程
+  /// 启动当前大厅分线专属的 20 TPS 物理线程
   void start();
 
-  /// 停止当前实例专属的 20 TPS 物理线程
+  /// 停止当前大厅分线专属的 20 TPS 物理线程
   void stop();
 
   /// 单步执行一次物理 Tick（供确定性单元测试驱动）
@@ -87,13 +67,13 @@ class IGameInstance {
   /// 释放玩家席位
   void releaseSlot(uint64_t session_id);
 
-  /// 检查指定会话是否已在本实例中预留席位
+  /// 检查指定会话是否已在本分线中预留席位
   [[nodiscard]] bool hasReservedSlot(uint64_t session_id) const;
 
-  /// 供网络线程或调度器推入事件至本实例的 MPSC 队列
+  /// 供网络线程或调度器推入事件至本分线的 MPSC 队列
   void pushEvent(world::WorldEvent event);
 
-  /// 向当前实例内的所有在线玩家零拷贝广播数据包（基于 ByteBuffer::retainedSlice）
+  /// 向当前大厅分线内的所有在线玩家零拷贝广播数据包（基于 ByteBuffer::retainedSlice）
   void broadcastInInstance(const ByteBuffer& packet, uint64_t except_sid = 0);
 
   /// 向指定玩家单播系统提示消息 (Position = SystemMessage)
@@ -102,29 +82,7 @@ class IGameInstance {
   /// 向指定玩家单播快捷栏上方动态提示 (Position = ActionBar)
   void sendActionBar(uint64_t session_id, std::string_view text);
 
-  /// 向指定玩家单播状态效果包 (0x4E Entity Effect)
-  void sendEntityEffect(
-      uint64_t session_id,
-      int32_t entity_id,
-      uint8_t effect_id,
-      uint8_t amplifier,
-      int32_t duration_ticks,
-      uint8_t flags = 0x00
-  );
-
-  /// 向指定玩家单播移除状态效果包 (0x4F Remove Entity Effect)
-  void sendRemoveEntityEffect(
-      uint64_t session_id,
-      int32_t entity_id,
-      uint8_t effect_id
-  );
-
   [[nodiscard]] const std::string& instanceId() const noexcept { return instance_id_; }
-  [[nodiscard]] InstanceType type() const noexcept { return type_; }
-  [[nodiscard]] InstanceState state() const noexcept {
-    return state_.load(std::memory_order_acquire);
-  }
-  void setState(InstanceState s) noexcept { state_.store(s, std::memory_order_release); }
 
   [[nodiscard]] const world::World& world() const noexcept { return *world_; }
   [[nodiscard]] std::shared_ptr<world::World> worldPtr() const noexcept { return world_; }
@@ -140,10 +98,10 @@ class IGameInstance {
     return *entity_manager_;
   }
 
-  /// 当前已分配进本实例的玩家人数
+  /// 当前已分配进本分线的玩家人数
   [[nodiscard]] size_t playerCount() const noexcept;
 
-  /// 本实例允许的最大玩家人数
+  /// 本分线允许的最大玩家人数
   [[nodiscard]] size_t maxPlayers() const noexcept {
     return max_players_.load(std::memory_order_acquire);
   }
@@ -153,28 +111,20 @@ class IGameInstance {
 
   [[nodiscard]] bool isFull() const noexcept { return playerCount() >= maxPlayers(); }
 
+  [[nodiscard]] double fallResetY() const noexcept { return fall_reset_y_; }
+  void setFallResetY(double y) noexcept { fall_reset_y_ = y; }
+
   void setTeleportCallback(TeleportPlayerFn fn) { teleport_fn_ = std::move(fn); }
-  void setReturnToLobbyCallback(ReturnToLobbyFn fn) { return_lobby_fn_ = std::move(fn); }
   void setChatDispatchCallback(ChatDispatchFn fn);
 
   static std::string escapeJsonText(std::string_view text);
   static ByteBuffer buildChatPacket(std::string_view json_text, protocol::ChatPosition pos);
 
- protected:
-  // 供子类 (LobbyInstance / 自定义玩法) 重写的 20 TPS 单线程安全钩子
-  virtual void onPlayerJoined(uint64_t /*session_id*/, std::string_view /*username*/) {}
-  virtual void onPlayerLeft(uint64_t /*session_id*/, std::string_view /*username*/) {}
-  virtual void onPlayerMoved(
-      uint64_t session_id,
-      world::PlayerMoveEvent& move_event
-  ) = 0;
-  virtual void onTick() {}
-
+ private:
   std::string instance_id_;
-  InstanceType type_;
   std::shared_ptr<world::World> world_;
   std::atomic<size_t> max_players_{50};
-  std::atomic<InstanceState> state_{InstanceState::Playing};
+  double fall_reset_y_{20.0};
 
   mutable std::mutex slot_mutex_;
   std::unordered_set<uint64_t> reserved_sessions_;
@@ -185,10 +135,9 @@ class IGameInstance {
 
   PacketUnicastFn unicast_fn_;
   TeleportPlayerFn teleport_fn_;
-  ReturnToLobbyFn return_lobby_fn_;
   ChatDispatchFn chat_dispatch_fn_;
 };
 
-}  // namespace mcpe::game
+}  // namespace mcpe::lobby
 
-#endif  // MCPE_GAME_I_GAME_INSTANCE_H
+#endif  // MCPE_LOBBY_LOBBY_INSTANCE_H

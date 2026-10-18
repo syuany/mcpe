@@ -12,8 +12,8 @@ namespace mcpe::world {
 class World;
 }
 
-namespace mcpe::game {
-class InstanceManager;
+namespace mcpe::lobby {
+class LobbyManager;
 }
 
 namespace mcpe::protocol {
@@ -26,9 +26,9 @@ class PlayHandler {
   static void setWorld(std::shared_ptr<world::World> world);
   static std::shared_ptr<world::World> getWorld();
 
-  /** @brief 绑定多实例并发调度中心（Sprint 4 多大厅分线与小游戏引擎） */
-  static void setInstanceManager(std::shared_ptr<game::InstanceManager> mgr);
-  static std::shared_ptr<game::InstanceManager> getInstanceManager();
+  /** @brief 绑定大厅动态分线并发调度中心 (LobbySharding) */
+  static void setLobbyManager(std::shared_ptr<lobby::LobbyManager> mgr);
+  static std::shared_ptr<lobby::LobbyManager> getLobbyManager();
 
   /** @brief 玩家鉴权通过后调用：分配大厅分线、下发 Join Game、Chunk 流与出生点并启动心跳 */
   static void onPlayerJoin(const std::shared_ptr<ClientSession>& session);

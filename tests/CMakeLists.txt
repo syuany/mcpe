@@ -21,18 +21,18 @@ mcpe_add_test(test_framing          test_framing.cc          mcpe_network mcpe_c
 mcpe_add_test(test_packet_writer    test_packet_writer.cc    mcpe_network mcpe_common)
 
 # 3. World 领域与空间 AOI 层测试
-mcpe_add_test(test_chunk            test_chunk.cc            mcpe_protocol mcpe_game mcpe_world mcpe_network mcpe_common)
+mcpe_add_test(test_chunk            test_chunk.cc            mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
 mcpe_add_test(test_event_queue      test_event_queue.cc      mcpe_world mcpe_common)
 mcpe_add_test(test_world            test_world.cc            mcpe_world mcpe_common)
 mcpe_add_test(test_spatial_grid     test_spatial_grid.cc     mcpe_world mcpe_common)
 
-# 4. Game 多实例大厅弹性分线测试 (Sprint 4)
-mcpe_add_test(test_lobby_sharding   test_lobby_sharding.cc   mcpe_protocol mcpe_game mcpe_world mcpe_network mcpe_common)
+# 4. Lobby 大厅弹性分线测试 (Sprint 4)
+mcpe_add_test(test_lobby_sharding   test_lobby_sharding.cc   mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
 
 # 5. Protocol 协议与多玩家联机测试
 mcpe_add_test(test_uuid             test_uuid.cc             mcpe_protocol)
-mcpe_add_test(test_packet_router    test_packet_router.cc    mcpe_protocol mcpe_game mcpe_world mcpe_network mcpe_common)
-mcpe_add_test(test_sprint3          test_sprint3.cc          mcpe_protocol mcpe_game mcpe_world mcpe_network mcpe_common)
+mcpe_add_test(test_packet_router    test_packet_router.cc    mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
+mcpe_add_test(test_sprint3          test_sprint3.cc          mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
 
 # 6. Tools 离线地图解析与归档测试
 mcpe_add_test(test_zip_archive      test_zip_archive.cc      mcpe_map_io mcpe_common ZLIB::ZLIB)

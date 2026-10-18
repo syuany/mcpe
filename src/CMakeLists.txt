@@ -40,16 +40,15 @@ target_include_directories(mcpe_world PUBLIC
 )
 target_link_libraries(mcpe_world PUBLIC mcpe_common)
 
-# 4. Game 多实例调度与大厅分线层 (LobbySharding)
-add_library(mcpe_game STATIC
-    game/IGameInstance.cc
-    game/InstanceManager.cc
-    game/lobby/LobbyInstance.cc
+# 4. Lobby 大厅分线并发调度层 (LobbySharding)
+add_library(mcpe_lobby STATIC
+    lobby/LobbyInstance.cc
+    lobby/LobbyManager.cc
 )
-target_include_directories(mcpe_game PUBLIC
+target_include_directories(mcpe_lobby PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
-target_link_libraries(mcpe_game PUBLIC mcpe_world mcpe_network mcpe_common)
+target_link_libraries(mcpe_lobby PUBLIC mcpe_world mcpe_network mcpe_common)
 
 # 5. Protocol 协议状态机与会话路由层
 add_library(mcpe_protocol STATIC
@@ -67,8 +66,8 @@ add_library(mcpe_protocol STATIC
 target_include_directories(mcpe_protocol PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
-target_link_libraries(mcpe_protocol PUBLIC mcpe_game mcpe_world mcpe_network mcpe_common)
+target_link_libraries(mcpe_protocol PUBLIC mcpe_lobby mcpe_world mcpe_network mcpe_common)
 
 # 6. 线上服务端主程序 (bin/server)
 add_executable(server main.cc)
-target_link_libraries(server PRIVATE mcpe_protocol mcpe_game mcpe_world mcpe_network mcpe_common)
+target_link_libraries(server PRIVATE mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
