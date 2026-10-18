@@ -1,28 +1,21 @@
 # Sprint 4 保姆级实战开发教程：双层 INI 配置体系、多实例并发 Actor 引擎与大厅动态分线 (INI Config, Multi-Instance Actor Engine & Lobby Sharding)
 
-> [!IMPORTANT]
-> **架构演进与跑酷模块归档说明 (Archival Notice)**:
-> 经过实际业务需求推演，跑酷玩法深度依赖原版 Minecraft 复杂的红石电路模拟、压力板感应、活塞机关、踩踏方块物理掉落与碰撞箱模拟。如果继续在本项目中补齐这些原版物理机制，将背离本项目“常驻内存 $\le 30\text{MB}$，冷启动 $\le 50\text{ms}$ 的高并发轻量级集群大厅与中转网关 (Lobby/Limbo)”这一核心定位。
-> 因此，项目于 2026 年重构中将所有跑酷相关实现代码与资源完整解耦并归档至 [`archive/parkour/`](../../archive/parkour/)，主工程全量聚焦于**双层 INI 配置体系、多实例并发 Actor 引擎、大厅动态弹性分线（`lobby-1..N`）与跨分线原子切换**。
-> 本教程保留多实例 Actor 引擎与分线设计的完整讲解，并将原跑酷小游戏章节作为“如何基于 `IGameInstance` 扩展自定义子玩法”的归档案例与设计沉淀进行学习参考。
-
 > **目标协议**：**Minecraft Java Edition 1.12.2（Protocol Version: 340）**  
 > **前置里程碑**：Sprint 0~3（网络、登录、20 TPS 单世界联机）与 **Sprint 3.5（离线地图烘焙 `.mcpe_map`、`SpatialGrid` 九宫格 AOI、商业大厅机制、C++20 协程化与 `retainedSlice()` 零拷贝多播）** 已全部验收通过。  
-> **本阶段核心目标**：将服务端从“单一大厅实例”全面升级为“**支持动态弹性分线的多实例大厅并发引擎**”！引入对齐 Cuberite 的 **`settings.ini` + `assets/maps/<map>.ini` 双层 INI 配置持久化体系**；在 `LoginHandler` 落地**全服总人数硬上限拦截**与**大厅满员自动裂变分线（`lobby-1`, `lobby-2`... 共享只读 `World` 区块内存）**；开辟清晰的 `src/lobby/` 玩法与实例调度层（`IGameInstance`、`LobbyManager`、`src/lobby/`），采用**每实例独立 20 TPS Actor 线程模型**实现多大厅分线并发互不阻塞；打通 **`0x35 Respawn` 单连接跨分线无缝原子切换**！  
-> **教学设计原则**：**透彻讲清“是什么、为什么、怎么做”**。严格遵守架构分层红线与开闭原则（OCP），让未来新增其他自定义空间实例只需在 `src/lobby/` 下扩展 `IGameInstance` 子类即可即插即用。  
-> **预估工期**：4 ~ 5 天 | **核心任务数**：6 个微任务（TASK-4.1 ~ TASK-4.6）
+> **本阶段核心目标**：将服务端从“单一大厅实例”全面升级为“**支持动态弹性分线的多实例大厅并发引擎**”！引入对齐 Cuberite 的 **`settings.ini` + `assets/maps/<map>.ini` 双层 INI 配置持久化体系**；在 `LoginHandler` 落地**全服总人数硬上限拦截**与**大厅满员自动裂变分线（`lobby-1`, `lobby-2`... 共享只读 `World` 区块内存）**；开辟清晰的 `src/lobby/` 大厅实例调度层（`LobbyInstance`、`LobbyManager`），采用**每实例独立 20 TPS Actor 线程模型**实现多大厅分线并发互不阻塞；打通 **`0x35 Respawn` 单连接跨分线无缝原子切换**！  
+> **教学设计原则**：**透彻讲清“是什么、为什么、怎么做”**。严格遵守架构分层红线与单一职责原则（SRP），将大厅分线 Actor 与调度逻辑彻底内聚在 `src/lobby/`。  
+> **预估工期**：3 ~ 4 天 | **核心任务数**：5 个微任务（TASK-4.1 ~ TASK-4.5）
 
 ## 一、 架构设计决策树总览（Grill-Me 共识基线）
 
-在动手编写代码前，我们先锁定本阶段经过严密推演确立的 **5 大核心架构决策**：
+在动手编写代码前，我们先锁定本阶段经过严密推演确立的 **4 大核心架构决策**：
 
 | 决策维度 | 最终选定方案 | 核心架构收益与设计理由 |
 | :--- | :--- | :--- |
 | **1. 并发与线程模型** | **Per-Instance Actor 模型（对齐 Cuberite `cWorld`）** | 只读地形 `std::shared_ptr<const World>`（`.mcpe_map`）全局共享一份内存；每个大厅分线实例各自拥有独立的 `EventQueue` + `EntityManager`（含 `SpatialGrid`）+ `WorldTicker`（20 TPS 专属线程），实例间 100% 物理隔离、零锁争用。 |
 | **2. 人数上限与大厅分线** | **全服硬上限拦截 + 动态弹性大厅分线 (`lobby-1..N`)** | `settings.ini` 配置 `server_max_players`（超限在 `LoginHandler` 发 `0x00 Disconnect` 拒绝连入）与 `lobby_max_players`（`lobby-1` 满员自动新建 `lobby-2` 实例并共享只读地图，支持 `/lobby [id]` 手动切线）。 |
-| **3. 代码目录与扩展边界** | **`src/world/`（纯空间底座）+ `src/lobby/`（按玩法分子目录）** | `src/world/` 仅保留通用区块与 AOI 底座；新增 `src/lobby/` 存放 `IGameInstance`、`LobbyManager` 及 `lobby/` 子目录。未来扩展新功能完全符合开闭原则。 |
+| **3. 代码目录与层级边界** | **`src/world/`（空间底座）+ `src/lobby/`（大厅分线调度）** | `src/world/` 仅保留通用区块与 AOI 底座；`src/lobby/` 存放 `LobbyInstance` 与 `LobbyManager`，与底层网络层完全解耦。 |
 | **4. 配置管理与持久化** | **根目录 `settings.ini` + 地图伴生 `assets/maps/<map>.ini`** | `settings.ini` 管理 `[Server]` 与 `[Lobby]` 全局/分线配额（首次启动自动生成，支持 `/setmaxplayers` 写回）；`<map>.ini` 管理单图出生点与 `fall_reset_y`（取代 `spawn.json`，支持 `/setspawn` 写回）。 |
-| **5. 业务边界与小游戏归档** | **大厅轻量微服务聚焦 + 跑酷归档至 `archive/parkour/`** | 跑酷因强依赖红石、活塞与原版物理模拟，已解耦归档至 `archive/parkour/`；引擎全量聚焦高并发、低内存的大厅分线与跨服网关。 |
 
 ## 二、 心智模型跃迁与底层原理（是什么与为什么）
 
@@ -32,7 +25,7 @@
   当服务器同时运行多个大厅分线（`lobby-1` ~ `lobby-N`）时，系统中存在多个并行的游戏空间实例。
   我们将每个实例拆解为两部分：
   1. **静态只读地形（Static Read-Only Terrain，`std::shared_ptr<const world::World>`）**：由 `.mcpe_map` 加载的区块方块数组 `ChunkSection`。由于大厅开启全局只读保护（禁止挖掘/放置破坏地图），地形在运行期是 **100% 不可变（Immutable）** 的；
-  2. **动态实例状态（Dynamic Instance State，`game::IGameInstance`）**：包含该实例内的在线玩家实体表 `EntityManager`、九宫格索引 `SpatialGrid`、跨线程事件队列 `EventQueue` 以及驱动它的 20 TPS 物理线程 `WorldTicker`。
+  2. **动态实例状态（Dynamic Instance State，`lobby::LobbyInstance`）**：包含该实例内的在线玩家实体表 `EntityManager`、九宫格索引 `SpatialGrid`、跨线程事件队列 `EventQueue` 以及驱动它的 20 TPS 物理线程 `WorldTicker`。
 * **为什么这样设计能同时兼顾 $\le 30\text{MB}$ 内存红线与高并发吞吐**：
   - **内存极致共享**：哪怕裂变出 10 个大厅分线实例，内存中依然**只有 1 份 `lobby.mcpe_map` 的 `World` 对象**！新增一个分线实例仅增加空的哈希表和队列，额外内存开销不到 **16 KB**；
   - **故障与负载绝对隔离**：`lobby-1` 的 50 名玩家同屏聊天移动，与 `lobby-2` 的玩家，运行在各自独立的 `WorldTicker` 线程上，彼此之间没有任何 `std::mutex` 锁竞争。
@@ -102,8 +95,6 @@ mcpe/
 │   │   ├── PlayHandler.h/.cc                # [升级] 增加 switchPlayerWorld (0x35) 并按会话当前实例投递事件
 │   │   └── ChatHandler.h/.cc                # [升级] 支持 /lobby [id], /lobbies, /help, /admin, /setmaxplayers, /setspawn
 │   └── main.cc                              # [升级] 加载 settings.ini，初始化 LobbyManager 并挂载大厅地图
-├── archive/
-│   └── parkour/                             # [归档] 早期跑酷小游戏实现与测试代码 (解耦归档)
 └── tests/
     ├── test_ini_config.cc                   # [新增] settings.ini 与 <map>.ini 读写往返单测
     └── test_lobby_sharding.cc               # [新增] 大厅满员自动裂变分线与全服人数上限拦截单测
@@ -500,186 +491,7 @@ bool LobbyManager::transferPlayer(
 }
 ```
 
-### TASK-4.5 (归档案例参考): 跑酷小游戏实例实现与解耦归档沉淀 (`archive/parkour/`)
-
-> [!NOTE]
-> **模块解耦与归档说明**：
-> 因跑酷玩法深度依赖原版红石、压力板与复杂物理掉落模拟，违背了轻量级微服务大厅（$\le 30\text{MB}$ 内存）的设计初衷，本项目已将其源码与资源完整归档至 [`archive/parkour/`](../../archive/parkour/)。
-> 本节完整保留原设计与代码推演，作为开发者学习“如何基于 `IGameInstance` 扩展自定义子玩法”的工业级实践案例。
-
-#### 1. 核心状态结构 (`archive/parkour/src/lobby/parkour/ParkourInstance.h`)
-```cpp
-#ifndef MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H
-#define MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H
-
-#include <chrono>
-#include <unordered_map>
-#include <vector>
-
-#include "game/IGameInstance.h"
-#include "game/parkour/ParkourMapConfig.h"
-
-namespace mcpe::lobby::parkour {
-
-struct PlayerParkourState {
-  uint64_t session_id{0};
-  std::string username;
-  Vector3d respawn_pos{};
-  Rotation respawn_rot{};
-  int32_t current_checkpoint_idx{-1};  // -1 表示起点，0..K-1 表示已激活的检查点
-  bool running{false};
-  bool finished{false};
-  std::chrono::steady_clock::time_point start_time{};
-  std::chrono::steady_clock::time_point finish_time{};
-  int64_t best_ms{0};
-};
-
-class ParkourInstance final : public IGameInstance {
- public:
-  ParkourInstance(
-      std::string instance_id,
-      std::shared_ptr<const world::World> world,
-      ParkourMapConfig map_cfg,
-      size_t max_players,
-      PacketUnicastFn unicast_fn
-  );
-
- protected:
-  void onPlayerJoined(uint64_t session_id, std::string_view username) override;
-  void onPlayerLeft(uint64_t session_id) override;
-  void onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move_event) override;
-  void onTick() override;
-
- private:
-  ParkourMapConfig cfg_;
-  uint64_t tick_counter_{0};
-  std::unordered_map<uint64_t, PlayerParkourState> runners_;
-};
-
-}  // namespace mcpe::lobby::parkour
-
-#endif  // MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H
-```
-
-#### 2. 跑酷核心判定逻辑 (`ParkourInstance.cc`)
-在 `ParkourInstance::onPlayerMoved` 与 `onTick` 中，完全在跑酷实例自己的 20 TPS 物理线程内无锁运行：
-```cpp
-void ParkourInstance::onPlayerJoined(uint64_t session_id, std::string_view username) {
-  PlayerParkourState st;
-  st.session_id = session_id;
-  st.username = std::string(username);
-  st.respawn_pos = world_->spawnPoint();
-  st.respawn_rot = world_->spawnRotation();
-  runners_[session_id] = std::move(st);
-
-  sendSystemMessage(
-      session_id,
-      std::format("§a[跑酷] 欢迎进入赛道 §e{}§a！踏入起点框自动开始计时，输入 §b/lobby §a随时返回大厅。", cfg_.map_name)
-  );
-}
-
-void ParkourInstance::onPlayerLeft(uint64_t session_id) {
-  runners_.erase(session_id);
-}
-
-void ParkourInstance::onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move_event) {
-  if (!move_event.has_position) return;
-  auto it = runners_.find(session_id);
-  if (it == runners_.end()) return;
-  auto& runner = it->second;
-
-  const Vector3d& pos = move_event.position;
-
-  // 1. 掉落熔断保护 (Fall Reset)：跌落至 fall_reset_y 以下，立即拉回最近激活的检查点或起点，计时不中断！
-  if (pos.y < cfg_.fall_reset_y) {
-    if (teleport_fn_) {
-      teleport_fn_(session_id, runner.respawn_pos, runner.respawn_rot);
-    }
-    // 闭环覆写 move_event，确保本实例 EntityManager 与 SpatialGrid 坐标同步
-    move_event.position = runner.respawn_pos;
-    move_event.rotation = runner.respawn_rot;
-    move_event.has_rotation = true;
-    move_event.on_ground = true;
-    sendActionBar(session_id, "§c[掉落复位] 已返回最近检查点，计时继续！");
-    return;
-  }
-
-  // 2. 起点 AABB 触发：踏入起点包围盒开启或重置高精度 steady_clock 计时器
-  if (!runner.running && !runner.finished && cfg_.start_box.contains(pos)) {
-    runner.running = true;
-    runner.current_checkpoint_idx = -1;
-    runner.respawn_pos = world_->spawnPoint();
-    runner.respawn_rot = world_->spawnRotation();
-    runner.start_time = std::chrono::steady_clock::now();
-    sendActionBar(session_id, "§e§l⏱ 计时开始！冲向终点！");
-    return;
-  }
-
-  if (!runner.running || runner.finished) return;
-
-  // 3. 多级检查点 (Checkpoints) AABB 触发
-  for (size_t i = 0; i < cfg_.checkpoints.size(); ++i) {
-    if (static_cast<int32_t>(i) > runner.current_checkpoint_idx &&
-        cfg_.checkpoints[i].box.contains(pos)) {
-      runner.current_checkpoint_idx = static_cast<int32_t>(i);
-      runner.respawn_pos = cfg_.checkpoints[i].respawn_pos;
-      runner.respawn_rot = cfg_.checkpoints[i].respawn_rot;
-      sendSystemMessage(
-          session_id,
-          std::format("§b[检查点] 已激活第 {} 号检查点！", i + 1)
-      );
-      break;
-    }
-  }
-
-  // 4. 终点 AABB 触发结算
-  if (cfg_.finish_box.contains(pos)) {
-    const auto now = std::chrono::steady_clock::now();
-    const int64_t elapsed_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - runner.start_time).count();
-    runner.running = false;
-    runner.finished = true;
-    runner.finish_time = now;
-
-    const std::string broadcast_msg = std::format(
-        R"({{"text":"§a[跑酷榜单] 恭喜玩家 §e{} §a通关赛道 §b[{}]§a！最终耗时: §6{:.3f} 秒§a！"}})",
-        runner.username, cfg_.map_name, elapsed_ms / 1000.0
-    );
-    network::PacketBuilder chat_builder(protocol::ClientboundPacket::ChatMessage);
-    chat_builder.appendString(broadcast_msg);
-    chat_builder.appendByte(static_cast<uint8_t>(protocol::ChatPosition::SystemMessage));
-    broadcastInInstance(chat_builder.build());
-  }
-}
-
-void ParkourInstance::onTick() {
-  ++tick_counter_;
-  const auto now = std::chrono::steady_clock::now();
-
-  for (auto& [sid, runner] : runners_) {
-    // 每 5 Ticks (250ms) 向正在奔跑的玩家刷新一次底部 ActionBar 实时毫秒计时器
-    if (runner.running && !runner.finished && (tick_counter_ % 5 == 0)) {
-      const int64_t ms =
-          std::chrono::duration_cast<std::chrono::milliseconds>(now - runner.start_time).count();
-      sendActionBar(sid, std::format("§e⏱ 当前用时: §f{:.2f}s", ms / 1000.0));
-    }
-
-    // 完赛满 3 秒后自动触发 0x35 切回可用大厅分线
-    if (runner.finished) {
-      const auto post_finish_ms =
-          std::chrono::duration_cast<std::chrono::milliseconds>(now - runner.finish_time).count();
-      if (post_finish_ms >= 3000) {
-        runner.finished = false;
-        if (return_lobby_fn_) {
-          return_lobby_fn_(sid);
-        }
-      }
-    }
-  }
-}
-```
-
-### TASK-4.6: 快捷指令路由扩展与自动化测试矩阵 (`ChatHandler` & `tests/`)
+### TASK-4.5: 快捷指令路由扩展与自动化测试矩阵 (`ChatHandler` & `tests/`)
 
 #### 1. `ChatHandler` 新增多实例与配置持久化指令
 在 `ChatHandler::handleCommand` 中对接 `LobbyManager` 与 `IniConfig`：
@@ -701,8 +513,8 @@ void ParkourInstance::onTick() {
   - **现象**：源分线是主世界（`Dimension = 0`），目标分线也是主世界（`Dimension = 0`）。若只发一个 `Dimension = 0` 的 `0x35 Respawn`，1.12.2 原版客户端会跳过部分渲染缓存清理，导致旧分线方块残留在新分线半空中。
   - **正解**：同维度切世界时，连续下发一个过渡维度包 `Respawn(Dimension = -1)` 紧接着 `Respawn(Dimension = 0)`，客户端 100% 清空旧区块与实体表。
 * **坑 3：多个实例析构时的线程安全退出顺序**
-  - **现象**：服务器关闭时，若先销毁 `ClientManager` 或 `World`，而各个 `IGameInstance` 的 `WorldTicker` 线程还在执行 `tick()`，会引发悬空引用崩溃。
-  - **正解**：在 `LobbyManager::stopAll()`（及 `IGameInstance::~IGameInstance()`）中，必须先对所有实例调用 `ticker_->stop()` 等待 `std::thread::join()` 完成，确保所有 20 TPS 物理线程彻底停机后，再销毁会话与地图资源。
+  - **现象**：服务器关闭时，若先销毁 `ClientManager` 或 `World`，而各个 `LobbyInstance` 的 `WorldTicker` 线程还在执行 `tick()`，会引发悬空引用崩溃。
+  - **正解**：在 `LobbyManager::stopAll()`（及 `LobbyInstance::~LobbyInstance()`）中，必须先对所有实例调用 `ticker_->stop()` 等待 `std::thread::join()` 完成，确保所有 20 TPS 物理线程彻底停机后，再销毁会话与地图资源。
 
 ### 5.2 核心技术选型深度对比（Trade-offs 权衡矩阵）
 
@@ -714,18 +526,18 @@ void ParkourInstance::onTick() {
 | **故障与卡顿隔离** | 单个分线计算复杂会直接拖慢主大厅所有玩家 | **100% 物理隔离**，任一分线实例负载波动对其他分线零影响 |
 | **内存与同步开销** | 零锁，但单队列争用剧烈 | 每个实例独立 `EventQueue` 分散生产者锁压力，只读共享 `World` 零额外区块内存 |
 
-#### 选型 2：未来新玩法扩展成本验证（开闭原则 OCP）
+#### 选型 2：微服务架构职责收敛（单一职责原则 SRP）
 
-当开发者想要新增自定义游戏实例时，在当前架构下需要改哪些地方？
-1. `src/network/`、`src/common/`、`src/world/`：**0 行修改**；
-2. 新建游戏子类，继承 `game::IGameInstance`，重写 `onPlayerMoved` 与 `onTick`；
-3. 在 `LobbyManager` 中注册该实例。
-真正做到了**对扩展开放，对修改关闭**！
+大厅微服务只关注分线管理、AOI 视界、聊天多播与跨服网关：
+1. `src/network/`、`src/common/`、`src/world/`：纯粹的基础设施与空间底座；
+2. `src/lobby/`：高度内聚的大厅 Actor 实例管理与调度；
+3. 原版复杂玩法（如红石、战斗、破坏、小游戏）全部由下游专用 Java/Bedrock 子服承担，通过 BungeeCord 路由无缝跨服转接。
+真正做到**小而美、高并发、毫秒冷启动**！
 
 ### 5.3 高频面试核心考点与标准作答
 
 * **Q1：你们的大厅动态分线是怎么设计的？如果一个大厅人满了怎么处理？**
-  - **作答**：我们借鉴了 Cuberite 和商业群组服的 Actor 实例隔离设计。静态的地图区块数据（`World`）从 `.mcpe_map` 加载后作为 `std::shared_ptr<const World>` 全局只读共享；而运行时的动态状态（`EventQueue`、`EntityManager`、`SpatialGrid` 和 20 TPS `WorldTicker` 线程）被封装在 `IGameInstance` 中。我们在 `settings.ini` 中配置了双层上限：全服总上限 `server_max_players` 在 `LoginHandler` 阶段做 `0x00 Disconnect` 准入保护；单大厅上限 `lobby_max_players`（如 50 人）由 `LobbyManager` 管控，当 `lobby-1` 满 50 人时自动裂变创建 `lobby-2` 实例并挂载同一个只读 `World` 指针，新建一个分线仅需不到 16KB 内存，且不同分线运行在各自独立的 20 TPS 线程上互不阻塞。
+  - **作答**：我们借鉴了 Cuberite 和商业群组服的 Actor 实例隔离设计。静态的地图区块数据（`World`）从 `.mcpe_map` 加载后作为 `std::shared_ptr<const World>` 全局只读共享；而运行时的动态状态（`EventQueue`、`EntityManager`、`SpatialGrid` 和 20 TPS `WorldTicker` 线程）被封装在 `LobbyInstance` 中。我们在 `settings.ini` 中配置了双层上限：全服总上限 `server_max_players` 在 `LoginHandler` 阶段做 `0x00 Disconnect` 准入保护；单大厅上限 `lobby_max_players`（如 50 人）由 `LobbyManager` 管控，当 `lobby-1` 满 50 人时自动裂变创建 `lobby-2` 实例并挂载同一个只读 `World` 指针，新建一个分线仅需不到 16KB 内存，且不同分线运行在各自独立的 20 TPS 线程上互不阻塞。
 * **Q2：玩家在不同大厅分线之间切换时，底层发生了什么？怎么保证多线程切换不崩溃？**
   - **作答**：整个切换在单条 TCP 连接内通过四步异步消息传递完成，没有任何跨线程直接写内存的操作：① 向原大厅实例的 MPSC `EventQueue` 投递 `PlayerLeaveEvent`，由原大厅线程安全移除实体并向原九宫格邻居广播 `0x32 DestroyEntities`；② 切换 `ClientSession` 绑定的 `current_instance_id`；③ 在协议层连续下发 `0x35 Respawn (-1 -> 0)` 清空客户端区块缓存，流式下发大厅区块与 `0x2F` 出生点传送包（刷新 `Teleport ID` 屏障过滤在途旧移动包）；④ 向目标大厅实例的 `EventQueue` 投递 `PlayerJoinEvent`，由目标大厅线程将其纳入目标九宫格 AOI 网格并同步周围实体。
 
@@ -739,7 +551,6 @@ void ParkourInstance::onTick() {
 2. **自动化单元测试矩阵（CTest 100% 通过）**：
    - `test_ini_config`：验证 `settings.ini` 与 `<map>.ini` 的读写往返及三维向量/AABB 解析；
    - `test_lobby_sharding`：设置 `lobby_max_players = 2, server_max_players = 4`，模拟第 1、2 名玩家进入 `lobby-1`，断言第 3、4 名玩家自动触发裂变分配至 `lobby-2`，第 5 名玩家在登录阶段收到 `0x00 Disconnect` 被拒；
-   - `test_parkour_instance`（已随跑酷代码归档至 `archive/parkour/tests/` 备查）。
 3. **多客户端实机联调闭环**：
    - 客户端 A 与 B 连入大厅，输入 `/lobbies` 查看各分线在线人数；
    - 输入 `/lobby 2` 后屏幕闪切约 0.2 秒无缝切入分线 2；
