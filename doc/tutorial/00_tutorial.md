@@ -211,7 +211,7 @@ mcpe/
    * 单静态二进制，无任何外部动态库依赖；
    * 输出量化压测基准文档，直接作为简历王炸亮点。
 
-* **实战独立教程**：详见 [`doc/tutorial/sprint5_cluster_gateway.md`](sprint5_cluster_gateway.md)。
+* **实战独立教程**：详见 [`doc/tutorial/sprint5_cluster_gateway.md`](sprint5_cluster_gateway.md) 与 **全链路搭建部署实战** [`doc/tutorial/bungeecord_paper_cluster_deployment_guide.md`](bungeecord_paper_cluster_deployment_guide.md)。
 
 ---
 
@@ -219,8 +219,9 @@ mcpe/
 
 1. **本地全站离线协议存档**：[`doc/reference/wiki.vg/Protocol.html`](../reference/wiki.vg/Protocol.html)
 2. **本项目协议速查表**：[`doc/protocol/protocol_340_cheatsheet.md`](../protocol/protocol_340_cheatsheet.md)
-3. **Cuberite 工业标杆对照**：[`doc/guides/cuberite_architecture_guide.md`](../guides/cuberite_architecture_guide.md)
-4. **并发与网络底层指南**：[`doc/guides/modern_cpp_concurrency_guide.md`](../guides/modern_cpp_concurrency_guide.md)
+3. **网关即插即用原理指南**：[`doc/guides/bungeecord_gateway_and_plug_and_play.md`](../guides/bungeecord_gateway_and_plug_and_play.md)
+4. **Cuberite 工业标杆对照**：[`doc/guides/cuberite_architecture_guide.md`](../guides/cuberite_architecture_guide.md)
+5. **并发与网络底层指南**：[`doc/guides/modern_cpp_concurrency_guide.md`](../guides/modern_cpp_concurrency_guide.md)
 
 ---
 
