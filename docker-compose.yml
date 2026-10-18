@@ -1,28 +1,155 @@
 version: '3.8'
 
+# ==============================================================================
+# Minecraft 分布式集群微服务一键编排 (mc-cluster)
+# 架构包含:
+#   1. MySQL 8.0 (持久化存储)
+#   2. Redis 7.0 (缓存、分布式锁、ZSET 榜单)
+#   3. EnderVault (Go 语言分布式数据代理服)
+#   4. MCPE-Lobby (C++20 异步微服务大厅)
+#   5. Paper-Parkour (Paper 1.12.2 跑酷业务子服)
+#   6. BungeeCord (统一网关入口与跨服路由)
+# ==============================================================================
+
+networks:
+  mc-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+
 services:
-  # 1. MCPE 极轻量大厅微服务引擎 (C++23 / Asio)
+  # ----------------------------------------------------------------------------
+  # 1. 基础数据存储层: MySQL 8.0
+  # ----------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: mc-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: mc_root_secret
+      MYSQL_DATABASE: mc_cluster
+      MYSQL_USER: mc_user
+      MYSQL_PASSWORD: mc_cluster_secret
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./deploy/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql_data:/var/lib/mysql
+    networks:
+      - mc-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ----------------------------------------------------------------------------
+  # 2. 高速缓存与实时榜单层: Redis 7.0
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7.0-alpine
+    container_name: mc-redis
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./deploy/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+    networks:
+      - mc-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # 3. 核心数据代理微服务: EnderVault (Golang)
+  # ----------------------------------------------------------------------------
+  ender-vault:
+    build:
+      context: ./services/ender-vault
+      dockerfile: Dockerfile
+    container_name: mc-ender-vault
+    restart: unless-stopped
+    environment:
+      MYSQL_DSN: "mc_user:mc_cluster_secret@(mysql:3306)/mc_cluster?charset=utf8mb4&parseTime=True&loc=Local"
+      REDIS_ADDR: "redis:6379"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mc-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # ----------------------------------------------------------------------------
+  # 4. 高性能自研大厅服: MCPE-Lobby (C++20 / Asio)
+  # ----------------------------------------------------------------------------
   mcpe-lobby:
     build:
-      context: .
+      context: ./services/mcpe-lobby
       dockerfile: Dockerfile
     container_name: mcpe-lobby
+    restart: unless-stopped
     ports:
       - "25566:25566"
-    restart: unless-stopped
+    networks:
+      - mc-network
     deploy:
       resources:
         limits:
           memory: 64M
+    depends_on:
+      ender-vault:
+        condition: service_healthy
 
-  # 2. 外部反向代理网关 (BungeeCord)
-  bungeecord:
-    image: itzg/bungeecord:latest
-    container_name: mcpe-bungee-proxy
+  # ----------------------------------------------------------------------------
+  # 5. 业务游戏子服: Paper 1.12.2 跑酷服
+  # ----------------------------------------------------------------------------
+  paper-parkour:
+    build:
+      context: ./game-nodes/paper-parkour
+      dockerfile: Dockerfile
+    container_name: mc-paper-parkour
+    restart: unless-stopped
     ports:
-      - "25565:25565"
-    volumes:
-      - ./deploy/bungee_config.yml:/server/config.yml
+      - "25567:25567"
+    networks:
+      - mc-network
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    depends_on:
+      ender-vault:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # 6. 集群网关与反向代理: BungeeCord
+  # ----------------------------------------------------------------------------
+  bungeecord:
+    build:
+      context: ./game-nodes/bungeecord
+      dockerfile: Dockerfile
+    container_name: mc-bungee-proxy
+    restart: unless-stopped
+    ports:
+      - "25565:25565" # 玩家直连的对外统一入口端口
     depends_on:
       - mcpe-lobby
-    restart: unless-stopped
+      - paper-parkour
+    networks:
+      - mc-network

@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package mccluster.vault.v1;
+
+option go_package = "mc-cluster/services/ender-vault/pkg/proto/v1;vaultv1";
+option java_package = "com.mccluster.vault.proto.v1";
+option java_multiple_files = true;
+
+// ==============================================================================
+// EnderVault 跨语言高性能 RPC 契约定义
+// 供 C++ (mcpe-lobby)、Java (Paper 子服)、Go (数据微服务) 共享使用
+// ==============================================================================
+
+service EnderVaultService {
+    // 获取玩家基础数据与背包
+    rpc GetPlayerData (GetPlayerDataRequest) returns (GetPlayerDataResponse);
+
+    // 写入/同步玩家跨服数据 (支持乐观锁与异步合并)
+    rpc UpdatePlayerData (UpdatePlayerDataRequest) returns (UpdatePlayerDataResponse);
+
+    // 跑酷通关成绩上报结算
+    rpc RecordParkourFinish (ParkourFinishRequest) returns (ParkourFinishResponse);
+
+    // 获取跑酷排行榜 (Redis ZSET 实时榜单)
+    rpc GetLeaderboard (LeaderboardRequest) returns (LeaderboardResponse);
+
+    // 分布式锁申请 (用于跨服资产转移、交易防重)
+    rpc AcquireLock (AcquireLockRequest) returns (AcquireLockResponse);
+
+    // 分布式锁释放
+    rpc ReleaseLock (ReleaseLockRequest) returns (ReleaseLockResponse);
+}
+
+// ------------------------------------------------------------------------------
+// 玩家数据模型
+// ------------------------------------------------------------------------------
+
+message PlayerProfile {
+    string uuid = 1;
+    string username = 2;
+    int64 coins = 3;
+    uint32 level = 4;
+    uint64 exp = 5;
+    string last_server = 6;
+}
+
+message VaultInventory {
+    string player_uuid = 1;
+    string inventory_json = 2;
+    string ender_chest_json = 3;
+    string extra_attributes_json = 4;
+    uint64 version = 5;
+}
+
+// ------------------------------------------------------------------------------
+// 请求与响应定义
+// ------------------------------------------------------------------------------
+
+message GetPlayerDataRequest {
+    string uuid = 1;
+    string username = 2; // 可选，用于首次进服自动注册
+}
+
+message GetPlayerDataResponse {
+    int32 code = 1;
+    string message = 2;
+    PlayerProfile profile = 3;
+    VaultInventory vault = 4;
+}
+
+message UpdatePlayerDataRequest {
+    string uuid = 1;
+    int64 coins_delta = 2;       // 增量变动，支持并发原子相加
+    int64 exp_delta = 3;         // 增量经验
+    string last_server = 4;
+    string inventory_json = 5;   // 背包全量更新 (可选)
+    string ender_chest_json = 6;
+    uint64 expected_version = 7; // CAS 乐观锁版本
+}
+
+message UpdatePlayerDataResponse {
+    int32 code = 1;
+    string message = 2;
+    uint64 current_version = 3;
+    PlayerProfile updated_profile = 4;
+}
+
+message ParkourFinishRequest {
+    string player_uuid = 1;
+    string player_name = 2;
+    string track_id = 3;
+    uint64 time_ms = 4;
+    uint32 checkpoints = 5;
+}
+
+message ParkourFinishResponse {
+    int32 code = 1;
+    string message = 2;
+    bool is_new_record = 3;
+    uint64 rank = 4;
+    int64 reward_coins = 5;
+}
+
+message LeaderboardRequest {
+    string track_id = 1;
+    int32 limit = 2;
+}
+
+message LeaderboardEntry {
+    uint32 rank = 1;
+    string player_uuid = 2;
+    string player_name = 3;
+    uint64 time_ms = 4;
+}
+
+message LeaderboardResponse {
+    int32 code = 1;
+    string message = 2;
+    string track_id = 3;
+    repeated LeaderboardEntry entries = 4;
+}
+
+message AcquireLockRequest {
+    string resource_key = 1;
+    string lock_owner = 2;
+    int64 ttl_seconds = 3;
+}
+
+message AcquireLockResponse {
+    bool acquired = 1;
+    string lock_token = 2;
+}
+
+message ReleaseLockRequest {
+    string resource_key = 1;
+    string lock_token = 2;
+}
+
+message ReleaseLockResponse {
+    bool success = 1;
+}

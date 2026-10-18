@@ -1,0 +1,11 @@
+name: ParkourVault
+version: 1.0.0
+main: com.mccluster.parkour.ParkourPlugin
+api-version: 1.13
+description: Lightweight Parkour Sync Plugin connecting to EnderVault microservice
+author: mc-cluster-team
+commands:
+  parkour:
+    description: Parkour game operations and leaderboard
+    usage: /<command> [top|reset]
+    aliases: [pk]

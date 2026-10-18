@@ -1,0 +1,39 @@
+backup/
+build/
+bin/
+# .vscode/
+examples/
+*.md
+# 例外：docs/ 与 doc/ 下的技术文档与协议存档必须纳入版本控制
+!docs/**/*.md
+!docs/*.md
+!doc/**/*.md
+!doc/*.md
+!README.md
+
+# 忽略本地任务清单与待办事项 (TODO 不纳入 Git 跟踪)
+TODO.md
+TODO
+doc/TODO.md
+doc/TODO
+
+reference/
+/sprints/
+/tutorial/
+.obsidian/
+
+*.log
+archive/
+bak/
+.agents/
+
+# 预烘焙地图二进制镜像（由 map_baker 工具自动构建产生；保留默认大厅基准镜像）
+*.mcpe_map
+!assets/maps/lobby/floating-island.mcpe_map
+
+*.jar
+*.zip
+.cache/
+__pycache__/
+
+gost*.exe

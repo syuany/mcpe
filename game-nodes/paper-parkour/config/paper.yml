@@ -1,0 +1,49 @@
+# Paper 1.12.2 Configuration optimized for Parkour subserver
+verbose: false
+config-version: 13
+settings:
+  enable-player-collisions: false
+  load-permissions-yml-before-plugins: true
+  bungee-online-mode: false
+  save-empty-scoreboard-teams: false
+  incoming-packet-spam-threshold: 300
+  use-alternative-luck-formula: false
+  velocity-support:
+    enabled: false
+    online-mode: false
+    secret: ''
+  async-chunks:
+    enable: true
+    load-threads: -1
+timings:
+  enabled: true
+  verbose: true
+  server-name-privacy: false
+  hidden-config-entries:
+  - database
+  - settings.bungeecord-addresses
+  history-interval: 300
+  history-length: 3600
+world-settings:
+  default:
+    verbose: false
+    keep-spawn-loaded: true
+    generator-settings:
+      flat-bedrock: true
+    anti-xray:
+      enabled: false
+    experience-merge-max-value: -1
+    disable-thunder: true
+    disable-ice-and-snow: true
+    armor-stands-do-collision-entity-lookups: false
+    keep-spawn-loaded-range: 4
+    auto-save-interval: 6000
+    max-auto-save-chunks-per-tick: 24
+    optimize-explosions: true
+    use-vanilla-world-scoreboard-name-coloring: false
+    delay-chunk-unloads-by: 10s
+    max-chunk-sends-per-tick: 81
+    max-chunk-gens-per-tick: 10
+    prevent-moving-into-unloaded-chunks: true
+    falling-block-height-nerf: 0
+    tnt-entity-height-nerf: 0

@@ -1,0 +1,292 @@
+openapi: 3.0.3
+info:
+  title: EnderVault Distributed Data Proxy API
+  description: >
+    mc-cluster 核心微服务契约。提供统一的分布式玩家数据代理、背包同步、
+    跑酷冲线结算、实时榜单（Redis ZSet）以及基于 Redis 的分布式锁机制。
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: 本地开发与 Docker 容器内部直连地址
+  - url: http://ender-vault:8080
+    description: Docker Compose 集群内部服务名寻址
+
+paths:
+  /health:
+    get:
+      summary: 服务健康检查
+      description: 返回 MySQL、Redis 联通性及微服务状态
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  database:
+                    type: string
+                    example: connected
+                  redis:
+                    type: string
+                    example: connected
+
+  /api/v1/player/{uuid}/data:
+    get:
+      summary: 获取玩家基础数据与背包
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            example: 00000000-0000-0000-0000-000000000001
+        - name: username
+          in: query
+          required: false
+          schema:
+            type: string
+            example: Steve
+      responses:
+        '200':
+          description: 查询成功 (走 Singleflight + Redis 缓存 + MySQL 回源)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerDataResponse'
+        '404':
+          description: 玩家不存在
+    post:
+      summary: 增量/全量更新玩家数据
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlayerRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+
+  /api/v1/parkour/finish:
+    post:
+      summary: 跑酷关卡冲线成绩结算
+      description: 记录玩家通关成绩，触发排行榜更新并异步发放代币奖励
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParkourFinishRequest'
+      responses:
+        '200':
+          description: 成绩记录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkourFinishResponse'
+
+  /api/v1/parkour/leaderboard:
+    get:
+      summary: 获取跑酷赛道排行榜
+      parameters:
+        - name: track_id
+          in: query
+          required: true
+          schema:
+            type: string
+            default: rooftop_sprint
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: 排行榜查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaderboardResponse'
+
+  /api/v1/lock/acquire:
+    post:
+      summary: 获取分布式互斥锁
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource_key, ttl_seconds]
+              properties:
+                resource_key:
+                  type: string
+                ttl_seconds:
+                  type: integer
+                  default: 5
+      responses:
+        '200':
+          description: 加锁操作响应
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  acquired:
+                    type: boolean
+                  lock_token:
+                    type: string
+
+  /api/v1/lock/release:
+    post:
+      summary: 释放分布式互斥锁 (Lua 脚本防误删)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource_key, lock_token]
+              properties:
+                resource_key:
+                  type: string
+                lock_token:
+                  type: string
+      responses:
+        '200':
+          description: 解锁操作响应
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+components:
+  schemas:
+    CommonResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+          example: success
+
+    PlayerDataResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+          example: success
+        data:
+          type: object
+          properties:
+            uuid:
+              type: string
+            username:
+              type: string
+            coins:
+              type: integer
+            level:
+              type: integer
+            exp:
+              type: integer
+            last_server:
+              type: string
+            inventory_data:
+              type: string
+            ender_chest_data:
+              type: string
+            version:
+              type: integer
+
+    UpdatePlayerRequest:
+      type: object
+      properties:
+        coins_delta:
+          type: integer
+          default: 0
+        exp_delta:
+          type: integer
+          default: 0
+        last_server:
+          type: string
+        inventory_data:
+          type: string
+        ender_chest_data:
+          type: string
+        expected_version:
+          type: integer
+
+    ParkourFinishRequest:
+      type: object
+      required: [player_uuid, player_name, track_id, time_ms]
+      properties:
+        player_uuid:
+          type: string
+        player_name:
+          type: string
+        track_id:
+          type: string
+        time_ms:
+          type: integer
+        checkpoints:
+          type: integer
+
+    ParkourFinishResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        is_new_record:
+          type: boolean
+        rank:
+          type: integer
+        reward_coins:
+          type: integer
+
+    LeaderboardResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        track_id:
+          type: string
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              rank:
+                type: integer
+              player_uuid:
+                type: string
+              player_name:
+                type: string
+              time_ms:
+                type: integer
