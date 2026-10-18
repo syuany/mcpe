@@ -59,3 +59,6 @@ backup/
 archive/
 .cache/
 cache/
+tmp/
+
+TODO.md
