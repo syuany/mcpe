@@ -40,13 +40,11 @@ target_include_directories(mcpe_world PUBLIC
 )
 target_link_libraries(mcpe_world PUBLIC mcpe_common)
 
-# 4. Game 多实例调度与可插拔小游戏玩法层 (LobbySharding + ParkourMinigame)
+# 4. Game 多实例调度与大厅分线层 (LobbySharding)
 add_library(mcpe_game STATIC
     game/IGameInstance.cc
     game/InstanceManager.cc
     game/lobby/LobbyInstance.cc
-    game/parkour/ParkourMapConfig.cc
-    game/parkour/ParkourInstance.cc
 )
 target_include_directories(mcpe_game PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>

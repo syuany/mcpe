@@ -23,7 +23,12 @@ reference/
 .obsidian/
 
 *.log
-archive/
+archive/*
+!archive/parkour/
+!archive/parkour/**
+archive/parkour/**/*.mcpe_map
+!archive/parkour/**/*.zip
+!archive/parkour/**/*.md
 bak/
 .agents/
 
@@ -33,6 +38,7 @@ bak/
 
 *.jar
 *.zip
+!archive/parkour/**/*.zip
 .cache/
 
 gost*.exe

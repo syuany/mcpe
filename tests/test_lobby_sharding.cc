@@ -27,7 +27,7 @@ TEST(LobbyShardingTest, AutoSpawnsNewLobbyShardWhenFullAndSharesWorldMemory) {
   shared_lobby_world->getOrCreateChunk(ChunkPos{3, 3}).setBlock(BlockPos{48, 33, 48}, BlockStates::kStone);
 
   // 设置单个大厅分线最多容纳 2 人，最多允许裂变 3 个分线，关闭后台线程使用单步确定性驱动
-  InstanceManager mgr(shared_lobby_world, /*lobby_max_players=*/2, /*max_lobby_instances=*/3, /*parkour_max=*/10, /*auto_start=*/false);
+  InstanceManager mgr(shared_lobby_world, /*lobby_max_players=*/2, /*max_lobby_instances=*/3, /*auto_start=*/false);
 
   // 初始仅存在常驻分线 lobby-1
   EXPECT_EQ(mgr.lobbyInstanceCount(), 1u);
@@ -75,7 +75,7 @@ TEST(LobbyShardingTest, InstanceIsolationForChatAndSetMaxPlayersPersistence) {
   const int32_t orig_lobby_max = ServerConfig::defaultInstance().lobby_max_players;
 
   auto world = std::make_shared<World>();
-  auto inst_mgr = std::make_shared<InstanceManager>(world, 2, 5, 10, false);
+  auto inst_mgr = std::make_shared<InstanceManager>(world, 2, 5, false);
 
   std::vector<std::pair<uint64_t, std::string>> received_packets;
   inst_mgr->setUnicastCallback([&](uint64_t sid, ByteBuffer pkt) {

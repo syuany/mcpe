@@ -26,9 +26,8 @@ mcpe_add_test(test_event_queue      test_event_queue.cc      mcpe_world mcpe_com
 mcpe_add_test(test_world            test_world.cc            mcpe_world mcpe_common)
 mcpe_add_test(test_spatial_grid     test_spatial_grid.cc     mcpe_world mcpe_common)
 
-# 4. Game 多实例分线与跑酷小游戏引擎测试 (Sprint 4)
+# 4. Game 多实例大厅弹性分线测试 (Sprint 4)
 mcpe_add_test(test_lobby_sharding   test_lobby_sharding.cc   mcpe_protocol mcpe_game mcpe_world mcpe_network mcpe_common)
-mcpe_add_test(test_parkour_instance test_parkour_instance.cc mcpe_protocol mcpe_game mcpe_world mcpe_network mcpe_common)
 
 # 5. Protocol 协议与多玩家联机测试
 mcpe_add_test(test_uuid             test_uuid.cc             mcpe_protocol)

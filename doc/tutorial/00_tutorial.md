@@ -1,7 +1,7 @@
-# 从语法小白到架构思维：Minecraft 集群大厅与跑酷微服务引擎实战指南
+# 从语法小白到架构思维：Minecraft 高性能轻量大厅与跨服网关微服务引擎实战指南
 
 > **目标协议**：**Minecraft Java Edition 1.12.2（protocol 340）** —— 全项目统一版本；所有包 ID、字段类型与区块格式以 [`doc/protocol/protocol_340_cheatsheet.md`](../protocol/protocol_340_cheatsheet.md) 为唯一权威参考。  
-> **项目定位**：基于 C++23 与 Asio 构建的**高并发集群大厅与多地图跑酷微服务引擎**（常驻内存 $\le 30\text{MB}$，冷启动 $\le 50\text{ms}$，原生兼容 BungeeCord/Velocity 网关反向代理）。  
+> **项目定位**：基于 C++23 与 Asio 构建的**高并发轻量集群大厅与跨服网关微服务引擎**（常驻内存 $\le 30\text{MB}$，冷启动 $\le 50\text{ms}$，原生兼容 BungeeCord/Velocity 网关反向代理）。  
 > **面向读者**：学完现代 C++ 基本语法、读过或了解过 Muduo 网络库，渴望通过一个真实、高复杂度、具备硬核网络并发与微服务特性的项目来提升大型系统架构能力的开发者。  
 > **核心原则**：**授人以渔，不写玩具 Demo**。聚焦于架构推演、模块解耦、时序逻辑、接口契约与工业级防屎山红线。
 
@@ -21,7 +21,7 @@
   - [阶段 1：网络基座、分包器与服务器列表展示（已完成）](#阶段-1网络基座分包器与服务器列表展示已完成)
   - [阶段 2：握手鉴权与 5x5 区块流式下发（已完成）](#阶段-2握手鉴权与-5x5-区块流式下发已完成)
   - [阶段 3：玩家移动同步、同屏可见与聊天系统（已完成）](#阶段-3玩家移动同步同屏可见与聊天系统已完成)
-  - [阶段 4：多地图跑酷房间引擎与 0x35 无缝切世界（已完成）](#阶段-4多地图跑酷房间引擎与-0x35-无缝切世界已完成)
+  - [阶段 4：双层 INI 配置体系与多实例大厅并发分线引擎（已完成）](#阶段-4双层-ini-配置体系与多实例大厅并发分线引擎已完成)
   - [阶段 5：BungeeCord 集群网关穿透与生产级交付（已完成）](#阶段-5bungeecord-集群网关穿透与生产级交付已完成)
 - [四、 权威学习资源与文档速查](#四-权威学习资源与文档速查)
 - [五、 大型 C++ 工程能力自查清单（Checklist）](#五-大型-c-工程能力自查清单checklist)
@@ -69,12 +69,12 @@ mcpe/
 │   ├── protocol/               # 协议规范速查
 │   └── guides/                 # 架构专题指南
 ├── src/                        # 源代码 (严格遵循四层架构红线)
-│   ├── common/                 # 1. 基础库：ByteBuffer (COW零拷贝), VarInt
+│   ├── common/                 # 1. 基础库：ByteBuffer (COW零拷贝), VarInt, IniConfig
 │   ├── network/                # 2. 网络传输层：TcpServer, TcpSession, PacketFraming (纯网络无协议逻辑)
 │   ├── protocol/               # 3. 协议会话层：PacketRouter, HandshakeHandler, StatusHandler, LoginHandler, PlayHandler
-│   ├── world/                  # 4. 空间与世界层：Chunk, ChunkColumn, ChunkSection, SchematicLoader
-│   ├── game/                   # 5. 游戏房间层：RoomManager, ParkourRoom, FallReset, Ticker
-│   └── server.cc               # 启动入口与信号优雅退出
+│   ├── world/                  # 4. 空间与世界层：Chunk, ChunkSection, World, SpatialGrid, EntityManager
+│   ├── game/                   # 5. 游戏分线层：InstanceManager, IGameInstance, LobbyInstance
+│   └── main.cc                 # 启动入口与信号优雅退出
 └── tests/                      # 100% 覆盖率单元测试套件
 ```
 
@@ -96,13 +96,13 @@ mcpe/
                                        │ 批量拉取事件 (Batch Pop)
                                        ▼
               ┌─────────────────────────────────────────────────────────┐
-              │               游戏与房间逻辑主线程 (Game World)           │
+              │               游戏与大厅分线 Actor 线程 (Game World)      │
               │                                                         │
               │   20 TPS 物理节拍器 (每 50ms 触发一次)                    │
-              │   ├── 1. 消费所有客户端操作输入 (位移 / 聊天 / 选图)        │
-              │   ├── 2. 调度 RoomManager 房间生命周期与倒计时            │
-              │   ├── 3. 跑酷判定 (检查点 / Fall Reset 掉落拉回 / 终点结算) │
-              │   └── 4. 0x35 无缝切世界 / 实体移动多播 (COW 零拷贝广播)   │
+              │   ├── 1. 消费所有客户端操作输入 (位移 / 聊天 / 切线)        │
+              │   ├── 2. 调度 InstanceManager 大厅动态分线与扩缩容        │
+              │   ├── 3. 空间判定 (传送门 AABB / Fall Reset 虚空掉落拉回)   │
+              │   └── 4. 0x35 跨分线热切换 / 九宫格 AOI 实体多播 (COW 广播)│
               └────────────────────────┬────────────────────────────────┘
                                        │ 投递响应数据包 (Shared ByteBuffer)
                                        ▼
@@ -162,33 +162,32 @@ mcpe/
 
 ---
 
-### 阶段 4：多地图跑酷房间引擎与 0x35 无缝切世界（进阶核心）
+### 阶段 4：双层 INI 配置体系与多实例大厅并发分线引擎（进阶核心）
 
 #### 1. 目标定义（Definition of Done）
-* 服务端内置或外置加载多张 WorldEdit `.schematic` 建筑蓝图跑酷地图（如新手跑酷、高空螺旋跑酷）。
-* 玩家在大厅中走到跑酷传送门或输入 `/join spiral`：
-  * 客户端屏幕黑屏刷新约 0.2 秒，**单 TCP 连接不中断**，瞬间切入跑酷地图！
-  * 踩中起点方块开始计时；
-  * 玩家失手跌落跑道（$Y < \text{fall\_y}$）时，**不死亡、不扣血**，服务端自动下发瞬移包将玩家拉回起点或最近检查点，计时不中断；
-  * 玩家踩中终点包围盒：广播通关成绩（精确到毫秒），3 秒后下发 `0x35` 切回大厅世界。
+* 落地双层 INI 配置持久化体系：`settings.ini`（全服与单分线配额、网络配置）与地图伴生 `assets/maps/<map>.ini`（出生点坐标、虚空跌落拉回高度）。
+* 全服总人数硬上限准入拦截：在 `LoginHandler` 阶段校验在线总人数，超限时发送 `0x00 Disconnect`，保障系统高可用。
+* 单大厅满员弹性裂变分线：`InstanceManager` 调度 `lobby-1..N` 分线，单分线满员自动创建新分线；所有分线共享同一个只读预烘焙 `World` 区块内存，单分线增量内存 $<16\text{KB}$。
+* 跨分线无缝热切换（`/lobby [id]`、`/lobbies`）：
+  * 客户端屏幕黑屏刷新约 0.2 秒，**单 TCP 连接不中断**，通过 `0x35 Respawn (-1 -> 0)` 瞬间平滑切入新分线！
+  * 虚空防坠落熔断（Fall Reset）：消费位移包时检测 $Y < \text{fall\_reset\_y}$，直接拉回大厅出生点并矫正九宫格 AOI 归属。
+* **业务边界聚焦与跑酷解耦归档**：早期规划的跑酷小游戏由于强依赖原版复杂的红石电路、压力板与活塞等原版生存物理，违背轻量大厅微服务架构原则，已解耦并归档至 `archive/parkour/`。
 
 #### 2. 核心架构与协议契约
-1. **WorldEdit `.schematic` 蓝图加载器**：
-   * 文件格式本质为 Gzip 压缩的 NBT 复合标签；
-   * 提取 `Width` (X)、`Height` (Y)、`Length` (Z) 及 `Blocks` / `Data` 数组；
-   * 将三维方块数组直接灌入内存 `Chunk` 结构中，加载极速，开箱即用。
-2. **`RoomManager` 房间有限状态机**：
-   * `WAITING`（等待玩家 / 选图） -> `COUNTDOWN`（倒数 3 秒） -> `PLAYING`（竞速中） -> `ENDED`（通报成绩与回收）。
-3. **0x35 无缝切世界时序**：
-   * 步骤 1：下发 `0x35 Respawn`（通知客户端清空当前世界渲染缓存）；
-   * 步骤 2：流式下发目标跑道周围的 `0x20 Chunk Data` 数据包；
-   * 步骤 3：下发 `0x2F Player Position And Look`（把玩家瞬移到起点）。
-4. **跑酷游戏规则系统**：
-   * 起点触发：记录 `std::chrono::steady_clock::now()`；
-   * 掉落熔断保护（Fall Reset）：消费位移包时检测 $Y < \text{fall\_reset\_y}$，触发瞬移；
-   * 终点 AABB 判定：坐标落入检测盒内即为通关。
+1. **双层 INI 配置文件驱动 (`IniConfig`)**：
+   * 采用轻量 INI 解析器，支持 section 字典与键值提取；
+   * 管理员可通过 `/setmaxplayers` 与 `/setspawn` 指令实时更新内存并持久化写回磁盘。
+2. **多实例并发 Actor 线程模型 (`src/game/`)**：
+   * `IGameInstance` 抽象玩法空间，封装独立 `EventQueue` + `EntityManager` + `SpatialGrid` + 20 TPS `WorldTicker` 线程；
+   * `InstanceManager` 提供线程安全的大厅实例注册、查找、跨实例原子迁移（`transferPlayer`）与生命周期管理。
+3. **0x35 无缝跨分线切换时序**：
+   * 步骤 1：向原大厅分线投递 `PlayerLeaveEvent`，向原九宫格邻居广播 `0x32 DestroyEntities`；
+   * 步骤 2：下发 `0x35 Respawn`（切换维度通知客户端清空当前世界渲染缓存）；
+   * 步骤 3：流式补发新分线周围视距的 `0x20 Chunk Data` 数据包；
+   * 步骤 4：下发 `0x2F Player Position And Look`（把玩家瞬移到新分线出生点）；
+   * 步骤 5：收到客户端 `0x00 Teleport Confirm` 确认后，向目标分线投递 `PlayerJoinEvent` 激活实体双向感知。
 
-* **实战独立教程**：详见 [`doc/tutorial/sprint4_parkour_room.md`](sprint4_parkour_room.md)。
+* **实战独立教程**：详见 [`doc/tutorial/sprint4_parkour_room.md`](sprint4_parkour_room.md)（含跑酷归档说明）。
 
 ---
 

@@ -536,7 +536,7 @@ PlayHandler::handlePlayerMovement(
   payload.retrieveAll();
 
   // 当未启用多实例管理器（单世界兼容模式）时，在 PlayHandler 中执行大厅虚空拉回；
-  // 启用 InstanceManager 后，由各实例专属的 20 TPS 物理线程钩子 (LobbyInstance / ParkourInstance) 精确判定。
+  // 启用 InstanceManager 后，由各大厅实例专属的 20 TPS 物理线程钩子 (LobbyInstance) 精确判定。
   if (!g_instance_manager) {
     const double fall_threshold = session->canFly() ? 0.0 : 20.0;
     if (move_event.has_position && move_event.position.y < fall_threshold) {

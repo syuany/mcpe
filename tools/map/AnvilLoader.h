@@ -6,7 +6,7 @@
  * 1. 深度适配 Minecraft 1.12.2 (Protocol 340) 原版 Anvil 格式；
  * 2. 自动从 level.dat 解析并提取官方 SpawnPoint 出生点坐标；
  * 3. 流式解析 region/r.X.Z.mca 容器中的所有有效 ChunkSections (Blocks / Data)；
- * 4. 原生支持 .zip 格式世界存档（如跑酷地图 FLASH.zip、大厅 world.zip）及解压文件夹。
+ * 4. 原生支持 .zip 格式世界存档（如大厅 world.zip）及解压文件夹。
  */
 
 #ifndef MCPE_WORLD_ANVIL_LOADER_H
@@ -58,7 +58,7 @@ class AnvilLoader {
   );
 
   /**
-   * @brief 从指定 ZIP 压缩包（如跑酷 FLASH.zip 或大厅 world.zip）加载完整世界
+   * @brief 从指定 ZIP 压缩包（如大厅 world.zip）加载完整世界
    * @param zip_path ZIP 文件路径
    * @param world 目标世界容器
    * @return 成功加载的 Chunk 总数
@@ -80,7 +80,7 @@ class AnvilLoader {
   );
 
   /**
-   * @brief 从指定 RAR 压缩包（如跑酷地图 Gold vs Diamond 4.rar）解压并加载完整世界
+   * @brief 从指定 RAR 压缩包解压并加载完整世界
    * @param rar_path RAR 文件路径
    * @param world 目标世界容器
    * @return 成功加载的 Chunk 总数

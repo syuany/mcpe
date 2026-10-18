@@ -35,14 +35,11 @@ struct ServerConfig {
   int32_t max_players{100};  // 全服总人数硬上限
   int32_t keep_alive_timeout_seconds{45};  // 客户端心跳超时踢出阈值 (秒)
 
-  // 大厅分线与小游戏实例配额
+  // 大厅分线配额
   std::string default_lobby_map{"lobby"};
   int32_t lobby_max_players{50};     // 单个大厅分线人数上限
   int32_t max_lobby_instances{10};   // 大厅最大允许裂变分线数
   int32_t view_distance{5};          // 视距区块半径 (R=5 -> 11x11)
-
-  std::string parkour_maps{"spiral"};
-  int32_t parkour_max_players{25};   // 单个跑酷房间实例人数上限
 
   GameMode default_gamemode{GameMode::Adventure};
   Dimension default_dimension{Dimension::Overworld};
@@ -83,9 +80,6 @@ struct ServerConfig {
     max_lobby_instances = ini.getInt("Lobby", "max_instances", max_lobby_instances);
     view_distance = ini.getInt("Lobby", "view_distance", view_distance);
 
-    parkour_maps = ini.getString("Parkour", "maps", parkour_maps);
-    parkour_max_players = ini.getInt("Parkour", "max_players_per_instance", parkour_max_players);
-
     dev_mode_enabled = ini.getBool("Security", "dev_mode_enabled", dev_mode_enabled);
     admins = ini.getString("Security", "admins", admins);
     dev_secret = ini.getString("Security", "dev_secret", dev_secret);
@@ -105,9 +99,6 @@ struct ServerConfig {
     ini.setInt("Lobby", "max_players_per_instance", lobby_max_players);
     ini.setInt("Lobby", "max_instances", max_lobby_instances);
     ini.setInt("Lobby", "view_distance", view_distance);
-
-    ini.setString("Parkour", "maps", parkour_maps);
-    ini.setInt("Parkour", "max_players_per_instance", parkour_max_players);
 
     ini.setBool("Security", "dev_mode_enabled", dev_mode_enabled);
     ini.setString("Security", "admins", admins);

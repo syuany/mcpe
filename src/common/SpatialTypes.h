@@ -204,7 +204,7 @@ struct Vector3d {
 };
 
 /**
- * @brief 三维轴对齐包围盒 (Axis-Aligned Bounding Box) - 用于跑酷起点/检查点/终点碰撞检测
+ * @brief 三维轴对齐包围盒 (Axis-Aligned Bounding Box) - 用于传送门与空间碰撞检测
  */
 struct AABB {
   Vector3d min_pt{};

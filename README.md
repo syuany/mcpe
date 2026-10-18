@@ -1,13 +1,18 @@
-# MCPE: Minecraft C++23 轻量大厅与跑酷微服务引擎
+# MCPE: Minecraft C++23 轻量集群大厅与挂机微服务引擎
 
-MCPE 是一个基于 **C++23** 与 **Standalone Asio** 开发的高性能 Minecraft 1.12.2 服务端微服务引擎。主要面向商业群组服的**轻量大厅/挂机中转 (Lobby/Limbo)** 与 **多实例跑酷小游戏** 场景，常驻内存仅需约 **25MB**，冷启动耗时 **<20ms**。
+MCPE 是一个基于 **C++23** 与 **Standalone Asio** 开发的高性能 Minecraft 1.12.2 服务端微服务引擎。专精于商业群组服的**轻量大厅/挂机中转 (Lobby/Limbo)** 与 **即插即用集群网关** 场景，常驻内存仅需约 **25MB**，冷启动耗时 **<20ms**。
+
+> [!NOTE]
+> **跑酷玩法归档说明**：跑酷玩法深度依赖 Minecraft 原版红石模拟、压力板电平、活塞推拉与复杂方块碰撞物理，与本项目“极致轻量微服务”的非目标冲突。跑酷模块已彻底解耦归档至 [`archive/parkour/`](archive/parkour/)，本项目全面收敛并聚焦于**商业大厅微服务、弹性分线中转与群组网关**。
 
 ---
 
 ## 核心功能
 
-- **轻量大厅与漫游**：支持玩家进服认证、区块流式加载、富文本聊天广播与同屏移动同步（基于九宫格 AOI 空间裁剪与写时复制零拷贝多播）。
-- **多地图跑酷小游戏**：内置多张跑酷赛道地图，支持多人同场随进随跑、独立毫秒计时器、检查点跌落复位（Fall Reset）、排行榜以及单连接无缝跨世界切换。
+- **轻量大厅与漫游**：支持玩家进服认证、预烘焙只读区块极速加载、富文本聊天广播与同屏移动同步（基于九宫格 AOI 空间裁剪与写时复制零拷贝多播）。
+- **多实例动态弹性分线**：基于 Actor 模型的 `InstanceManager`，支持 `lobby-1..N` 满员自动裂变与席位原子预留，各分线独占 20 TPS 物理线程，共享一份底层只读地形内存。
+- **商业大厅管理与防作弊**：支持全服人数上限与分线配额配置（`/setmaxplayers`）、虚空跌落保护（Fall Reset）、大厅飞行切换（`/fly`）、出生点更新（`/setspawn`）及管理员动态口令鉴权（`/admin auth`）。
+- **即插即用集群网关**：原生兼容 BungeeCord / Velocity IP Forwarding 协议穿透与正版 UUID/皮肤属性提取，支持 `0x18 Plugin Message (BungeeCord:Connect)` 传送门跨服路由。
 - **极简容器交付**：多阶段构建生产级 Docker 镜像，体积 $\le 30\text{MB}$，毫秒级冷启动。
 
 ---
@@ -26,7 +31,7 @@ MCPE 是一个基于 **C++23** 与 **Standalone Asio** 开发的高性能 Minecr
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target server -j$(nproc)
 
-# 2. 运行自动化单元测试 (232 项单元测试)
+# 2. 运行自动化单元测试 (229 项单元测试全绿通过)
 ctest --test-dir build --output-on-failure
 
 # 3. 启动服务端 (默认监听 25566 端口，首次启动自动生成 src/settings.ini)

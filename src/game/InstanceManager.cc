@@ -17,13 +17,11 @@ InstanceManager::InstanceManager(
     std::shared_ptr<world::World> lobby_world,
     size_t lobby_max_players,
     size_t max_lobby_instances,
-    size_t parkour_max_players,
     bool auto_start_threads
 )
     : lobby_world_(std::move(lobby_world)),
       lobby_max_players_(std::max<size_t>(1, lobby_max_players)),
       max_lobby_instances_(std::max<size_t>(1, max_lobby_instances)),
-      parkour_max_players_(std::max<size_t>(1, parkour_max_players)),
       auto_start_threads_(auto_start_threads) {
   if (!lobby_world_) {
     lobby_world_ = std::make_shared<world::World>();
@@ -64,18 +62,6 @@ void
 InstanceManager::setWorldSwitchCallback(WorldSwitchFn fn) {
   std::lock_guard<std::mutex> lock(mutex_);
   world_switch_fn_ = std::move(fn);
-}
-
-void
-InstanceManager::registerParkourMap(
-    const parkour::ParkourMapConfig& cfg,
-    std::shared_ptr<world::World> map_world
-) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  parkour_templates_[cfg.map_name] = ParkourTemplate{cfg, std::move(map_world)};
-  if (parkour_shards_[cfg.map_name].empty()) {
-    (void)createParkourShardUnlocked(cfg.map_name);
-  }
 }
 
 void
@@ -137,49 +123,6 @@ InstanceManager::createLobbyShardUnlocked() {
   return inst;
 }
 
-std::shared_ptr<parkour::ParkourInstance>
-InstanceManager::createParkourShardUnlocked(std::string_view map_name) {
-  auto tpl_it = parkour_templates_.find(std::string(map_name));
-  if (tpl_it == parkour_templates_.end()) {
-    return nullptr;
-  }
-
-  auto& vec = parkour_shards_[std::string(map_name)];
-  const size_t next_idx = vec.size() + 1;
-  const std::string id = std::format("parkour-{}-{}", map_name, next_idx);
-
-  auto inst = std::make_shared<parkour::ParkourInstance>(
-      id,
-      tpl_it->second.world,
-      tpl_it->second.config,
-      parkour_max_players_,
-      [this](uint64_t sid, ByteBuffer pkt) {
-        PacketUnicastFn fn;
-        {
-          std::lock_guard<std::mutex> lk(mutex_);
-          fn = unicast_fn_;
-        }
-        if (fn) {
-          fn(sid, std::move(pkt));
-        }
-      }
-  );
-  bindInstanceCallbacksUnlocked(inst);
-  if (auto_start_threads_) {
-    inst->start();
-  }
-  vec.push_back(inst);
-  instances_by_id_[id] = inst;
-
-  spdlog::info(
-      "[InstanceManager] Created parkour shard '{}' for map '{}' (max_players={})",
-      id,
-      map_name,
-      parkour_max_players_
-  );
-  return inst;
-}
-
 void
 InstanceManager::bindInstanceCallbacksUnlocked(const std::shared_ptr<IGameInstance>& inst) {
   if (teleport_fn_) {
@@ -236,33 +179,6 @@ InstanceManager::acquireLobbyForPlayer(uint64_t session_id) {
       [](const auto& a, const auto& b) { return a->playerCount() < b->playerCount(); }
   );
   return (min_it != lobbies_.end()) ? *min_it : nullptr;
-}
-
-std::shared_ptr<parkour::ParkourInstance>
-InstanceManager::acquireParkourForPlayer(uint64_t session_id, std::string_view map_name) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto it = parkour_shards_.find(std::string(map_name));
-  if (it == parkour_shards_.end()) {
-    return nullptr;
-  }
-
-  for (const auto& inst : it->second) {
-    if (inst->tryReserveSlot(session_id)) {
-      if (!player_instance_map_.contains(session_id)) {
-        player_instance_map_[session_id] = inst->instanceId();
-      }
-      return inst;
-    }
-  }
-
-  auto new_inst = createParkourShardUnlocked(map_name);
-  if (new_inst) {
-    (void)new_inst->tryReserveSlot(session_id);
-    if (!player_instance_map_.contains(session_id)) {
-      player_instance_map_[session_id] = new_inst->instanceId();
-    }
-  }
-  return new_inst;
 }
 
 bool
@@ -399,18 +315,6 @@ std::vector<std::shared_ptr<lobby::LobbyInstance>>
 InstanceManager::getLobbies() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return lobbies_;
-}
-
-std::vector<std::string>
-InstanceManager::getRegisteredParkourMaps() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<std::string> names;
-  names.reserve(parkour_templates_.size());
-  for (const auto& [name, _] : parkour_templates_) {
-    names.push_back(name);
-  }
-  std::sort(names.begin(), names.end());
-  return names;
 }
 
 void

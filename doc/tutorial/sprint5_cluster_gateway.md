@@ -1,7 +1,7 @@
 # Sprint 5 保姆级实战开发教程：BungeeCord/Velocity 集群网关穿透、0x18 跨服传送门路由、Docker 极简容器化与千人漫游压测 (Cluster Gateway, IP Forwarding, BungeeCord Plugin Message, Dockerization & Benchmark)
 
 > **目标协议**：**Minecraft Java Edition 1.12.2（Protocol Version: 340）**  
-> **前置里程碑**：Sprint 0~3（网络、登录、移动聊天与 AOI）与 **Sprint 4（双层 INI 配置体系、多实例 Actor 引擎、大厅弹性分线与跑酷小游戏切世界）** 已全部验收通过。  
+> **前置里程碑**：Sprint 0~3（网络、登录、移动聊天与 AOI）与 **Sprint 4（双层 INI 配置体系、多实例 Actor 引擎与大厅弹性分线）** 已全部验收通过。  
 > **本阶段核心目标**：从“单机单服微服务”跨入“**商业分布式集群即插即用网关大厅 (Cluster Gateway & Lobby/Limbo Microservice)**”！原生兼容商业代理（BungeeCord / Velocity）的 **IP Forwarding 协议穿透**（在握手包 `server_address` 中安全提取客户端真实公网 IP、正版 UUID 与带签名的皮肤属性 JSON，并设计基于共享密钥的 Bungee-Guard 假冒伪劣防护）；落地 **`0x18 Plugin Message (Clientbound)`** 跨服转交信令（通道 `"BungeeCord"`，载荷规范对齐 Java `DataOutputStream.writeUTF("Connect")`）；设计大厅**跨服传送门（Server Portals）**与 `/server <target>` 路由指令，实现玩家踩入传送门 AABB 瞬间无缝跨服切入外部生存/小游戏服；编写工业级 **Multi-Stage 极简 Dockerfile**（剥离调试符号，构建 $\le 30\text{MB}$ 极小镜像，毫秒级容器冷启动，支持环境变量热覆盖）；部署 **Docker Compose 商业集群演练拓扑**；运行 **千人无头 Bot（Headless Bot）并发漫游压测集群**，量化对比 C++ 微服务与传统 Java 服务端（Paper 1.12.2）在 1,000 Bot 高频同屏移动下的内存占用（25MB vs 1.5GB）与 20 TPS 稳定性！  
 > **教学设计原则**：**透彻讲清“是什么、为什么、怎么做”**。严格遵守四层架构红线，零裸写魔数，杜绝过渡性玩具代码，以一线分布式游戏微服务标准交付。  
 > **预估工期**：3 ~ 4 天 | **核心任务数**：5 个微任务（TASK-5.1 ~ TASK-5.5）
@@ -76,17 +76,17 @@
        (默认路由)   │                       │ (传送门跳转)           │ (跨服跳转)
                     ▼                       ▼                        ▼
         ┌──────────────────────┐  ┌────────────────────┐  ┌────────────────────┐
-        │  MCPE 大厅/跑酷微服务 │  │  外部 Java 生存服  │  │  外部 Java 空岛服  │
+        │  MCPE 轻量大厅微服务 │  │  外部 Java 生存服  │  │  外部 Java 空岛服  │
         │  (本项目 C++23 / 340)│  │  (Paper / Purpur)  │  │  (Paper / Purpur)  │
         │                      │  │                    │  │                    │
         │ * 常驻内存 ≤ 25MB    │  │ * 内存 ~ 2GB       │  │ * 内存 ~ 3GB       │
         │ * 冷启动 ≤ 50ms      │  │ * 承载复杂原版生存 │  │ * 承载生存小游戏   │
-        │ * 大厅挂机/跑酷选服  │  └────────────────────┘  └────────────────────┘
+        │ * 大厅挂机/跨服选服  │  └────────────────────┘  └────────────────────┘
         └──────────────────────┘
 ```
 
 在这个拓扑中，**MCPE 的定位非常精准**：它充当集群中资源消耗最大、但逻辑最轻量、并发连接数最多的**大厅与挂机中转微服务（Lobby/Limbo）**！
-当成千上万名玩家涌入群组服时，不需要为每个闲逛挂机的玩家分配昂贵的 Java 内存，由 C++ 实现的 MCPE 以极低的物理成本（25MB / 50ms 启动）提供大厅漫游、跑酷竞技与跨服传送路由。
+当成千上万名玩家涌入群组服时，不需要为每个闲逛挂机的玩家分配昂贵的 Java 内存，由 C++ 实现的 MCPE 以极低的物理成本（25MB / 50ms 启动）提供大厅漫游、挂机防掉线与跨服传送路由。
 
 ---
 
@@ -736,7 +736,7 @@ services:
       - mcpe-lobby
     restart: unless-stopped
 
-  # 2. MCPE 高性能集群大厅与跑酷微服务 (本项目)
+  # 2. MCPE 高性能集群大厅微服务 (本项目)
   mcpe-lobby:
     build:
       context: .
@@ -839,7 +839,7 @@ python scripts/benchmark_swarm.py \
   - **满分作答**：
     这主要得益于四个维度的现代 C++ 底层架构设计：
     1. **零 JVM 运行时开销**：C++ 编译为纯粹的原生二进制，完全消除了 JVM 的堆外元空间（Metaspace）、JIT 编译缓存与 GC 数据结构的数百兆固定底噪；
-    2. **静态地图只读共享**：我们通过离线烘焙工具链剥离了臃肿的 NBT/Schematic 解析器，生成紧凑的 `.mcpe_map` 二进制镜像。无论大厅裂变出多少个动态分线或跑酷房间，全服只读共享一份 `World` 区块内存，单分线增量内存开销 $<16\text{KB}$；
+    2. **静态地图只读共享**：我们通过离线烘焙工具链剥离了臃肿的 NBT/Schematic 解析器，生成紧凑的 `.mcpe_map` 二进制镜像。无论大厅裂变出多少个动态分线，全服只读共享一份 `World` 区块内存，单分线增量内存开销 $<16\text{KB}$；
     3. **零拷贝广播管线**：在 20 TPS 状态同步中，我们利用 `ByteBuffer::retainedSlice()` 结合写时复制（COW）机制，一份广播包被同屏上千名玩家共享引用计数，彻底杜绝了 Java 频繁在堆上分配包对象的 GC 压力；
     4. **局部 AOI 视界裁剪**：借助 `SpatialGrid` 九宫格空间哈希，精准裁剪非可见区域的网络广播，避免了 $O(N^2)$ 的广播膨胀，使得千人并发下的数据结构紧凑且 CPU Cache 命中率极高。
 

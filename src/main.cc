@@ -2,7 +2,7 @@
  * @file main.cc
  * @brief MCPE (Minecraft Java Edition 1.12.2 / Protocol 340) 服务端主程序入口
  *
- * 负责加载 settings.ini 与 <map>.ini 配置体系，极速装载预烘焙大厅与跑酷地图镜像 (.mcpe_map)，
+ * 负责加载 settings.ini 与 <map>.ini 配置体系，极速装载预烘焙大厅地图镜像 (.mcpe_map)，
  * 启动多实例并发 Actor 引擎 (InstanceManager) 与 Asio 异步网络事件循环。
  */
 
@@ -16,7 +16,6 @@
 
 #include "common/IniConfig.h"
 #include "game/InstanceManager.h"
-#include "game/parkour/ParkourMapConfig.h"
 #include "network/TcpServer.h"
 #include "protocol/ChatHandler.h"
 #include "protocol/ClientManager.h"
@@ -114,7 +113,6 @@ main() {
         lobby_world,
         static_cast<size_t>(server_cfg.lobby_max_players),
         static_cast<size_t>(server_cfg.max_lobby_instances),
-        static_cast<size_t>(server_cfg.parkour_max_players),
         true
     );
 
@@ -155,41 +153,9 @@ main() {
         }
     );
 
-    // 4. 自动扫描并加载 settings.ini 中配置的跑酷地图列表 (例如 FLASH, spiral)
-    const auto parkour_map_names = common::IniConfig::splitCsv(server_cfg.parkour_maps);
-    for (const auto& map_name : parkour_map_names) {
-      std::filesystem::path ini_path = std::format("assets/maps/parkour/{}.ini", map_name);
-      if (!std::filesystem::exists(ini_path)) {
-        const auto fallback_ini = std::format("assets/maps/{}.ini", map_name);
-        if (std::filesystem::exists(fallback_ini)) {
-          ini_path = fallback_ini;
-        }
-      }
-      auto pk_cfg_opt = parkour::ParkourMapConfig::loadFromIni(map_name, ini_path);
-      parkour::ParkourMapConfig pk_cfg = pk_cfg_opt.value_or(parkour::ParkourMapConfig{});
-      pk_cfg.map_name = map_name;
-      if (pk_cfg.companion_ini_path.empty()) {
-        pk_cfg.companion_ini_path = ini_path;
-      }
-
-      auto pk_world = std::make_shared<World>();
-      const std::string pk_baked_str = pk_cfg.baked_file.string();
-      if (pk_world->loadBakedMap(pk_cfg.baked_file) == 0) {
-        spdlog::warn(
-            "[Main] Parkour baked map '{}' not found; generating default course chunks.",
-            pk_baked_str
-        );
-      }
-      pk_world->setSpawnPoint(pk_cfg.spawn_point);
-      pk_world->setSpawnRotation(pk_cfg.spawn_rotation);
-      pk_world->setFallResetY(pk_cfg.fall_reset_y);
-
-      instance_manager->registerParkourMap(pk_cfg, pk_world);
-    }
-
     PlayHandler::setInstanceManager(instance_manager);
 
-    // 5. 初始化聊天多播与快捷指令路由系统
+    // 4. 初始化聊天多播与快捷指令路由系统
     auto chat_handler = std::make_shared<ChatHandler>();
     chat_handler->setClientManager(client_manager);
     chat_handler->setInstanceManager(instance_manager);

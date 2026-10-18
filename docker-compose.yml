@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. MCPE 极轻量大厅/跑酷微服务引擎 (C++23 / Asio)
+  # 1. MCPE 极轻量大厅微服务引擎 (C++23 / Asio)
   mcpe-lobby:
     build:
       context: .

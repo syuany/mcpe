@@ -176,10 +176,10 @@ TEST(Sprint3Test, ChatJsonEscapingAndCommandRouting) {
   EXPECT_NE(public_messages[0].find(R"(<Steve> Hello everyone!)"), std::string::npos);
 
   // 快捷指令：绝不流入公屏
-  chat.handleMessage(1, "Steve", "/maps");
+  chat.handleMessage(1, "Steve", "/lobbies");
   EXPECT_EQ(public_messages.size(), 1);
   EXPECT_EQ(sys_messages.size(), 1);
-  EXPECT_NE(sys_messages[0].find("地图列表"), std::string::npos);
+  EXPECT_NE(sys_messages[0].find("大厅分线"), std::string::npos);
 
   chat.handleMessage(1, "Steve", "/lobby");
   EXPECT_EQ(sys_messages.size(), 2);

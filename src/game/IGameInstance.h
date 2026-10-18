@@ -3,11 +3,11 @@
  * @brief 游戏空间实例抽象基类（Game 玩法与实例调度层）
  *
  * 核心架构设计（对齐 Cuberite cWorld 与商业群组服 Actor 实例模型）：
- * 1. 静态地形共享：持有 std::shared_ptr<world::World>，多条大厅分线或同图跑酷房间共享同一份只读区块内存；
+ * 1. 静态地形共享：持有 std::shared_ptr<world::World>，多条大厅分线共享同一份只读区块内存；
  * 2. 动态状态隔离：每个实例独占一套 EventQueue + EntityManager (含 SpatialGrid) + WorldTicker (20 TPS 线程)；
  * 3. 原子席位预留：提供 tryReserveSlot / releaseSlot 保证高并发瞬时连入时的分线满员判定 100% 精确无竞态；
  * 4. 插件式扩展钩子：定义 Waiting -> Countdown -> Playing -> Ended 状态机与虚函数钩子，
- *    供 LobbyInstance, ParkourInstance 及未来新小游戏零侵入继承扩展。
+ *    供 LobbyInstance 及未来新小游戏零侵入继承扩展。
  */
 
 #ifndef MCPE_GAME_I_GAME_INSTANCE_H
@@ -38,7 +38,7 @@ namespace mcpe::game {
 enum class InstanceState : uint8_t {
   Waiting = 0,    // 等待玩家加入
   Countdown = 1,  // 开局倒计时
-  Playing = 2,    // 正在进行中 (大厅与随进随跑跑酷常驻此状态)
+  Playing = 2,    // 正在进行中 (大厅常驻此状态)
   Ended = 3       // 结算与回收中
 };
 
@@ -47,8 +47,7 @@ enum class InstanceState : uint8_t {
  */
 enum class InstanceType : uint8_t {
   Lobby = 0,
-  Parkour = 1,
-  CustomMinigame = 2
+  CustomMinigame = 1
 };
 
 class IGameInstance {
@@ -162,7 +161,7 @@ class IGameInstance {
   static ByteBuffer buildChatPacket(std::string_view json_text, protocol::ChatPosition pos);
 
  protected:
-  // 供子类 (LobbyInstance / ParkourInstance / 未来小游戏) 重写的 20 TPS 单线程安全钩子
+  // 供子类 (LobbyInstance / 自定义玩法) 重写的 20 TPS 单线程安全钩子
   virtual void onPlayerJoined(uint64_t /*session_id*/, std::string_view /*username*/) {}
   virtual void onPlayerLeft(uint64_t /*session_id*/, std::string_view /*username*/) {}
   virtual void onPlayerMoved(

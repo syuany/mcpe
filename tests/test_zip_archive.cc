@@ -221,7 +221,7 @@ TEST(ZipArchiveTest, OpenInvalidBuffers) {
 
 TEST(ZipArchiveTest, ReadStoredEntry) {
   const std::string name = "hello.txt";
-  const std::string content = "Hello Minecraft Parkour Engine!";
+  const std::string content = "Hello Minecraft Lobby Engine!";
   auto zip_data = createInMemoryStoredZip(name, content);
 
   auto archive = ZipArchive::openMemory(zip_data);

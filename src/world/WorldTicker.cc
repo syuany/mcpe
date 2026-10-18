@@ -137,7 +137,7 @@ WorldTicker::tick() {
     );
   }
 
-  // 3. 执行上层游戏实例自定义 Tick 钩子（如跑酷秒表刷新、倒计时推进与完赛自动回大厅）
+  // 3. 执行上层游戏实例自定义 Tick 钩子（如大厅定时任务、倒计时推进等）
   if (tick_hook_callback_) {
     tick_hook_callback_();
   }

@@ -233,9 +233,9 @@ def main():
 
     assert alex_saw_chat, "Alex 未收到 Steve 的公屏聊天！"
 
-    # 6. 验证快捷指令分流 (Steve 发送 /maps，仅 Steve 收到，Alex 不受干扰)
+    # 6. 验证快捷指令分流 (Steve 发送 /lobbies，仅 Steve 收到，Alex 不受干扰)
     print("\n[*] 验证阶段 4: 快捷指令拦截与单播分流...")
-    steve.send_chat("/maps")
+    steve.send_chat("/lobbies")
 
     steve_saw_cmd = False
     start = time.time()
@@ -244,14 +244,14 @@ def main():
             p_id, payload = read_packet(steve.sock)
             if p_id == 0x0F:
                 chat_json = payload[1:-1].decode('utf-8', errors='ignore')
-                if "地图列表" in chat_json:
+                if "大厅分线" in chat_json:
                     steve_saw_cmd = True
                     print(f"[✔] Steve 收到指令单播回复 (0x0F): {chat_json}")
                     break
         except socket.timeout:
             break
 
-    assert steve_saw_cmd, "Steve 未收到 /maps 指令的系统回复！"
+    assert steve_saw_cmd, "Steve 未收到 /lobbies 指令的系统回复！"
 
     # 6.5. 验证 /fly 临时飞行模式开启与关闭
     print("\n[*] 验证阶段 4.5: /fly 飞行权限与能力包 (0x2C) 切换验证...")
@@ -378,7 +378,7 @@ def main():
     print("   1. 双向进服可见性时序 (0x2E -> 0x05) 正常")
     print("   2. 20 TPS 物理节拍器与定点数相对位移广播 (0x26/0x27) 正常")
     print("   3. 聊天消息富文本 JSON 多播广播正常")
-    print("   4. 快捷指令 /maps 分流单播正常")
+    print("   4. 快捷指令 /lobbies 分流单播正常")
     print("   5. 玩家退服实时实体销毁 (0x32) 正常")
     print("=" * 60)
 

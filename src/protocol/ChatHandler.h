@@ -3,9 +3,10 @@
  * @brief 聊天多播与快捷指令路由系统（Protocol 协议层）
  *
  * 支持功能：
- * 1. 按玩家当前所属实例（LobbyInstance / ParkourInstance）隔离公屏聊天多播；
- * 2. 快捷指令路由：/join <map>, /lobby [id], /leave, /lobbies, /maps, /top [map],
- *    /fly [on|off], /spawn, /setspawn, /setmaxplayers <server_max> [lobby_max], /help。
+ * 1. 按玩家当前所属大厅分线（LobbyInstance）隔离公屏聊天多播；
+ * 2. 快捷指令路由：/lobby [id], /lobbies, /join <id>, /spawn,
+ *    /fly [on|off], /setspawn, /setmaxplayers <server_max> [lobby_max],
+ *    /admin auth <secret>, /admin deauth, /help。
  */
 
 #ifndef MCPE_PROTOCOL_CHAT_HANDLER_H
@@ -64,7 +65,7 @@ class ChatHandler {
   );
 
   /**
-   * @brief 处理以 / 开头的控制台/大厅/跑酷快捷指令（绝不多播广播至公屏，仅私发系统回显）
+   * @brief 处理以 / 开头的控制台/大厅快捷指令（绝不多播广播至公屏，仅私发系统回显）
    */
   void handleCommand(uint64_t sender_sid, const std::string& cmd_line);
 
@@ -87,13 +88,11 @@ class ChatHandler {
   void handleFlyCommand(uint64_t sender_sid, const std::string& cmd_line);
   void handleSetSpawnCommand(uint64_t sender_sid);
   void handleSpawnCommand(uint64_t sender_sid);
-  void handleJoinCommand(uint64_t sender_sid, std::string_view map_arg);
+  void handleJoinCommand(uint64_t sender_sid, std::string_view shard_arg);
   void handleLobbyCommand(uint64_t sender_sid, std::string_view shard_arg);
   void handleLobbiesCommand(uint64_t sender_sid);
-  void handleMapsCommand(uint64_t sender_sid);
-  void handleTopCommand(uint64_t sender_sid, std::string_view map_arg);
   void handleSetMaxPlayersCommand(uint64_t sender_sid, std::string_view args);
-  void handleParkourDevCommand(
+  void handleAdminCommand(
       uint64_t sender_sid,
       std::string_view sub_cmd,
       std::string_view arg

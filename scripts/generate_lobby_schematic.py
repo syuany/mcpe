@@ -138,19 +138,19 @@ def main():
                     else:
                         set_block(px, surface_y + fy, pz + fz, 90) # Portal
 
-    # 5. Parkour stepping stones (floating blocks around Western side)
+    # 5. Floating decorative stepping stones (around Western side)
     # 8 stepping stones spiraling up
-    parkour_coords = [
+    stepping_coords = [
         (cx - 22, surface_y + 1, cz - 4, 155),
         (cx - 24, surface_y + 2, cz - 1, 155),
-        (cx - 25, surface_y + 3, cz + 3, 41), # Gold block checkpoint
+        (cx - 25, surface_y + 3, cz + 3, 41), # Gold block feature
         (cx - 23, surface_y + 4, cz + 7, 155),
         (cx - 20, surface_y + 5, cz + 10, 155),
         (cx - 16, surface_y + 6, cz + 13, 155),
         (cx - 12, surface_y + 7, cz + 15, 41),
-        (cx - 8,  surface_y + 8, cz + 16, 169), # Finish lantern
+        (cx - 8,  surface_y + 8, cz + 16, 169), # Lantern
     ]
-    for kx, ky, kz, bid in parkour_coords:
+    for kx, ky, kz, bid in stepping_coords:
         set_block(kx, ky, kz, bid, 0)
 
     # 6. Encode into Gzipped NBT

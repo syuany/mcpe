@@ -1,9 +1,15 @@
-# Sprint 4 保姆级实战开发教程：双层 INI 配置体系、多实例并发 Actor 引擎、大厅动态分线与跑酷小游戏实现 (INI Config, Multi-Instance Actor Engine, Lobby Sharding & Parkour Minigame)
+# Sprint 4 保姆级实战开发教程：双层 INI 配置体系、多实例并发 Actor 引擎与大厅动态分线 (INI Config, Multi-Instance Actor Engine & Lobby Sharding)
+
+> [!IMPORTANT]
+> **架构演进与跑酷模块归档说明 (Archival Notice)**:
+> 经过实际业务需求推演，跑酷玩法深度依赖原版 Minecraft 复杂的红石电路模拟、压力板感应、活塞机关、踩踏方块物理掉落与碰撞箱模拟。如果继续在本项目中补齐这些原版物理机制，将背离本项目“常驻内存 $\le 30\text{MB}$，冷启动 $\le 50\text{ms}$ 的高并发轻量级集群大厅与中转网关 (Lobby/Limbo)”这一核心定位。
+> 因此，项目于 2026 年重构中将所有跑酷相关实现代码与资源完整解耦并归档至 [`archive/parkour/`](../../archive/parkour/)，主工程全量聚焦于**双层 INI 配置体系、多实例并发 Actor 引擎、大厅动态弹性分线（`lobby-1..N`）与跨分线原子切换**。
+> 本教程保留多实例 Actor 引擎与分线设计的完整讲解，并将原跑酷小游戏章节作为“如何基于 `IGameInstance` 扩展自定义子玩法”的归档案例与设计沉淀进行学习参考。
 
 > **目标协议**：**Minecraft Java Edition 1.12.2（Protocol Version: 340）**  
 > **前置里程碑**：Sprint 0~3（网络、登录、20 TPS 单世界联机）与 **Sprint 3.5（离线地图烘焙 `.mcpe_map`、`SpatialGrid` 九宫格 AOI、商业大厅机制、C++20 协程化与 `retainedSlice()` 零拷贝多播）** 已全部验收通过。  
-> **本阶段核心目标**：将服务端从“单一大厅实例”全面升级为“**支持动态弹性分线的多实例大厅 + 可插拔多玩法小游戏并发引擎**”！引入对齐 Cuberite 的 **`settings.ini` + `assets/maps/<map>.ini` 双层 INI 配置持久化体系**；在 `LoginHandler` 落地**全服总人数硬上限拦截**与**大厅满员自动裂变分线（`lobby-1`, `lobby-2`... 共享只读 `World` 区块内存）**；开辟清晰的 `src/game/` 玩法与实例调度层（`IGameInstance`、`InstanceManager`、`src/game/lobby/`、`src/game/parkour/`），采用**每实例独立 20 TPS Actor 线程模型**实现大厅与多场小游戏共存互不阻塞；打通 **`0x35 Respawn` 单连接跨实例无缝切换**与**跑酷同赛道随进随跑、个人毫秒级计时、检查点复位及终点 AABB 结算闭环**！  
-> **教学设计原则**：**透彻讲清“是什么、为什么、怎么做”**。严格遵守架构分层红线与开闭原则（OCP），让未来新增其他小游戏（如 TNT Run、掘一死战 Spleef）只需在 `src/game/<minigame>/` 下扩展子类即可即插即用。  
+> **本阶段核心目标**：将服务端从“单一大厅实例”全面升级为“**支持动态弹性分线的多实例大厅并发引擎**”！引入对齐 Cuberite 的 **`settings.ini` + `assets/maps/<map>.ini` 双层 INI 配置持久化体系**；在 `LoginHandler` 落地**全服总人数硬上限拦截**与**大厅满员自动裂变分线（`lobby-1`, `lobby-2`... 共享只读 `World` 区块内存）**；开辟清晰的 `src/game/` 玩法与实例调度层（`IGameInstance`、`InstanceManager`、`src/game/lobby/`），采用**每实例独立 20 TPS Actor 线程模型**实现多大厅分线并发互不阻塞；打通 **`0x35 Respawn` 单连接跨分线无缝原子切换**！  
+> **教学设计原则**：**透彻讲清“是什么、为什么、怎么做”**。严格遵守架构分层红线与开闭原则（OCP），让未来新增其他自定义空间实例只需在 `src/game/` 下扩展 `IGameInstance` 子类即可即插即用。  
 > **预估工期**：4 ~ 5 天 | **核心任务数**：6 个微任务（TASK-4.1 ~ TASK-4.6）
 
 ## 一、 架构设计决策树总览（Grill-Me 共识基线）
@@ -12,24 +18,24 @@
 
 | 决策维度 | 最终选定方案 | 核心架构收益与设计理由 |
 | :--- | :--- | :--- |
-| **1. 并发与线程模型** | **Per-Instance Actor 模型（对齐 Cuberite `cWorld`）** | 只读地形 `std::shared_ptr<const World>`（`.mcpe_map`）全局共享一份内存；每个大厅分线或小游戏实例各自拥有独立的 `EventQueue` + `EntityManager`（含 `SpatialGrid`）+ `WorldTicker`（20 TPS 专属线程），实例间 100% 物理隔离、零锁争用。 |
+| **1. 并发与线程模型** | **Per-Instance Actor 模型（对齐 Cuberite `cWorld`）** | 只读地形 `std::shared_ptr<const World>`（`.mcpe_map`）全局共享一份内存；每个大厅分线实例各自拥有独立的 `EventQueue` + `EntityManager`（含 `SpatialGrid`）+ `WorldTicker`（20 TPS 专属线程），实例间 100% 物理隔离、零锁争用。 |
 | **2. 人数上限与大厅分线** | **全服硬上限拦截 + 动态弹性大厅分线 (`lobby-1..N`)** | `settings.ini` 配置 `server_max_players`（超限在 `LoginHandler` 发 `0x00 Disconnect` 拒绝连入）与 `lobby_max_players`（`lobby-1` 满员自动新建 `lobby-2` 实例并共享只读地图，支持 `/lobby [id]` 手动切线）。 |
-| **3. 代码目录与扩展边界** | **`src/world/`（纯空间底座）+ `src/game/`（按玩法分子目录）** | `src/world/` 仅保留通用区块与 AOI 底座；新增 `src/game/` 存放 `IGameInstance`、`InstanceManager` 及 `lobby/`、`parkour/` 子目录。未来加新小游戏只需平铺新建 `src/game/<new_game>/`，完全符合开闭原则。 |
-| **4. 配置管理与持久化** | **根目录 `settings.ini` + 地图伴生 `assets/maps/<map>.ini`** | `settings.ini` 管理 `[Server]` 与 `[Lobby]` 全局/分线配额（首次启动自动生成，支持 `/setmaxplayers` 写回）；`<map>.ini` 管理单图出生点、`fall_reset_y` 与跑酷起点/检查点/终点 AABB（取代 `spawn.json`，支持 `/setspawn` 写回）。 |
-| **5. 跑酷房间运作模式** | **同赛道多人随进随跑 + 独立个人计时 + 基类预留回合制 FSM** | 跑酷实例支持多人随时加入同屏竞跳（满员同样可裂变新分线），每名玩家拥有独立的 `steady_clock` 毫秒计时器、检查点与 Fall Reset，通关后广播成绩并在 3 秒后自动切回大厅；基类预留 `Waiting -> Countdown -> Playing -> Ended` 钩子。 |
+| **3. 代码目录与扩展边界** | **`src/world/`（纯空间底座）+ `src/game/`（按玩法分子目录）** | `src/world/` 仅保留通用区块与 AOI 底座；新增 `src/game/` 存放 `IGameInstance`、`InstanceManager` 及 `lobby/` 子目录。未来扩展新功能完全符合开闭原则。 |
+| **4. 配置管理与持久化** | **根目录 `settings.ini` + 地图伴生 `assets/maps/<map>.ini`** | `settings.ini` 管理 `[Server]` 与 `[Lobby]` 全局/分线配额（首次启动自动生成，支持 `/setmaxplayers` 写回）；`<map>.ini` 管理单图出生点与 `fall_reset_y`（取代 `spawn.json`，支持 `/setspawn` 写回）。 |
+| **5. 业务边界与小游戏归档** | **大厅轻量微服务聚焦 + 跑酷归档至 `archive/parkour/`** | 跑酷因强依赖红石、活塞与原版物理模拟，已解耦归档至 `archive/parkour/`；引擎全量聚焦高并发、低内存的大厅分线与跨服网关。 |
 
 ## 二、 心智模型跃迁与底层原理（是什么与为什么）
 
-### 2.1 为什么大厅与小游戏共存必须采用“只读地形共享 + 每实例独立 Actor 线程”？
+### 2.1 为什么多大厅分线必须采用“只读地形共享 + 每实例独立 Actor 线程”？
 
 * **是什么**：
-  当服务器同时运行 3 个大厅分线（`lobby-1` ~ `lobby-3`）和 5 个跑酷房间（`parkour-spiral-1` 等）时，系统中存在 **8 个并行的游戏空间实例**。
+  当服务器同时运行多个大厅分线（`lobby-1` ~ `lobby-N`）时，系统中存在多个并行的游戏空间实例。
   我们将每个实例拆解为两部分：
-  1. **静态只读地形（Static Read-Only Terrain，`std::shared_ptr<const world::World>`）**：由 `.mcpe_map` 加载的区块方块数组 `ChunkSection`。由于大厅和小游戏均开启方块保护（禁止挖掘/放置破坏地图），地形在运行期是 **100% 不可变（Immutable）** 的；
+  1. **静态只读地形（Static Read-Only Terrain，`std::shared_ptr<const world::World>`）**：由 `.mcpe_map` 加载的区块方块数组 `ChunkSection`。由于大厅开启全局只读保护（禁止挖掘/放置破坏地图），地形在运行期是 **100% 不可变（Immutable）** 的；
   2. **动态实例状态（Dynamic Instance State，`game::IGameInstance`）**：包含该实例内的在线玩家实体表 `EntityManager`、九宫格索引 `SpatialGrid`、跨线程事件队列 `EventQueue` 以及驱动它的 20 TPS 物理线程 `WorldTicker`。
 * **为什么这样设计能同时兼顾 $\le 30\text{MB}$ 内存红线与高并发吞吐**：
-  - **内存极致共享**：哪怕裂变出 10 个大厅分线实例和 10 个螺旋跑酷实例，内存中依然**只有 1 份 `lobby.mcpe_map` 和 1 份 `spiral.mcpe_map` 的 `World` 对象**！新增一个分线实例仅增加空的哈希表和队列，额外内存开销不到 **16 KB**；
-  - **故障与负载绝对隔离**：`lobby-1` 的 50 名玩家同屏聊天移动，与 `parkour-spiral-1` 的 20 名玩家高频 AABB 碰撞计时，运行在各自独立的 `WorldTicker` 线程上，彼此之间没有任何 `std::mutex` 锁竞争。
+  - **内存极致共享**：哪怕裂变出 10 个大厅分线实例，内存中依然**只有 1 份 `lobby.mcpe_map` 的 `World` 对象**！新增一个分线实例仅增加空的哈希表和队列，额外内存开销不到 **16 KB**；
+  - **故障与负载绝对隔离**：`lobby-1` 的 50 名玩家同屏聊天移动，与 `lobby-2` 的玩家，运行在各自独立的 `WorldTicker` 线程上，彼此之间没有任何 `std::mutex` 锁竞争。
 
 ### 2.2 为什么需要双层人数上限（`server_max_players` vs `lobby_max_players`）？
 
@@ -38,22 +44,22 @@
   2. 如果只有全服上限（例如 500 人）而没有**单大厅分线上限（`lobby_max_players`，如 50 人）**，500 名玩家全部挤在同一个 `lobby-1` 的出生点喷泉旁，客户端渲染 500 个皮肤模型会直接掉帧卡死（Client FPS Drop），且单区块九宫格广播退化为 500 人全量互发。
 * **商业服标准解法**：
   - **第一道防线（`LoginHandler` 全服硬上限拦截）**：在收到 `0x00 Login Start` 时，检查 `client_manager->playerCount() >= settings.server.max_players`。若超限，直接下发 **Login 阶段的 `0x00 Disconnect`**（携带红色 JSON 提示 `"{"text":"服务器已满员，请稍后再试！","color":"red"}"`）并关闭连接；
-  - **第二道分流（`InstanceManager` 动态弹性分线）**：玩家通过登录鉴权进入 `PLAY` 阶段（或从跑酷房间返回大厅）时，`InstanceManager::acquireLobbyInstance()` 按序扫描现有大厅列表 `lobby-1, lobby-2, ...`：
+  - **第二道分流（`InstanceManager` 动态弹性分线）**：玩家通过登录鉴权进入 `PLAY` 阶段时，`InstanceManager::acquireLobbyInstance()` 按序扫描现有大厅列表 `lobby-1, lobby-2, ...`：
     - 若找到首个 `playerCount() < lobby_max_players` 的分线，直接分配进入；
     - 若所有现有分线均已满员且分线总数 `< max_lobby_instances`，则动态创建新的 `LobbyInstance("lobby-" + next_id)`，挂载共享的 `lobby_world` 并启动其 20 TPS 线程！
 
-### 2.3 玩家在“大厅分线 $\leftrightarrow$ 跑酷实例”之间切换时，如何保证跨线程与协议时序安全？
+### 2.3 玩家在不同大厅分线之间切换（`/lobby [id]`）时，如何保证跨线程与协议时序安全？
 
 * **是什么**：
-  当玩家在大厅输入 `/join spiral`（或 `/lobby 2` 切线，或跑酷通关 3 秒后自动返回大厅）时，玩家的 `ClientSession` 需要从**源实例 `Instance A`（运行在线程 A）** 迁移到 **目标实例 `Instance B`（运行在线程 B）**。
+  当玩家在聊天栏输入 `/lobby 2` 手动切线（或某分线满员系统分流）时，玩家的 `ClientSession` 需要从**源分线 `lobby-1`（运行在线程 A）** 迁移到 **目标分线 `lobby-2`（运行在线程 B）**。
 * **为什么不能直接在当前线程里同时操作两个实例的 `EntityManager`**：
-  因为 `Instance A` 的 `EntityManager` 归线程 A 独占写入，`Instance B` 的 `EntityManager` 归线程 B 独占写入！若跨线程直接调用 `instanceB->entityManager().addPlayer(...)`，会立即破坏单写入者原则并引发迭代器崩溃。
+  因为 `lobby-1` 的 `EntityManager` 归线程 A 独占写入，`lobby-2` 的 `EntityManager` 归线程 B 独占写入！若跨线程直接调用 `instanceB->entityManager().addPlayer(...)`，会立即破坏单写入者原则并引发迭代器崩溃。
 * **怎么做（三步原子迁移与 `0x35 Respawn` 协议流水线）**：
   1. **步骤 1（从源实例摘除）**：向源实例 `Instance A` 的 `EventQueue` 投递 `PlayerLeaveEvent{session_id}`，由线程 A 在本 Tick 内安全将其从 `Instance A` 的 `EntityManager` 与 `SpatialGrid` 中移除，并向源实例九宫格邻居广播 `0x32 Destroy Entities` + `0x2E RemovePlayer`；
   2. **步骤 2（客户端协议层 `0x35` 刷屏与新地形下发）**：更新 `session->setCurrentInstance(instance_b)`，向该玩家依次发送：
-     - 过渡维度 `0x35 Respawn (Dimension = -1 Nether)` + 目标维度 `0x35 Respawn (Dimension = 0 Overworld)`（彻底清空客户端旧世界的区块缓存与旧实体残留）；
+     - 过渡维度 `0x35 Respawn (Dimension = -1 Nether)` + 目标维度 `0x35 Respawn (Dimension = 0 Overworld)`（彻底清空客户端旧分线的区块渲染缓存与旧实体残留）；
      - 目标实例 `Instance B` 出生点周围的 `0x20 Chunk Data` 区块流；
-     - `0x46 Spawn Position`、`0x2C Player Abilities`、`0x47 Time Update` 以及定位到目标世界起点的 `0x2F Player Position And Look (Teleport ID)`；
+     - `0x46 Spawn Position`、`0x2C Player Abilities`、`0x47 Time Update` 以及定位到新分线出生点的 `0x2F Player Position And Look (Teleport ID)`；
   3. **步骤 3（注入目标实例）**：向目标实例 `Instance B` 的 `EventQueue` 投递 `PlayerJoinEvent{session_id, entity_id, username, uuid}`，由线程 B 在下一 Tick 安全将其注册进 `Instance B` 的 `EntityManager` 与 `SpatialGrid`，并与目标实例内的同屏玩家互发 `0x2E AddPlayer` + `0x05 SpawnPlayer`！
 
 ## 三、 严格四层架构拓扑与可扩展目录规划
@@ -68,9 +74,7 @@ mcpe/
 ├── assets/
 │   └── maps/
 │       ├── lobby.mcpe_map                   # 预烘焙浮空岛大厅二进制区块镜像
-│       ├── lobby.ini                        # [新增] 大厅地图伴生配置 (出生点坐标、朝向、fall_reset_y)
-│       ├── spiral.mcpe_map                  # [新增] 预烘焙螺旋跑酷地图二进制镜像
-│       └── spiral.ini                       # [新增] 螺旋跑酷伴生配置 (出生点、起点/检查点/终点 AABB)
+│       └── lobby.ini                        # [新增] 大厅地图伴生配置 (出生点坐标、朝向、fall_reset_y)
 ├── src/
 │   ├── CMakeLists.txt                       # [更新] 纳入 common/IniConfig 与 game/ 模块
 │   ├── common/
@@ -87,56 +91,51 @@ mcpe/
 │   │   ├── EntityManager.h/.cc              # 单实例内实体生命周期与局部 AOI 多播
 │   │   ├── EventQueue.h                     # 单实例 MPSC 双缓冲事件队列
 │   │   └── WorldTicker.h/.cc                # 单实例 20 TPS 物理节拍器线程
-│   ├── game/                                # [全新核心层] 多实例调度与可插拔小游戏框架
+│   ├── game/                                # [全新核心层] 多实例大厅调度框架
 │   │   ├── IGameInstance.h/.cc              # 实例抽象基类 (封装 World, EventQueue, EntityManager, WorldTicker 及 FSM 钩子)
 │   │   ├── InstanceManager.h/.cc            # 全局实例注册表、大厅弹性分线器与跨实例 0x35 迁移协调器
-│   │   ├── lobby/
-│   │   │   └── LobbyInstance.h/.cc          # 大厅分线实例 (永昼、/fly 开关、/setspawn 持久化、虚空拉回)
-│   │   └── parkour/
-│   │       ├── ParkourMapConfig.h/.cc       # 解析 <map>.ini 中的起点、多级检查点与终点 AABB
-│   │       └── ParkourInstance.h/.cc        # 跑酷实例 (同赛道多人随进随跑、个人毫秒计时、检查点复位、通关结算)
+│   │   └── lobby/
+│   │       └── LobbyInstance.h/.cc          # 大厅分线实例 (永昼、/fly 开关、/setspawn 持久化、虚空拉回)
 │   ├── protocol/
 │   │   ├── PacketTypes.h                    # [扩充] LoginDisconnect(0x00), Respawn(0x35), Title(0x48)
 │   │   ├── GameTypes.h                      # [升级] 对接 settings.ini 配置结构
 │   │   ├── ClientSession.h/.cc              # [升级] 维护 current_instance_id_ 路由指针
 │   │   ├── LoginHandler.h/.cc               # [升级] 增加 server_max_players 满员 0x00 Disconnect 拦截
 │   │   ├── PlayHandler.h/.cc                # [升级] 增加 switchPlayerWorld (0x35) 并按会话当前实例投递事件
-│   │   └── ChatHandler.h/.cc                # [升级] 支持 /join <map>, /lobby [id], /lobbies, /leave, /setmaxplayers
-│   └── main.cc                              # [升级] 加载 settings.ini，初始化 InstanceManager 并挂载大厅与跑酷地图
+│   │   └── ChatHandler.h/.cc                # [升级] 支持 /lobby [id], /lobbies, /help, /admin, /setmaxplayers, /setspawn
+│   └── main.cc                              # [升级] 加载 settings.ini，初始化 InstanceManager 并挂载大厅地图
+├── archive/
+│   └── parkour/                             # [归档] 早期跑酷小游戏实现与测试代码 (解耦归档)
 └── tests/
     ├── test_ini_config.cc                   # [新增] settings.ini 与 <map>.ini 读写往返单测
-    ├── test_lobby_sharding.cc               # [新增] 大厅满员自动裂变分线与全服人数上限拦截单测
-    └── test_parkour_instance.cc             # [新增] 跑酷起点触发、检查点更新、Fall Reset 与终点毫秒结算单测
+    └── test_lobby_sharding.cc               # [新增] 大厅满员自动裂变分线与全服人数上限拦截单测
 ```
 
-### 3.2 多实例多线程 Actor 并发拓扑与跨实例切换时序图
+### 3.2 多实例多线程 Actor 并发拓扑与跨分线切换
 
 ```mermaid
 flowchart TB
     subgraph NetPool["Asio 网络 I/O 协程层"]
         S1["ClientSession 1\n(instance_id = 'lobby-1')"]
         S2["ClientSession 2\n(instance_id = 'lobby-2')"]
-        S3["ClientSession 3\n(instance_id = 'parkour-spiral-1')"]
+        S3["ClientSession 3\n(instance_id = 'lobby-2')"]
     end
 
     subgraph SharedAssets["只读共享地图内存池 (Zero-Copy Terrain)"]
-        W_Lobby[("World: lobby.mcpe_map\n(常驻只读 1 份)")]
-        W_Spiral[("World: spiral.mcpe_map\n(常驻只读 1 份)")]
+        W_Lobby[("World: lobby.mcpe_map\n(常驻只读 1 份，全局共享)")]
     end
 
     subgraph InstMgr["InstanceManager (实例路由与弹性分线中心)"]
         L1["LobbyInstance 'lobby-1'\n[EventQueue + EntityManager + 20 TPS Thread]"]
         L2["LobbyInstance 'lobby-2' (满员自动裂变)\n[EventQueue + EntityManager + 20 TPS Thread]"]
-        P1["ParkourInstance 'parkour-spiral-1'\n[EventQueue + EntityManager + ParkourRuns + 20 TPS Thread]"]
     end
 
     S1 -- "push(WorldEvent)" --> L1
     S2 -- "push(WorldEvent)" --> L2
-    S3 -- "push(WorldEvent)" --> P1
+    S3 -- "push(WorldEvent)" --> L2
 
     L1 -. "共享 const World*" .-> W_Lobby
     L2 -. "共享 const World*" .-> W_Lobby
-    P1 -. "共享 const World*" .-> W_Spiral
 ```
 
 ## 四、 任务逐步实现指南（怎么做：接口契约与代码落地）
@@ -157,30 +156,17 @@ flowchart TB
   max_players_per_instance = 50
   max_instances = 10
   view_distance = 5
-
-  [Parkour]
-  maps = spiral
-  max_players_per_instance = 25
   ```
-* **地图伴生配置 `assets/maps/spiral.ini`（单图出生点与跑酷碰撞盒定义）**：
+* **地图伴生配置 `assets/maps/lobby.ini`（单图出生点与虚空掉落拉回阈值）**：
   ```ini
   [World]
-  baked_file = assets/maps/spiral.mcpe_map
+  baked_file = assets/maps/lobby.mcpe_map
   spawn_x = 0.50
   spawn_y = 65.00
   spawn_z = 0.50
   spawn_yaw = 0.00
   spawn_pitch = 0.00
-  fall_reset_y = 40.00
-
-  [Parkour]
-  start_min = -1.5, 65.0, 2.5
-  start_max = 2.5, 68.0, 4.5
-  checkpoint_1_min = 10.0, 72.0, 15.0
-  checkpoint_1_max = 13.0, 75.0, 18.0
-  checkpoint_1_spawn = 11.5, 72.0, 16.5, 90.0, 0.0
-  finish_min = 0.0, 95.0, 0.0
-  finish_max = 3.0, 99.0, 3.0
+  fall_reset_y = 30.00
   ```
 
 #### 2. `IniConfig` 核心接口落地 (`src/common/IniConfig.h`)
@@ -269,7 +255,7 @@ struct AABB {
 在 Sprint 3.5 中，`main.cc` 只创建了唯一的一套 `EventQueue`、`EntityManager` 和 `WorldTicker`。现在我们将这三者内聚到 `game::IGameInstance` 基类中：
 - 每个 `IGameInstance` 持有一个只读共享的 `std::shared_ptr<const world::World> world_`；
 - 内部独自拥有 `world::EventQueue event_queue_`、`world::EntityManager entity_manager_` 与 `std::unique_ptr<world::WorldTicker> ticker_`；
-- 提供虚钩子函数 `onPlayerJoined(session_id, username)`、`onPlayerLeft(session_id)`、`onPlayerMoved(session_id, move_event)`、`onTick()`，供子类 `LobbyInstance`、`ParkourInstance` 以及未来的新小游戏重写各自的游戏规则！
+- 提供虚钩子函数 `onPlayerJoined(session_id, username)`、`onPlayerLeft(session_id)`、`onPlayerMoved(session_id, move_event)`、`onTick()`，供子类 `LobbyInstance` 重写各自的游戏规则！
 
 #### 2. 核心代码落地 (`src/game/IGameInstance.h`)
 ```cpp
@@ -293,18 +279,18 @@ struct AABB {
 namespace mcpe::game {
 
 /**
- * @brief 通用房间/实例生命周期状态枚举（供回合制或竞速小游戏统一使用）
+ * @brief 通用房间/实例生命周期状态枚举
  */
 enum class InstanceState : uint8_t {
   Waiting = 0,    // 等待玩家加入
-  Countdown = 1,  // 开赛倒计时
-  Playing = 2,    // 游戏进行中 (大厅与随进随跑跑酷常驻此状态)
-  Ended = 3       // 游戏结算与回收中
+  Countdown = 1,  // 开局倒计时
+  Playing = 2,    // 游戏进行中 (大厅常驻此状态)
+  Ended = 3       // 结算与回收中
 };
 
 enum class InstanceType : uint8_t {
   Lobby = 0,
-  Parkour = 1
+  CustomMinigame = 1
 };
 
 class IGameInstance {
@@ -357,7 +343,7 @@ class IGameInstance {
   void setReturnToLobbyCallback(ReturnToLobbyFn fn) { return_lobby_fn_ = std::move(fn); }
 
  protected:
-  // 供子类 (LobbyInstance / ParkourInstance / 未来小游戏) 覆写的 20 TPS 单线程安全钩子
+  // 供子类 (如 LobbyInstance 或自定义玩法子类) 覆写的 20 TPS 单线程安全钩子
   virtual void onPlayerJoined(uint64_t session_id, std::string_view username) {}
   virtual void onPlayerLeft(uint64_t session_id) {}
   virtual void onPlayerMoved(
@@ -387,7 +373,7 @@ class IGameInstance {
 #endif  // MCPE_GAME_I_GAME_INSTANCE_H
 ```
 
-> **架构亮点**：注意 `onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move_event)` 接收的是**非 const 引用**！当子类（无论是大厅还是跑酷）在 `onPlayerMoved` 中检测到玩家跌落虚空触发 Fall Reset 时，直接调用 `teleport_fn_(session_id, reset_pos, reset_rot)` 下发 `0x2F`，并**当场修改 `move_event.position = reset_pos`**，随后基类继续将其交给 `entity_manager_.updatePlayerPosition()`，从而在实例线程内部 100% 闭环更新 `SpatialGrid` 九宫格归属！
+> **架构亮点**：注意 `onPlayerMoved(uint64_t session_id, world::PlayerMoveEvent& move_event)` 接收的是**非 const 引用**！当子类在 `onPlayerMoved` 中检测到玩家跌落虚空触发 Fall Reset 时，直接调用 `teleport_fn_(session_id, reset_pos, reset_rot)` 下发 `0x2F`，并**当场修改 `move_event.position = reset_pos`**，随后基类继续将其交给 `entity_manager_.updatePlayerPosition()`，从而在实例线程内部 100% 闭环更新 `SpatialGrid` 九宫格归属！
 
 ### TASK-4.3: 大厅弹性分线管理器 `InstanceManager` 与 `LoginHandler` 全服满员拦截 (`src/game/InstanceManager.h/.cc`)
 
@@ -414,7 +400,7 @@ if (auto mgr = session->clientManager()) {
 ```
 
 #### 2. `InstanceManager` 大厅自动分线算法 (`src/game/InstanceManager.cc`)
-`InstanceManager` 维护所有活跃的大厅分线 `lobbies_`（`lobby-1`, `lobby-2`, ...）与小游戏实例 `minigames_`（`parkour-spiral-1`, ...）：
+`InstanceManager` 维护所有活跃的大厅分线 `lobbies_`（`lobby-1`, `lobby-2`, ...）：
 ```cpp
 std::shared_ptr<IGameInstance> InstanceManager::acquireAvailableLobby() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -456,7 +442,7 @@ std::shared_ptr<IGameInstance> InstanceManager::acquireAvailableLobby() {
 
 ### TASK-4.4: `0x35 Respawn` 单连接跨实例无缝切换流水线 (`InstanceManager::transferPlayer`)
 
-当玩家执行 `/join spiral`、`/lobby 2` 或跑酷通关自动返回大厅时，`InstanceManager::transferPlayer(session, target_instance_id)` 执行跨实例原子切换：
+当玩家执行 `/lobby 2` 或系统满员分流时，`InstanceManager::transferPlayer(session, target_instance_id)` 执行跨实例原子切换：
 
 ```cpp
 bool InstanceManager::transferPlayer(
@@ -492,9 +478,7 @@ bool InstanceManager::transferPlayer(
   session->setCurrentInstanceId(new_inst->instanceId());
 
   // 3. 下发双 0x35 Respawn (Nether -1 -> Overworld 0) + 新实例 11x11 区块流 + 0x2F 起点传送
-  const auto target_gamemode = (new_inst->type() == InstanceType::Parkour)
-                                   ? protocol::GameMode::Adventure
-                                   : protocol::GameMode::Adventure;
+  const auto target_gamemode = protocol::GameMode::Adventure;
   protocol::PlayHandler::switchPlayerWorld(session, new_inst->world(), target_gamemode);
 
   // 4. 向新实例物理线程投递 PlayerJoinEvent（自动在新实例九宫格内触发 0x2E AddPlayer 与 0x05 SpawnPlayer）
@@ -518,9 +502,14 @@ bool InstanceManager::transferPlayer(
 }
 ```
 
-### TASK-4.5: 跑酷小游戏实例实现：同赛道随进随跑、检查点、Fall Reset 与 AABB 毫秒结算 (`src/game/parkour/ParkourInstance.h/.cc`)
+### TASK-4.5 (归档案例参考): 跑酷小游戏实例实现与解耦归档沉淀 (`archive/parkour/`)
 
-#### 1. 核心状态结构 (`ParkourInstance.h`)
+> [!NOTE]
+> **模块解耦与归档说明**：
+> 因跑酷玩法深度依赖原版红石、压力板与复杂物理掉落模拟，违背了轻量级微服务大厅（$\le 30\text{MB}$ 内存）的设计初衷，本项目已将其源码与资源完整归档至 [`archive/parkour/`](../../archive/parkour/)。
+> 本节完整保留原设计与代码推演，作为开发者学习“如何基于 `IGameInstance` 扩展自定义子玩法”的工业级实践案例。
+
+#### 1. 核心状态结构 (`archive/parkour/src/game/parkour/ParkourInstance.h`)
 ```cpp
 #ifndef MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H
 #define MCPE_GAME_PARKOUR_PARKOUR_INSTANCE_H
@@ -696,10 +685,10 @@ void ParkourInstance::onTick() {
 
 #### 1. `ChatHandler` 新增多实例与配置持久化指令
 在 `ChatHandler::handleCommand` 中对接 `InstanceManager` 与 `IniConfig`：
-- `/maps`：列出当前已加载的所有跑酷地图及各实例在线人数（如 `parkour-spiral-1 (3/25)`）；
-- `/join <map>`：调用 `instance_manager->joinParkour(session, map_name)`（若 `parkour-<map>-1` 满员，同样自动裂变 `parkour-<map>-2` 并通过 `0x35 Respawn` 切入）；
+- `/help`：系统富文本输出可用指令帮助列表；
 - `/lobby [id]` 或 `/leave`：若不带参数则调用 `acquireAvailableLobby()` 返回未满员大厅分线；若指定编号（如 `/lobby 2`）且未满员则切入指定大厅分线；
 - `/lobbies`：展示所有活跃大厅分线状态（如 `lobby-1 [50/50 满员]`, `lobby-2 [12/50 空闲]`）；
+- `/admin auth <secret>` / `/admin deauth` / `/admin dev [on|off]`：管理员鉴权认证与调试飞行开关；
 - `/setmaxplayers <server_max> <lobby_max>`：动态更新内存配额并立即调用 `IniConfig::saveToFile("settings.ini")` 持久化写回磁盘；
 - `/setspawn`：从当前实例 `EntityManager` 获取玩家权威坐标，更新当前地图对应的 `assets/maps/<map>.ini` 并写回磁盘。
 
@@ -708,10 +697,10 @@ void ParkourInstance::onTick() {
 ### 5.1 工业避坑血泪史
 
 * **坑 1：跨实例切换时旧实例的 `PlayerLeaveEvent` 与新实例的 `PlayerJoinEvent` 乱序竞态**
-  - **现象**：玩家从 `lobby-1` 切往 `parkour-spiral-1` 时，若不先更新 `session->setCurrentInstanceId()`，客户端在切换瞬间上行的残余移动包仍会被路由进 `lobby-1`，或者旧客户端未收到 `0x32 DestroyEntities` 导致大厅残留假人。
+  - **现象**：玩家从 `lobby-1` 切往 `lobby-2` 时，若不先更新 `session->setCurrentInstanceId()`，客户端在切换瞬间上行的残余移动包仍会被路由进 `lobby-1`，或者旧客户端未收到 `0x32 DestroyEntities` 导致大厅残留假人。
   - **正解**：严格按照 **`old_inst->pushEvent(Leave)` $\to$ 更新 `session->setCurrentInstanceId(new_id)` $\to$ 下发 `0x35 Respawn` + 新区块 + `0x2F`（生成新 `Teleport ID` 拦截切换途中的旧坐标移动包！） $\to$ `new_inst->pushEvent(Join)`** 的四步顺序执行。因为 `0x2F` 更新了 `pendingTeleportId()`，在客户端确认新世界出生点前，任何在途的旧世界移动包都会被 `PlayHandler` 的未确认传送屏障安全过滤。
 * **坑 2：`0x35 Respawn` 同维度切世界导致客户端地形残留不刷新**
-  - **现象**：大厅是主世界（`Dimension = 0`），跑酷地图也是主世界（`Dimension = 0`）。若只发一个 `Dimension = 0` 的 `0x35 Respawn`，1.12.2 原版客户端会跳过部分渲染缓存清理，导致大厅方块残留在跑酷半空中。
+  - **现象**：源分线是主世界（`Dimension = 0`），目标分线也是主世界（`Dimension = 0`）。若只发一个 `Dimension = 0` 的 `0x35 Respawn`，1.12.2 原版客户端会跳过部分渲染缓存清理，导致旧分线方块残留在新分线半空中。
   - **正解**：同维度切世界时，连续下发一个过渡维度包 `Respawn(Dimension = -1)` 紧接着 `Respawn(Dimension = 0)`，客户端 100% 清空旧区块与实体表。
 * **坑 3：多个实例析构时的线程安全退出顺序**
   - **现象**：服务器关闭时，若先销毁 `ClientManager` 或 `World`，而各个 `IGameInstance` 的 `WorldTicker` 线程还在执行 `tick()`，会引发悬空引用崩溃。
@@ -723,24 +712,24 @@ void ParkourInstance::onTick() {
 
 | 评价维度 | 全局单线程 Tick 所有房间 | 每实例独立 Actor 线程 (本项目采用，对齐 Cuberite) |
 | :--- | :--- | :--- |
-| **多核 CPU 利用率** | 仅能吃满单核，10 个房间累计耗时超过 50ms 即全服掉帧 | **天然多核并行**，操作系统调度器将不同大厅分线与小游戏均匀分布至多核 |
-| **故障与卡顿隔离** | 单个小游戏计算复杂会直接拖慢主大厅所有玩家 | **100% 物理隔离**，任一小游戏实例负载波动对主大厅零影响 |
+| **多核 CPU 利用率** | 仅能吃满单核，10 个房间累计耗时超过 50ms 即全服掉帧 | **天然多核并行**，操作系统调度器将不同大厅分线均匀分布至多核 |
+| **故障与卡顿隔离** | 单个分线计算复杂会直接拖慢主大厅所有玩家 | **100% 物理隔离**，任一分线实例负载波动对其他分线零影响 |
 | **内存与同步开销** | 零锁，但单队列争用剧烈 | 每个实例独立 `EventQueue` 分散生产者锁压力，只读共享 `World` 零额外区块内存 |
 
-#### 选型 2：未来新小游戏扩展成本验证（开闭原则 OCP）
+#### 选型 2：未来新玩法扩展成本验证（开闭原则 OCP）
 
-当你在 Sprint 4 之后想要新增第二个小游戏（例如 **掘一死战 Spleef** 或 **TNT Run**）时，在当前架构下需要改哪些地方？
+当开发者想要新增自定义游戏实例时，在当前架构下需要改哪些地方？
 1. `src/network/`、`src/common/`、`src/world/`：**0 行修改**；
-2. 新建 `src/game/spleef/SpleefInstance.h/.cc`，继承 `game::IGameInstance`，重写 `onPlayerMoved` 与 `onTick`（利用基类已有的 `InstanceState::Waiting -> Countdown -> Playing -> Ended` 状态机）；
-3. 在 `InstanceManager` 中注册 `"spleef"` 类型并配置 `assets/maps/spleef.ini`。
+2. 新建游戏子类，继承 `game::IGameInstance`，重写 `onPlayerMoved` 与 `onTick`；
+3. 在 `InstanceManager` 中注册该实例。
 真正做到了**对扩展开放，对修改关闭**！
 
 ### 5.3 高频面试核心考点与标准作答
 
-* **Q1：你们的大厅和小游戏是怎么共存的？如果一个大厅人满了怎么处理？**
-  - **作答**：我们借鉴了 Cuberite 和商业群组服的 Actor 实例隔离设计。静态的地图区块数据（`World`）从 `.mcpe_map` 加载后作为 `std::shared_ptr<const World>` 全局只读共享；而运行时的动态状态（`EventQueue`、`EntityManager`、`SpatialGrid` 和 20 TPS `WorldTicker` 线程）被封装在 `IGameInstance` 中。我们在 `settings.ini` 中配置了双层上限：全服总上限 `server_max_players` 在 `LoginHandler` 阶段做 `0x00 Disconnect` 准入保护；单大厅上限 `lobby_max_players`（如 50 人）由 `InstanceManager` 管控，当 `lobby-1` 满 50 人时自动裂变创建 `lobby-2` 实例并挂载同一个只读 `World` 指针，新建一个分线仅需不到 16KB 内存，且不同分线和跑酷房间运行在各自独立的 20 TPS 线程上互不阻塞。
-* **Q2：玩家从大厅进入跑酷房间时，底层发生了什么？怎么保证多线程切换不崩溃？**
-  - **作答**：整个切换在单条 TCP 连接内通过四步异步消息传递完成，没有任何跨线程直接写内存的操作：① 向原大厅实例的 MPSC `EventQueue` 投递 `PlayerLeaveEvent`，由大厅线程安全移除实体并向原九宫格邻居广播 `0x32 DestroyEntities`；② 切换 `ClientSession` 绑定的 `current_instance_id`；③ 在协议层连续下发 `0x35 Respawn (-1 -> 0)` 清空客户端区块缓存，流式下发跑酷地图区块与 `0x2F` 起点传送包（刷新 `Teleport ID` 屏障过滤在途旧移动包）；④ 向目标跑酷实例的 `EventQueue` 投递 `PlayerJoinEvent`，由跑酷线程将其纳入跑酷 AOI 网格与个人毫秒级计时器。
+* **Q1：你们的大厅动态分线是怎么设计的？如果一个大厅人满了怎么处理？**
+  - **作答**：我们借鉴了 Cuberite 和商业群组服的 Actor 实例隔离设计。静态的地图区块数据（`World`）从 `.mcpe_map` 加载后作为 `std::shared_ptr<const World>` 全局只读共享；而运行时的动态状态（`EventQueue`、`EntityManager`、`SpatialGrid` 和 20 TPS `WorldTicker` 线程）被封装在 `IGameInstance` 中。我们在 `settings.ini` 中配置了双层上限：全服总上限 `server_max_players` 在 `LoginHandler` 阶段做 `0x00 Disconnect` 准入保护；单大厅上限 `lobby_max_players`（如 50 人）由 `InstanceManager` 管控，当 `lobby-1` 满 50 人时自动裂变创建 `lobby-2` 实例并挂载同一个只读 `World` 指针，新建一个分线仅需不到 16KB 内存，且不同分线运行在各自独立的 20 TPS 线程上互不阻塞。
+* **Q2：玩家在不同大厅分线之间切换时，底层发生了什么？怎么保证多线程切换不崩溃？**
+  - **作答**：整个切换在单条 TCP 连接内通过四步异步消息传递完成，没有任何跨线程直接写内存的操作：① 向原大厅实例的 MPSC `EventQueue` 投递 `PlayerLeaveEvent`，由原大厅线程安全移除实体并向原九宫格邻居广播 `0x32 DestroyEntities`；② 切换 `ClientSession` 绑定的 `current_instance_id`；③ 在协议层连续下发 `0x35 Respawn (-1 -> 0)` 清空客户端区块缓存，流式下发大厅区块与 `0x2F` 出生点传送包（刷新 `Teleport ID` 屏障过滤在途旧移动包）；④ 向目标大厅实例的 `EventQueue` 投递 `PlayerJoinEvent`，由目标大厅线程将其纳入目标九宫格 AOI 网格并同步周围实体。
 
 ## 六、 验收门禁与端到端联调规范 (DoD)
 
@@ -748,12 +737,13 @@ void ParkourInstance::onTick() {
 
 1. **编译与配置生成门禁**：
    - GCC 14 `-Wall -Wextra -Wpedantic` 零告警编译通过；
-   - 首次启动 `./bin/mcpe_server` 自动在根目录生成 `settings.ini`，并正确读取 `assets/maps/lobby.ini` 与 `assets/maps/spiral.ini`。
+   - 首次启动 `./bin/mcpe_server` 自动在根目录生成 `settings.ini`，并正确读取 `assets/maps/lobby.ini`。
 2. **自动化单元测试矩阵（CTest 100% 通过）**：
    - `test_ini_config`：验证 `settings.ini` 与 `<map>.ini` 的读写往返及三维向量/AABB 解析；
    - `test_lobby_sharding`：设置 `lobby_max_players = 2, server_max_players = 4`，模拟第 1、2 名玩家进入 `lobby-1`，断言第 3、4 名玩家自动触发裂变分配至 `lobby-2`，第 5 名玩家在登录阶段收到 `0x00 Disconnect` 被拒；
-   - `test_parkour_instance`：模拟玩家移动序列依次穿过起点 AABB $\to$ 检查点 1 AABB $\to$ 跌落 $Y < \text{fall\_reset\_y}$（断言拉回检查点 1 而非起点，且计时继续） $\to$ 穿过终点 AABB（断言输出精确毫秒耗时并在 60 Ticks 后触发返回大厅回调）。
+   - `test_parkour_instance`（已随跑酷代码归档至 `archive/parkour/tests/` 备查）。
 3. **多客户端实机联调闭环**：
-   - 客户端 A 与 B 连入大厅，输入 `/maps` 查看可用跑酷赛道，输入 `/join spiral` 后屏幕闪切约 0.2 秒无缝进入螺旋跑酷地图；
-   - 双方在跑酷赛道同屏可见，踩入起点框底部 ActionBar 实时跳动毫秒秒表；
-   - 中途跳下虚空瞬间拉回最近检查点；冲过终点框全房间广播通关时间，3 秒后自动通过 `0x35 Respawn` 无缝切回主大厅！
+   - 客户端 A 与 B 连入大厅，输入 `/lobbies` 查看各分线在线人数；
+   - 输入 `/lobby 2` 后屏幕闪切约 0.2 秒无缝切入分线 2；
+   - 双方在大厅同屏可见，聊天与九宫格 AOI 移动广播顺畅；
+   - 中途跳下虚空瞬间触发 Fall Reset 拉回大厅出生点。

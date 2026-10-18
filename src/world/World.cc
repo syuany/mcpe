@@ -271,7 +271,7 @@ bool
 World::saveSpawnConfig(const std::filesystem::path& path) const {
   if (path.extension() == ".ini") {
     common::IniConfig ini;
-    (void)ini.loadFromFile(path);  // 保留文件中已有的其他 Section（如 [Parkour]）
+    (void)ini.loadFromFile(path);  // 保留文件中已有的其他 Section
     const Vector3d pos = spawnPoint();
     const Rotation rot = spawnRotation();
     ini.setDouble("World", "spawn_x", pos.x);

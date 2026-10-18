@@ -236,7 +236,7 @@ graph TD
 
 ### 3. 为什么 MCPE 坚定选择“基于 `ChunkPos` 的九宫格网格法”？
 
-根据 [`AGENTS.md`](../../AGENTS.md) 确立的**“轻量级大厅与跑酷微服务引擎（内存 $\le 30\text{MB}$，冷启动 $\le 50\text{ms}$）”**核心指标，经过严密论证，MCPE 团队坚决否定了十字链表与四叉树，选择九宫格方案的深层架构动机如下：
+根据 [`AGENTS.md`](../../AGENTS.md) 确立的**“轻量级大厅与跨服网关微服务引擎（内存 $\le 30\text{MB}$，冷启动 $\le 50\text{ms}$）”**核心指标，经过严密论证，MCPE 团队坚决否定了十字链表与四叉树，选择九宫格方案的深层架构动机如下：
 
 #### ① 与 Minecraft 原版 Chunk 拓扑体系天然共生 (Zero-Cost Alignment)
 Minecraft 原版协议 340 的世界存储与网络流式传输，在底层天然就是以 $16 \times 16$ 方块的 Chunk 为物理单元（例如 `0x20 Chunk Data`、`0x1D Unload Chunk`）。
@@ -336,8 +336,8 @@ sequenceDiagram
 
 ## 八、 后续演进方向 (Future Horizons)
 
-1. **Sprint 4 房间状态机物理隔离（Room-level AOI）**：
-   - 将 `SpatialGrid` 与 `EntityManager` 封装下沉至房间实例（`Room`），大厅房间与各个跑酷微服务房间拥有独立的网格索引，天然阻断跨玩法广播；
+1. **Sprint 4 实例级物理隔离（Instance-level AOI）**：
+   - 将 `SpatialGrid` 与 `EntityManager` 封装下沉至大厅分线实例（`IGameInstance`），各分线拥有独立的网格索引，天然阻断跨分线广播；
 2. **动态视距自适应（Dynamic View Distance）**：
    - 在高并发压测或玩家极端聚集场景下，支持动态将 $R$ 从 1 降为 0（仅同区块广播）或启用基于优先级的实体上限裁剪（Top-K Entity Culling）；
 3. **视锥裁剪预研（Frustum Culling）**：

@@ -53,7 +53,7 @@ TEST(IniConfigTest, AABBBoundingBoxAndCommentsParsing) {
   constexpr std::string_view kRawIni = R"(
     ; Comment line with semicolon
     # Comment line with hash
-    [Parkour]
+    [Zone]
     start_min = 30.5, 32.0, 34.0
     start_max = 34.5, 36.0, 36.5
   )";
@@ -61,7 +61,7 @@ TEST(IniConfigTest, AABBBoundingBoxAndCommentsParsing) {
   IniConfig ini;
   ini.parseFromString(kRawIni);
 
-  auto box_opt = ini.getAABB("Parkour", "start_min", "start_max");
+  auto box_opt = ini.getAABB("Zone", "start_min", "start_max");
   ASSERT_TRUE(box_opt.has_value());
   EXPECT_TRUE(box_opt->contains(Vector3d{32.5, 33.0, 35.0}));
   EXPECT_FALSE(box_opt->contains(Vector3d{10.0, 33.0, 35.0}));
@@ -69,11 +69,11 @@ TEST(IniConfigTest, AABBBoundingBoxAndCommentsParsing) {
 }
 
 TEST(IniConfigTest, WorldIniSpawnConfigPreservesOtherSections) {
-  const std::filesystem::path tmp_map_ini = "/tmp/test_spiral_map.ini";
+  const std::filesystem::path tmp_map_ini = "/tmp/test_lobby_extra.ini";
 
   IniConfig initial;
-  initial.setString("Parkour", "start_min", "0.0, 64.0, 0.0");
-  initial.setString("Parkour", "start_max", "2.0, 66.0, 2.0");
+  initial.setString("Zone", "start_min", "0.0, 64.0, 0.0");
+  initial.setString("Zone", "start_max", "2.0, 66.0, 2.0");
   ASSERT_TRUE(initial.saveToFile(tmp_map_ini));
 
   World w1;
@@ -91,11 +91,11 @@ TEST(IniConfigTest, WorldIniSpawnConfigPreservesOtherSections) {
   EXPECT_NEAR(w2.spawnRotation().pitch, -5.0f, 0.01f);
   EXPECT_NEAR(w2.fallResetY(), 18.0, 0.01);
 
-  // 验证 [Parkour] Section 依然被完好保留
+  // 验证 [Zone] Section 依然被完好保留
   IniConfig reloaded;
   ASSERT_TRUE(reloaded.loadFromFile(tmp_map_ini));
-  EXPECT_TRUE(reloaded.hasSection("Parkour"));
-  EXPECT_EQ(reloaded.getString("Parkour", "start_min"), "0.0, 64.0, 0.0");
+  EXPECT_TRUE(reloaded.hasSection("Zone"));
+  EXPECT_EQ(reloaded.getString("Zone", "start_min"), "0.0, 64.0, 0.0");
 
   std::filesystem::remove(tmp_map_ini);
 }

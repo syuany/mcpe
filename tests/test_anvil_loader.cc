@@ -68,7 +68,7 @@ void writeString(std::vector<uint8_t>& buf, std::string_view str) {
 
 TEST(AnvilLoaderTest, ParseLevelDatMetadata) {
   // 构造标准 level.dat NBT 结构:
-  // Root Compound -> "Data" Compound -> SpawnX(100), SpawnY(64), SpawnZ(200), LevelName("Parkour101")
+  // Root Compound -> "Data" Compound -> SpawnX(100), SpawnY(64), SpawnZ(200), LevelName("Lobby101")
   std::vector<uint8_t> raw_nbt;
   // 1. Root Compound header
   writeU8(raw_nbt, 10);  // TAG_Compound
@@ -96,7 +96,7 @@ TEST(AnvilLoaderTest, ParseLevelDatMetadata) {
   // 2.4 LevelName
   writeU8(raw_nbt, 8);   // TAG_String
   writeString(raw_nbt, "LevelName");
-  writeString(raw_nbt, "Parkour101");
+  writeString(raw_nbt, "Lobby101");
 
   // Data TAG_End
   writeU8(raw_nbt, 0);
@@ -109,7 +109,7 @@ TEST(AnvilLoaderTest, ParseLevelDatMetadata) {
 
   auto meta_opt = AnvilLoader::parseLevelDat(gzip_data);
   ASSERT_TRUE(meta_opt.has_value());
-  EXPECT_EQ(meta_opt->level_name, "Parkour101");
+  EXPECT_EQ(meta_opt->level_name, "Lobby101");
   EXPECT_DOUBLE_EQ(meta_opt->spawn_point.x, 100.5);
   EXPECT_DOUBLE_EQ(meta_opt->spawn_point.y, 64.0);
   EXPECT_DOUBLE_EQ(meta_opt->spawn_point.z, 200.5);
