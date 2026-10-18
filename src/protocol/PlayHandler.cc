@@ -110,7 +110,8 @@ PlayHandler::onPlayerJoin(const std::shared_ptr<ClientSession>& session) {
           session->entityId(),
           session->username(),
           session->uuidBytes(),
-          lobby
+          lobby,
+          session->properties()
       );
       return;
     }

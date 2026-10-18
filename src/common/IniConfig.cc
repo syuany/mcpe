@@ -134,6 +134,16 @@ IniConfig::saveToFile(const std::filesystem::path& path) const {
   return out.good();
 }
 
+std::vector<std::string>
+IniConfig::sections() const {
+  std::vector<std::string> result;
+  result.reserve(data_.size());
+  for (const auto& [sec, _] : data_) {
+    result.push_back(sec);
+  }
+  return result;
+}
+
 bool
 IniConfig::hasSection(std::string_view section) const noexcept {
   return data_.find(section) != data_.end();

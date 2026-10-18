@@ -31,6 +31,8 @@ mcpe_add_test(test_lobby_sharding   test_lobby_sharding.cc   mcpe_protocol mcpe_
 
 # 5. Protocol 协议与多玩家联机测试
 mcpe_add_test(test_uuid             test_uuid.cc             mcpe_protocol)
+mcpe_add_test(test_bungeecord       test_bungeecord.cc       mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
+mcpe_add_test(test_portal           test_portal.cc           mcpe_lobby mcpe_world mcpe_common)
 mcpe_add_test(test_packet_router    test_packet_router.cc    mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
 mcpe_add_test(test_sprint3          test_sprint3.cc          mcpe_protocol mcpe_lobby mcpe_world mcpe_network mcpe_common)
 

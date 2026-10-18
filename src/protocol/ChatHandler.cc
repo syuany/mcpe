@@ -143,10 +143,12 @@ ChatHandler::handleCommand(uint64_t sender_sid, const std::string& cmd_line) {
     handleSetMaxPlayersCommand(sender_sid, arg);
   } else if (cmd == "/fly") {
     handleFlyCommand(sender_sid, std::string(trimmed));
+  } else if (cmd == "/server") {
+    handleServerCommand(sender_sid, arg);
   } else if (cmd == "/help") {
     sendSystemMessage(
         sender_sid,
-        "§e[帮助] 支持指令: /lobby [id], /lobbies, /join <分线>, /spawn, "
+        "§e[帮助] 支持指令: /server <名称>, /lobby [id], /lobbies, /join <分线>, /spawn, "
         "/fly [on|off], /setspawn, /setmaxplayers <total> [lobby], /admin auth <口令>, /admin deauth"
     );
   } else {
@@ -633,6 +635,44 @@ ChatHandler::handleAdminCommand(
       sender_sid,
       "§e[管理指令] 支持指令: /admin auth <口令>, /admin deauth, /admin dev [on|off]"
   );
+}
+
+void
+ChatHandler::handleServerCommand(uint64_t sender_sid, std::string_view target) {
+  auto cm = client_manager_.lock();
+  if (!cm) {
+    return;
+  }
+  auto session = cm->findSession(sender_sid);
+  if (!session) {
+    return;
+  }
+
+  if (target.empty()) {
+    std::string srv_list;
+    if (auto lm = lobby_manager_.lock()) {
+      for (const auto& portal : lm->portals()) {
+        if (!srv_list.empty()) {
+          srv_list += ", ";
+        }
+        srv_list += portal.target_server;
+      }
+    }
+    if (srv_list.empty()) {
+      srv_list = "survival, skyblock";
+    }
+    sendSystemMessage(
+        sender_sid,
+        std::format("§e[跨服路由] 可用服务器: {} (用法: /server <名称>)", srv_list)
+    );
+    return;
+  }
+
+  sendSystemMessage(
+      sender_sid,
+      std::format("§a正在无缝前往目标服务器: {} §a...", target)
+  );
+  session->connectServer(target);
 }
 
 }  // namespace mcpe::protocol

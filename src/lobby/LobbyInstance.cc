@@ -72,6 +72,21 @@ LobbyInstance::LobbyInstance(
       move_ev.rotation = reset_rot;
       move_ev.has_rotation = true;
       move_ev.on_ground = true;
+      return;
+    }
+
+    // 跨服传送门 AABB 检测与路由跳转
+    if (const auto* portal = portal_manager_.checkAndTrigger(sid, move_ev.position)) {
+      sendActionBar(
+          sid,
+          std::format(
+              "§a正在无缝前往目标服务器: {} §a...",
+              portal->display_name.empty() ? portal->target_server : portal->display_name
+          )
+      );
+      if (server_connect_fn_) {
+        server_connect_fn_(sid, portal->target_server);
+      }
     }
   });
 
@@ -91,6 +106,7 @@ LobbyInstance::LobbyInstance(
       );
     } else {
       releaseSlot(sid);
+      portal_manager_.onPlayerLeave(sid);
       spdlog::info(
           "[LobbyInstance:{}] Player '{}' (SID {}) left lobby shard ({}/{})",
           instance_id_,

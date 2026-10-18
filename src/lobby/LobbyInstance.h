@@ -23,6 +23,7 @@
 
 #include "common/ByteBuffer.h"
 #include "common/SpatialTypes.h"
+#include "lobby/PortalManager.h"
 #include "protocol/PacketTypes.h"
 #include "world/EntityManager.h"
 #include "world/EventQueue.h"
@@ -38,6 +39,8 @@ class LobbyInstance final {
       std::function<void(uint64_t session_id, const Vector3d& pos, const Rotation& rot)>;
   using ChatDispatchFn = std::function<
       void(uint64_t session_id, std::string_view sender_name, const std::string& msg)>;
+  using ServerConnectFn =
+      std::function<void(uint64_t session_id, std::string_view target_server)>;
 
   LobbyInstance(
       std::string instance_id,
@@ -116,6 +119,15 @@ class LobbyInstance final {
 
   void setTeleportCallback(TeleportPlayerFn fn) { teleport_fn_ = std::move(fn); }
   void setChatDispatchCallback(ChatDispatchFn fn);
+  void setServerConnectCallback(ServerConnectFn fn) { server_connect_fn_ = std::move(fn); }
+  void setPropertyProvider(world::EntityManager::PropertyProvider provider) {
+    if (entity_manager_) {
+      entity_manager_->setPropertyProvider(std::move(provider));
+    }
+  }
+
+  [[nodiscard]] PortalManager& portalManager() noexcept { return portal_manager_; }
+  [[nodiscard]] const PortalManager& portalManager() const noexcept { return portal_manager_; }
 
   static std::string escapeJsonText(std::string_view text);
   static ByteBuffer buildChatPacket(std::string_view json_text, protocol::ChatPosition pos);
@@ -132,10 +144,12 @@ class LobbyInstance final {
   std::shared_ptr<world::EventQueue> event_queue_;
   std::shared_ptr<world::EntityManager> entity_manager_;
   std::unique_ptr<world::WorldTicker> ticker_;
+  PortalManager portal_manager_;
 
   PacketUnicastFn unicast_fn_;
   TeleportPlayerFn teleport_fn_;
   ChatDispatchFn chat_dispatch_fn_;
+  ServerConnectFn server_connect_fn_;
 };
 
 }  // namespace mcpe::lobby

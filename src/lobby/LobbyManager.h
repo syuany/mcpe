@@ -29,6 +29,8 @@ class LobbyManager {
   using PacketUnicastFn = LobbyInstance::PacketUnicastFn;
   using TeleportPlayerFn = LobbyInstance::TeleportPlayerFn;
   using ChatDispatchFn = LobbyInstance::ChatDispatchFn;
+  using ServerConnectFn = LobbyInstance::ServerConnectFn;
+  using PropertyProvider = world::EntityManager::PropertyProvider;
   using WorldSwitchFn =
       std::function<void(uint64_t session_id, const std::shared_ptr<LobbyInstance>& target_lobby)>;
 
@@ -48,6 +50,11 @@ class LobbyManager {
   void setTeleportCallback(TeleportPlayerFn fn);
   void setChatDispatchCallback(ChatDispatchFn fn);
   void setWorldSwitchCallback(WorldSwitchFn fn);
+  void setServerConnectCallback(ServerConnectFn fn);
+
+  bool loadPortals(const std::filesystem::path& ini_path);
+  void addPortal(Portal portal);
+  [[nodiscard]] std::vector<Portal> portals() const;
 
   /// 启动所有已创建分线的 20 TPS 物理线程
   void startAll();
@@ -69,7 +76,8 @@ class LobbyManager {
       int32_t entity_id,
       std::string_view username,
       const std::array<uint8_t, 16>& uuid,
-      const std::shared_ptr<LobbyInstance>& target_lobby
+      const std::shared_ptr<LobbyInstance>& target_lobby,
+      std::vector<protocol::PlayerProperty> properties = {}
   );
 
   /**
@@ -86,6 +94,11 @@ class LobbyManager {
   [[nodiscard]] size_t lobbyMaxPlayers() const noexcept { return lobby_max_players_; }
   [[nodiscard]] size_t lobbyInstanceCount() const;
 
+  void setPropertyProvider(PropertyProvider provider);
+  [[nodiscard]] std::vector<protocol::PlayerProperty> getPlayerProperties(
+      uint64_t session_id
+  ) const;
+
  private:
   std::shared_ptr<LobbyInstance> createLobbyShardUnlocked();
   void bindLobbyCallbacksUnlocked(const std::shared_ptr<LobbyInstance>& lobby);
@@ -100,6 +113,9 @@ class LobbyManager {
   TeleportPlayerFn teleport_fn_;
   ChatDispatchFn chat_dispatch_fn_;
   WorldSwitchFn world_switch_fn_;
+  ServerConnectFn server_connect_fn_;
+  PropertyProvider property_provider_;
+  std::vector<Portal> configured_portals_;
 
   std::vector<std::shared_ptr<LobbyInstance>> lobbies_;
   std::unordered_map<std::string, std::shared_ptr<LobbyInstance>> lobbies_by_id_;
@@ -109,6 +125,7 @@ class LobbyManager {
     int32_t entity_id{0};
     std::string username;
     std::array<uint8_t, 16> uuid{};
+    std::vector<protocol::PlayerProperty> properties;
   };
   std::unordered_map<uint64_t, PlayerIdentity> player_identities_;
 };

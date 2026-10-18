@@ -44,6 +44,7 @@ struct PlayerEntity {
   Vector3d last_synced_pos{0.5, 4.0, 0.5};
   Rotation last_synced_rot{0.0f, 0.0f};
   bool dirty{false};
+  std::vector<protocol::PlayerProperty> properties;
 };
 
 class EntityManager {
@@ -70,6 +71,13 @@ class EntityManager {
     default_spawn_rot_ = rot;
   }
 
+  using PropertyProvider =
+      std::function<std::vector<protocol::PlayerProperty>(uint64_t session_id)>;
+
+  void setPropertyProvider(PropertyProvider provider) {
+    property_provider_ = std::move(provider);
+  }
+
   /**
    * @brief 注册新玩家加入世界：触发双向同屏广播与 Player List 呈现
    */
@@ -77,7 +85,8 @@ class EntityManager {
       uint64_t session_id,
       int32_t entity_id,
       std::string_view username,
-      const std::array<uint8_t, 16>& uuid
+      const std::array<uint8_t, 16>& uuid,
+      std::vector<protocol::PlayerProperty> properties = {}
   );
 
   void addPlayer(
@@ -86,7 +95,8 @@ class EntityManager {
       std::string_view username,
       const std::array<uint8_t, 16>& uuid,
       const Vector3d& spawn_pos,
-      const Rotation& spawn_rot = {0.0f, 0.0f}
+      const Rotation& spawn_rot = {0.0f, 0.0f},
+      std::vector<protocol::PlayerProperty> properties = {}
   );
 
   /**
@@ -144,6 +154,7 @@ class EntityManager {
   std::unordered_map<uint64_t, PlayerEntity> players_;
   Vector3d default_spawn_pos_{0.5, 4.0, 0.5};
   Rotation default_spawn_rot_{0.0f, 0.0f};
+  PropertyProvider property_provider_;
 };
 
 }  // namespace mcpe::world

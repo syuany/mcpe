@@ -229,3 +229,39 @@ TEST(PacketWriterTest, PacketBuilderStandaloneFraming) {
   EXPECT_EQ(*pos, 1);
   EXPECT_EQ(pkt.readableBytes(), 0u);
 }
+
+// 测试 6：Java writeUTF 双字节大端编码与 0x18 PluginMessage 跨服封包测试
+TEST(PacketWriterTest, JavaUtfEncodingAndBungeeConnect) {
+  mcpe::network::PacketBuilder builder(0x18);
+  builder.appendString("BungeeCord");
+  builder.appendJavaUtf("Connect");
+  builder.appendJavaUtf("survival");
+
+  ByteBuffer pkt = builder.build();
+  auto total_len = pkt.readVarInt();
+  ASSERT_TRUE(total_len.has_value());
+  EXPECT_EQ(*total_len, static_cast<int32_t>(pkt.readableBytes()));
+
+  auto pid = pkt.readVarInt();
+  ASSERT_TRUE(pid.has_value());
+  EXPECT_EQ(*pid, 0x18);
+
+  // Channel: Minecraft VarInt 长度前缀字符串
+  auto channel = pkt.readString();
+  ASSERT_TRUE(channel.has_value());
+  EXPECT_EQ(*channel, "BungeeCord");
+
+  // Subchannel: Java writeUTF (2 字节大端长度 + 原始字节)
+  auto sub_len = pkt.readBe<uint16_t>();
+  ASSERT_TRUE(sub_len.has_value());
+  EXPECT_EQ(*sub_len, 7u);
+  EXPECT_EQ(pkt.retrieveAsString(*sub_len), "Connect");
+
+  // Target: Java writeUTF (2 字节大端长度 + 原始字节)
+  auto target_len = pkt.readBe<uint16_t>();
+  ASSERT_TRUE(target_len.has_value());
+  EXPECT_EQ(*target_len, 8u);
+  EXPECT_EQ(pkt.retrieveAsString(*target_len), "survival");
+
+  EXPECT_EQ(pkt.readableBytes(), 0u);
+}

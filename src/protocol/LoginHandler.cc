@@ -61,22 +61,24 @@ LoginHandler::handleLoginStart(const std::shared_ptr<ClientSession>& session, By
     }
   }
 
-  const std::string uuid_str = AuthUtils::generateOfflineUuid(username);
-  const auto uuid_bytes = AuthUtils::generateOfflineUuidBytes(username);
   session->setUsername(username);
-  session->setUuid(uuid_str);
-  session->setUuidBytes(uuid_bytes);
+  if (!session->isBungeeForwarded()) {
+    const std::string uuid_str = AuthUtils::generateOfflineUuid(username);
+    const auto uuid_bytes = AuthUtils::generateOfflineUuidBytes(username);
+    session->setUuid(uuid_str);
+    session->setUuidBytes(uuid_bytes);
+  }
 
   spdlog::info(
       "[LoginHandler] Player logged in: {} (UUID: {}) from {}",
       username,
-      uuid_str,
+      session->uuid(),
       session->remoteAddress()
   );
 
   // 利用 PacketWriter 下发 Login Success (0x02)
   network::PacketWriter writer(session, 0x02);
-  writer.appendString(uuid_str);
+  writer.appendString(session->uuid());
   writer.appendString(username);
   writer.flush();
 

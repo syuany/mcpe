@@ -52,6 +52,17 @@ class PacketBuilder {
     buffer_.appendString(str);
   }
 
+  /**
+   * @brief 写入符合 Java DataOutputStream.writeUTF() 规范的字符串
+   * 结构: uint16_t (Big-Endian 无符号 2 字节长度) + 原始 UTF-8 字节
+   */
+  void
+  appendJavaUtf(std::string_view str) {
+    const auto len = static_cast<uint16_t>(str.size());
+    buffer_.writeBe<uint16_t>(len);
+    buffer_.append(str.data(), str.size());
+  }
+
   void
   appendByte(uint8_t byte) {
     buffer_.appendByte(byte);
@@ -185,6 +196,17 @@ class PacketWriter {
   void
   appendString(std::string_view str) {
     buffer_.appendString(str);
+  }
+
+  /**
+   * @brief 写入符合 Java DataOutputStream.writeUTF() 规范的字符串
+   * 结构: uint16_t (Big-Endian 无符号 2 字节长度) + 原始 UTF-8 字节
+   */
+  void
+  appendJavaUtf(std::string_view str) {
+    const auto len = static_cast<uint16_t>(str.size());
+    buffer_.writeBe<uint16_t>(len);
+    buffer_.append(str.data(), str.size());
   }
 
   void

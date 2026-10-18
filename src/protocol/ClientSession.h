@@ -10,11 +10,13 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "common/ByteBuffer.h"
 #include "common/SpatialTypes.h"
 #include "network/SessionCallbacks.h"
 #include "protocol/ConnectionState.h"
+#include "protocol/PacketTypes.h"
 
 namespace mcpe::world {
 class EventQueue;
@@ -56,6 +58,9 @@ class ClientSession : public network::SessionCallbacks,
   void stop();
   bool isStopped() const noexcept;
   const std::string& remoteAddress() const noexcept;
+  void setRemoteAddress(std::string addr) {
+    remote_address_ = std::move(addr);
+  }
   std::shared_ptr<network::TcpSession> tcpSession() const noexcept;
 
   // --- Minecraft 协议连接状态机 ---
@@ -112,6 +117,30 @@ class ClientSession : public network::SessionCallbacks,
   setEntityId(int32_t id) noexcept {
     entity_id_ = id;
   }
+
+  // --- BungeeCord / Velocity 网关穿透与玩家皮肤属性 ---
+  [[nodiscard]] bool
+  isBungeeForwarded() const noexcept {
+    return is_bungee_forwarded_.load(std::memory_order_acquire);
+  }
+  void
+  setIsBungeeForwarded(bool val) noexcept {
+    is_bungee_forwarded_.store(val, std::memory_order_release);
+  }
+
+  [[nodiscard]] std::vector<PlayerProperty>
+  properties() const {
+    std::lock_guard<std::mutex> lock(properties_mutex_);
+    return properties_;
+  }
+  void
+  setProperties(std::vector<PlayerProperty> props) {
+    std::lock_guard<std::mutex> lock(properties_mutex_);
+    properties_ = std::move(props);
+  }
+
+  /// 跨服切服：通过 0x18 Plugin Message (Channel: "BungeeCord", Action: "Connect") 指令通知网关切服
+  void connectServer(std::string_view target_server);
 
   // --- 多实例归属与任务队列关联 ---
   std::string
@@ -257,6 +286,10 @@ class ClientSession : public network::SessionCallbacks,
   std::atomic<bool> can_fly_{false};
   std::atomic<bool> is_flying_{false};
   std::atomic<bool> is_admin_{false};
+
+  std::atomic<bool> is_bungee_forwarded_{false};
+  mutable std::mutex properties_mutex_;
+  std::vector<PlayerProperty> properties_;
 
   mutable std::mutex pose_mutex_;
   Vector3d position_{0.5, 4.0, 0.5};

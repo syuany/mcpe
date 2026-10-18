@@ -10,9 +10,11 @@
 
 #include <asio.hpp>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <string_view>
 
 #include "common/IniConfig.h"
 #include "lobby/LobbyManager.h"
@@ -53,13 +55,27 @@ main() {
       spdlog::info("[Main] Generated default global configuration at {}", kSettingsIniPath);
     } else if (server_cfg.loadFromIni(kSettingsIniPath)) {
       spdlog::info(
-          "[Main] Loaded {}: port={}, server_max={}, lobby_max={}, max_lobbies={}",
+          "[Main] Loaded {}: port={}, server_max={}, lobby_max={}, max_lobbies={}, bungee_fwd={}",
           kSettingsIniPath,
           server_cfg.port,
           server_cfg.max_players,
           server_cfg.lobby_max_players,
-          server_cfg.max_lobby_instances
+          server_cfg.max_lobby_instances,
+          server_cfg.bungee_forwarding
       );
+    }
+
+    if (const char* env_port = std::getenv("MCPE_PORT")) {
+      server_cfg.port = static_cast<uint16_t>(std::atoi(env_port));
+      spdlog::info("[Main] Overrode port via MCPE_PORT={}", server_cfg.port);
+    }
+    if (const char* env_fwd = std::getenv("MCPE_BUNGEE_FORWARDING")) {
+      server_cfg.bungee_forwarding = (std::string_view(env_fwd) == "true" || std::string_view(env_fwd) == "1");
+      spdlog::info("[Main] Overrode bungee_forwarding via MCPE_BUNGEE_FORWARDING={}", server_cfg.bungee_forwarding);
+    }
+    if (const char* env_token = std::getenv("MCPE_BUNGEE_GUARD_TOKEN")) {
+      server_cfg.bungee_guard_token = env_token;
+      spdlog::info("[Main] Configured Bungee-Guard token from environment");
     }
 
     asio::io_context io_context;
@@ -152,6 +168,25 @@ main() {
           }
         }
     );
+
+    lobby_manager->setServerConnectCallback(
+        [client_manager](uint64_t sid, std::string_view target) {
+          if (auto session = client_manager->findSession(sid)) {
+            session->connectServer(target);
+          }
+        }
+    );
+
+    lobby_manager->setPropertyProvider([client_manager](uint64_t sid) {
+      if (auto session = client_manager->findSession(sid)) {
+        return session->properties();
+      }
+      return std::vector<protocol::PlayerProperty>{};
+    });
+
+    if (lobby_manager->loadPortals(lobby_ini_path)) {
+      spdlog::info("[Main] Loaded portals from {}", lobby_ini_path.string());
+    }
 
     PlayHandler::setLobbyManager(lobby_manager);
 

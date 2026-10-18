@@ -65,6 +65,65 @@ LobbyManager::setWorldSwitchCallback(WorldSwitchFn fn) {
 }
 
 void
+LobbyManager::setServerConnectCallback(ServerConnectFn fn) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  server_connect_fn_ = std::move(fn);
+  for (auto& [_, lobby] : lobbies_by_id_) {
+    lobby->setServerConnectCallback(server_connect_fn_);
+  }
+}
+
+void
+LobbyManager::setPropertyProvider(PropertyProvider provider) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  property_provider_ = std::move(provider);
+}
+
+std::vector<protocol::PlayerProperty>
+LobbyManager::getPlayerProperties(uint64_t session_id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = player_identities_.find(session_id);
+  if (it != player_identities_.end() && !it->second.properties.empty()) {
+    return it->second.properties;
+  }
+  if (property_provider_) {
+    return property_provider_(session_id);
+  }
+  return {};
+}
+
+bool
+LobbyManager::loadPortals(const std::filesystem::path& ini_path) {
+  PortalManager pm;
+  if (!pm.loadFromIni(ini_path)) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  configured_portals_ = pm.portals();
+  for (auto& [_, lobby] : lobbies_by_id_) {
+    for (const auto& p : configured_portals_) {
+      lobby->portalManager().addPortal(p);
+    }
+  }
+  return true;
+}
+
+void
+LobbyManager::addPortal(Portal portal) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto& [_, lobby] : lobbies_by_id_) {
+    lobby->portalManager().addPortal(portal);
+  }
+  configured_portals_.push_back(std::move(portal));
+}
+
+std::vector<Portal>
+LobbyManager::portals() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return configured_portals_;
+}
+
+void
 LobbyManager::startAll() {
   std::lock_guard<std::mutex> lock(mutex_);
   for (auto& [_, lobby] : lobbies_by_id_) {
@@ -131,6 +190,15 @@ LobbyManager::bindLobbyCallbacksUnlocked(const std::shared_ptr<LobbyInstance>& l
   if (chat_dispatch_fn_) {
     lobby->setChatDispatchCallback(chat_dispatch_fn_);
   }
+  if (server_connect_fn_) {
+    lobby->setServerConnectCallback(server_connect_fn_);
+  }
+  lobby->setPropertyProvider([this](uint64_t sid) {
+    return getPlayerProperties(sid);
+  });
+  for (const auto& p : configured_portals_) {
+    lobby->portalManager().addPortal(p);
+  }
 }
 
 std::shared_ptr<LobbyInstance>
@@ -172,7 +240,8 @@ LobbyManager::transferPlayer(
     int32_t entity_id,
     std::string_view username,
     const std::array<uint8_t, 16>& uuid,
-    const std::shared_ptr<LobbyInstance>& target_lobby
+    const std::shared_ptr<LobbyInstance>& target_lobby,
+    std::vector<protocol::PlayerProperty> properties
 ) {
   if (!target_lobby) {
     return false;
@@ -182,7 +251,13 @@ LobbyManager::transferPlayer(
   WorldSwitchFn switch_cb;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    player_identities_[session_id] = PlayerIdentity{entity_id, std::string(username), uuid};
+    auto& identity = player_identities_[session_id];
+    identity.entity_id = entity_id;
+    identity.username = std::string(username);
+    identity.uuid = uuid;
+    if (!properties.empty()) {
+      identity.properties = std::move(properties);
+    }
 
     auto old_it = player_lobby_map_.find(session_id);
     if (old_it != player_lobby_map_.end()) {

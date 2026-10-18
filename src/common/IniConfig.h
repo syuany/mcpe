@@ -47,6 +47,8 @@ class IniConfig {
    */
   [[nodiscard]] std::string toString() const;
 
+  [[nodiscard]] std::vector<std::string> sections() const;
+
   [[nodiscard]] bool hasSection(std::string_view section) const noexcept;
   [[nodiscard]] bool hasKey(std::string_view section, std::string_view key) const noexcept;
 

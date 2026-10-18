@@ -52,6 +52,10 @@ struct ServerConfig {
   std::string admins{"Notch, Developer_A, 5627dd98-e6be-3c21-b8a8-e92344183641"};
   std::string dev_secret{"mcpe_secret_2026"};
 
+  // 集群网关与穿透配置 [Gateway]
+  bool bungee_forwarding{true};
+  std::string bungee_guard_token{""};
+
   static ServerConfig&
   mutableInstance() {
     static ServerConfig kInstance;
@@ -83,6 +87,9 @@ struct ServerConfig {
     dev_mode_enabled = ini.getBool("Security", "dev_mode_enabled", dev_mode_enabled);
     admins = ini.getString("Security", "admins", admins);
     dev_secret = ini.getString("Security", "dev_secret", dev_secret);
+
+    bungee_forwarding = ini.getBool("Gateway", "bungee_forwarding", bungee_forwarding);
+    bungee_guard_token = ini.getString("Gateway", "bungee_guard_token", bungee_guard_token);
     return true;
   }
 
@@ -103,6 +110,9 @@ struct ServerConfig {
     ini.setBool("Security", "dev_mode_enabled", dev_mode_enabled);
     ini.setString("Security", "admins", admins);
     ini.setString("Security", "dev_secret", dev_secret);
+
+    ini.setBool("Gateway", "bungee_forwarding", bungee_forwarding);
+    ini.setString("Gateway", "bungee_guard_token", bungee_guard_token);
     return ini.saveToFile(path);
   }
 };

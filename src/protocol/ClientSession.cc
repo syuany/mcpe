@@ -201,4 +201,22 @@ ClientSession::onKeepAliveResponse(int64_t id) {
   }
 }
 
+void
+ClientSession::connectServer(std::string_view target_server) {
+  if (isStopped()) {
+    return;
+  }
+  spdlog::info(
+      "[ClientSession] Forwarding player '{}' (SID: {}) to server '{}' via BungeeCord",
+      username_,
+      session_id_,
+      target_server
+  );
+
+  network::PacketWriter writer(shared_from_this(), ClientboundPacket::PluginMessage);
+  writer.appendString("BungeeCord");
+  writer.appendJavaUtf("Connect");
+  writer.appendJavaUtf(target_server);
+}
+
 }  // namespace mcpe::protocol

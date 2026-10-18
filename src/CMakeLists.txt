@@ -44,6 +44,7 @@ target_link_libraries(mcpe_world PUBLIC mcpe_common)
 add_library(mcpe_lobby STATIC
     lobby/LobbyInstance.cc
     lobby/LobbyManager.cc
+    lobby/PortalManager.cc
 )
 target_include_directories(mcpe_lobby PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -55,6 +56,7 @@ add_library(mcpe_protocol STATIC
     protocol/ClientSession.cc
     protocol/ClientManager.cc
     protocol/HandshakeHandler.cc
+    protocol/BungeeCord.cc
     protocol/PacketRouter.cc
     protocol/StatusHandler.cc
     protocol/AuthUtils.cc

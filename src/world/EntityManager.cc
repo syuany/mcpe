@@ -40,9 +40,18 @@ EntityManager::addPlayer(
     uint64_t session_id,
     int32_t entity_id,
     std::string_view username,
-    const std::array<uint8_t, 16>& uuid
+    const std::array<uint8_t, 16>& uuid,
+    std::vector<protocol::PlayerProperty> properties
 ) {
-  addPlayer(session_id, entity_id, username, uuid, default_spawn_pos_, default_spawn_rot_);
+  addPlayer(
+      session_id,
+      entity_id,
+      username,
+      uuid,
+      default_spawn_pos_,
+      default_spawn_rot_,
+      std::move(properties)
+  );
 }
 
 void
@@ -52,7 +61,8 @@ EntityManager::addPlayer(
     std::string_view username,
     const std::array<uint8_t, 16>& uuid,
     const Vector3d& spawn_pos,
-    const Rotation& spawn_rot
+    const Rotation& spawn_rot,
+    std::vector<protocol::PlayerProperty> properties
 ) {
   PlayerEntity new_player;
   new_player.session_id = session_id;
@@ -64,6 +74,11 @@ EntityManager::addPlayer(
   new_player.last_synced_pos = spawn_pos;
   new_player.last_synced_rot = spawn_rot;
   new_player.dirty = false;
+  if (properties.empty() && property_provider_) {
+    new_player.properties = property_provider_(session_id);
+  } else {
+    new_player.properties = std::move(properties);
+  }
 
   spdlog::info(
       "[EntityManager] Adding player '{}' (EID: {}, SID: {}) to world",
@@ -369,7 +384,17 @@ EntityManager::buildPlayerListItemPacket(
   if (action == protocol::PlayerListItemAction::AddPlayer) {
     builder.append(player.uuid.data(), 16);
     builder.appendString(player.username);
-    builder.appendVarInt(0);  // 0 properties
+    builder.appendVarInt(static_cast<int32_t>(player.properties.size()));
+    for (const auto& prop : player.properties) {
+      builder.appendString(prop.name);
+      builder.appendString(prop.value);
+      if (!prop.signature.empty()) {
+        builder.appendByte(1);
+        builder.appendString(prop.signature);
+      } else {
+        builder.appendByte(0);
+      }
+    }
     builder.appendVarInt(1);  // Gamemode: Creative
     builder.appendVarInt(5);  // Ping: 5ms
     builder.appendByte(0);    // Has Display Name: false

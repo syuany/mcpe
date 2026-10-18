@@ -97,6 +97,7 @@ class ChatHandler {
       std::string_view sub_cmd,
       std::string_view arg
   );
+  void handleServerCommand(uint64_t sender_sid, std::string_view target);
   [[nodiscard]] bool isPlayerAdmin(const std::shared_ptr<ClientSession>& session) const;
 
   SystemMessageSender sys_sender_;

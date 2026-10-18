@@ -9,6 +9,7 @@
 #define MCPE_PROTOCOL_PACKET_TYPES_H
 
 #include <cstdint>
+#include <string>
 
 namespace mcpe::protocol {
 
@@ -48,6 +49,7 @@ inline constexpr int32_t LoginDisconnect = 0x00;
 inline constexpr int32_t SpawnGlobalEntity = 0x02;
 inline constexpr int32_t SpawnPlayer = 0x05;
 inline constexpr int32_t ChatMessage = 0x0F;
+inline constexpr int32_t PluginMessage = 0x18;
 inline constexpr int32_t PlayDisconnect = 0x1A;
 inline constexpr int32_t UnloadChunk = 0x1D;
 inline constexpr int32_t KeepAlive = 0x1F;
@@ -131,6 +133,15 @@ enum class ChatPosition : uint8_t {
   ChatBox = 0,        // 聊天框
   SystemMessage = 1,  // 系统提示
   ActionBar = 2       // 快捷栏上方
+};
+
+/**
+ * @brief 玩家属性（如皮肤与材质纹理，包含可选数字签名）
+ */
+struct PlayerProperty {
+  std::string name;
+  std::string value;
+  std::string signature;
 };
 
 }  // namespace mcpe::protocol
