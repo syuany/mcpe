@@ -1956,3 +1956,135 @@ socket_.async_read_some(
 
 ---
 
+### Q17: 服务启动时报端口被占用（Address already in use / WSAEADDRINUSE 98/10048）怎么办？如何排查占用进程、修改集群端口，以及在 Linux/Windows、Docker 与高可用热更中如何设计端口与地址治理机制？
+
+#### 📍 代码与报错位置
+* 核心报错：
+  * Linux: `bind: Address already in use (errno: 98 EADDRINUSE)`
+  * Windows: `bind: Only one usage of each socket address (protocol/network address/port) is normally permitted (WSAEADDRINUSE: 10048)`
+* 触发源文件：[`src/network/TcpServer.cc`](file:///E:/workspace/class_101/mcpe/src/network/TcpServer.cc) 中的 `acceptor_.open(...)` 与 `acceptor_.bind(endpoint)`
+* 配置文件关联：
+  * MCPE 大厅：[`src/settings.ini`](file:///E:/workspace/class_101/mcpe/src/settings.ini) (`[Server] port = 25566`)
+  * 网关 BungeeCord：`config.yml` (`listeners.host: 0.0.0.0:25565`)
+  * Paper 生存/跑酷子服：`server.properties` (`server-port=20001`)
+
+#### 1. 根本原因剖析 (Root Cause)
+
+TCP 协议通过 **五元组**（协议、源 IP、源端口、目的 IP、目的端口）唯一定位一条网络连接。
+当服务端调用 `bind(ip, port)` 与 `listen()` 时，操作系统内核的 TCP 协议栈会在全局哈希表（Listener Socket Table）中注册此本地监听端点：
+1. **真实进程端口冲突**：如果本机已经运行了一个 Minecraft 服务端（例如残留的原版服务器、之前的后台进程未彻底退出、其他开发人员启动的服务），或者其他无关应用（如特定代理、网关或测试脚本）占用了该端口，内核将直接拒绝再次 `bind`，返回 `EADDRINUSE` 错误；
+2. **TIME_WAIT 状态遗留**：若前一个服务刚被 `kill`，原连接处于 TCP `TIME_WAIT`（通常维持 30s ~ 120s）。如果网络库未在 `bind` 前设置套接字选项 `SO_REUSEADDR`，操作系统会保护该端口不被立即可用。
+   * *本项目实现*：MCPE 在 `TcpServer::start()` 中通过 Asio 显式配置了 `acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true))`，因此**已彻底免疫 TIME_WAIT 导致的假性冲突**。若报错，**100% 为真实物理端口被其他活动进程占用**。
+
+#### 2. 冲突进程排查与终结 SOP (Investigation & Kill SOP)
+
+遇到端口被占用，推荐按以下步骤在 10 秒内快速定位并解决：
+
+##### A. Windows 平台排查与解决
+1. **查询占用目标端口（如 25565 / 25566）的进程 PID**：
+   ```cmd
+   netstat -ano | findstr :25565
+   ```
+   输出示例：
+   ```text
+   TCP    0.0.0.0:25565          0.0.0.0:0              LISTENING       14280
+   ```
+   末尾的 `14280` 即为占用该端口的进程 PID。
+2. **确认该 PID 到底是什么程序**：
+   ```cmd
+   tasklist | findstr 14280
+   ```
+   输出示例：
+   ```text
+   java.exe                     14280 Console                    1     65,240 K
+   ```
+3. **安全终止占用进程**：
+   ```cmd
+   taskkill /F /PID 14280
+   ```
+   *(PowerShell 用户亦可一键执行：`Get-NetTCPConnection -LocalPort 25565 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`)*
+
+##### B. Linux 平台排查与解决
+1. **通过 `ss` 或 `lsof` 定位进程**：
+   ```bash
+   # 方式 1 (推荐)：使用现代 ss 命令
+   ss -tulpn | grep :25565
+
+   # 方式 2：使用 lsof 命令
+   lsof -i :25565
+   ```
+   输出中将直接显示占用进程名（如 `java` 或 `server`）以及对应的 `pid=14280`。
+2. **安全杀掉进程**：
+   ```bash
+   kill -15 14280    # 先尝试优雅退出
+   kill -9 14280     # 若卡死则强行杀掉
+   ```
+
+#### 3. 不杀进程时的“优雅换端口”治理方案 (Port Migration)
+
+若占用该端口的程序不能关闭（如生产机上运行着别的业务系统），则需要调整集群微服务的端口编排。整个链路只需联动修改 2 处：
+
+##### 场景示例：默认 25566 端口被占用，将 MCPE 大厅改为 25577
+1. **修改 MCPE 大厅端口**（两种方式任选其一）：
+   * **方式 1：配置文件修改**：打开 [`src/settings.ini`](file:///E:/workspace/class_101/mcpe/src/settings.ini)，修改 `[Server] port = 25577`；
+   * **方式 2：环境变量动态覆盖（免改文件）**：
+     ```bash
+     # Linux
+     export MCPE_PORT=25577
+     ./bin/server
+
+     # Windows PowerShell
+     $env:MCPE_PORT="25577"
+     .\bin\server.exe
+     ```
+     *源码依据*：我们在 [`src/main.cc`](file:///E:/workspace/class_101/mcpe/src/main.cc#L68-L71) 中原生编写了环境变量覆盖机制，运行时检测到 `MCPE_PORT` 将自动覆写配置，容器化与云原生部署极其敏捷。
+2. **同步更新网关的映射表**：
+   * 打开 BungeeCord 的 `config.yml`，将 `servers.lobby.address` 更新为新的端口：
+     ```yaml
+     servers:
+       lobby:
+         address: 127.0.0.1:25577  # 与 MCPE 保持一致
+     ```
+3. **重启网关与 MCPE**：外部玩家依然连接公网 `25565` 端口，网关会自动将流量精准打到 `25577` 的 MCPE 上，**玩家端完全无感知**！
+
+##### 场景示例：公网 25565 被占用，调整网关对外端口
+* 若云服务器的 `25565` 被占用，只需在 `BungeeCord/config.yml` 中修改：
+  ```yaml
+  listeners:
+  - host: 0.0.0.0:25575   # 改为其他端口
+  ```
+* 玩家在客户端“多人游戏”中输入 `你的IP:25575` 即可正常连入。
+
+#### 4. 云原生与高级高可用端口治理架构
+
+在工业界大型集群运维中，还有更高维度的端口治理机制：
+
+```mermaid
+flowchart LR
+    subgraph HostPorts ["宿主机公网流量"]
+        P1["公网端口: 25565"]
+        P2["公网端口: 35565 (测试服)"]
+    end
+
+    subgraph DockerBridge ["Docker 容器虚拟网络 (隔离环境)"]
+        subgraph ContainerA ["网关容器"]
+            Bungee["BungeeCord 监听内部 25565"]
+        end
+        subgraph ContainerB ["MCPE 大厅容器"]
+            MCPE["MCPE 监听内部 25566"]
+        end
+    end
+
+    P1 -->|"NAT 端口映射 25565:25565"| Bungee
+    P2 -.->|"NAT 端口映射 35565:25565"| Bungee
+    Bungee -->|"容器内部 DNS 或虚拟 IP 直连"| MCPE
+```
+
+1. **Docker 容器化端口隔离（NAT 映射）**：
+   - 在容器内部，服务永远可以监听标准的 `25565` 或 `25566`，互不干扰；
+   - 宿主机层面只需要调整 `docker run -p <宿主机空闲端口>:25565` 即可，彻底解决宿主机多应用端口打架问题；
+2. **动态临时端口分配与服务注册（Dynamic Ephemeral Port + Service Discovery）**：
+   - 在大规模弹性伸缩集群中，MCPE 大厅实例可配置为端口 `0`（由操作系统内核在 `bind` 时随机分配一个尚未被使用的空闲端口，通过 `acceptor_.local_endpoint().port()` 读取出来）；
+   - 启动后，将自身 IP 和随机端口注册至 Redis 或 Consul/Nacos，BungeeCord 网关通过服务发现动态感知并更新路由，彻底告别静态手工分配端口。
+
+

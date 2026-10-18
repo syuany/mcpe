@@ -60,7 +60,7 @@ flowchart TD
 
 | 专题编号 | 专题文档 | 核心领域 | 包含题数 | 独立编号范围 |
 | :--- | :--- | :--- | :---: | :---: |
-| **专题 01** | [`01_network_asio.md`](./01_network_asio.md) | 网络通信与 Asio 异步 I/O | 16 题 | **Q1 ~ Q16** |
+| **专题 01** | [`01_network_asio.md`](./01_network_asio.md) | 网络通信与 Asio 异步 I/O | 17 题 | **Q1 ~ Q17** |
 | **专题 02** | [`02_modern_cpp_memory.md`](./02_modern_cpp_memory.md) | 现代 C++ 语言特性与内存架构 | 10 题 | **Q1 ~ Q10** |
 | **专题 03** | [`03_protocol_state_machine.md`](./03_protocol_state_machine.md) | 通信协议、数据切片与业务状态机 | 12 题 | **Q1 ~ Q12** |
 | **专题 04** | [`04_world_spatial_math.md`](./04_world_spatial_math.md) | 世界体系、空间数学与区块系统 | 7 题 | **Q1 ~ Q7** |
@@ -76,6 +76,7 @@ flowchart TD
   - Proactor 模拟机制与 Reactor 对比：[专题 01 (Q4)](./01_network_asio.md#q4-不是说-asio-是-proactor-模型吗为什么上一题提到了-epollreactor), [专题 01 (Q8)](./01_network_asio.md#q8-以上讨论都是异步模式无事就休眠那同步-io-呢同步也休眠吗两者的本质区别是什么)
   - C100K/C1000K 极致内存优化与 Socket 接收缓冲：[专题 01 (Q12)](./01_network_asio.md#q12-async_read_some-会怎么处理传入的缓冲区如-read_buffer_单次读满-4kb-会怎么办), [专题 01 (Q13)](./01_network_asio.md#q13-既然已经有了能动态扩容的-cumulative_buf_为什么很多网络库还要加一层固定大小的-read_buffer_-中转), [专题 01 (Q14)](./01_network_asio.md#q14-当前实现中-read_buffer_-不也是每个连接-4kb-吗中转写法有什么硬伤如何改成零拷贝直读), [专题 01 (Q15)](./01_network_asio.md#q15-在海量高并发c100kc1000k场景下工业级真正极度省内存的-socket-接收缓冲应该怎么设计)
   - 异步写线程安全与 `asio::post` 队列串行化：[专题 01 (Q9)](./01_network_asio.md#q9-task-13-中为什么-sendpacketbytebuffer-buf-只有一个参数数据已经在-buf-中了吗async_write-会做什么), [专题 01 (Q10)](./01_network_asio.md#q10-为什么-tcpsessionsendpacket-要用-asiopost这个-post-该如何理解)
+  - 端口冲突排查与微服务端口治理：[专题 01 (Q17)](./01_network_asio.md#q17-服务启动时报端口被占用address-already-in-use--wsaeaddrinuse-9810048怎么办如何排查占用进程修改集群端口以及在-linuxwindowsdocker-与高可用热更中如何设计端口与地址治理机制)
 - **现代 C++ 语言特性与内存管理**：
   - 移动语义值传递 (Pass-by-value) 与参数优化：[专题 02 (Q1)](./02_modern_cpp_memory.md#q1-为什么-stdmove--传值可以避免拷贝stdmove--传引用const--或-不行吗), [专题 02 (Q6)](./02_modern_cpp_memory.md#q6-解析数据包字段时为什么-const-stdstring-host-用常引用而-int32_t-和-uint16_t-却直接按值拷贝)
   - 智能指针所有权哲学与弱指针 `weak_ptr` 控制块双计数：[专题 02 (Q8)](./02_modern_cpp_memory.md#q8-loginhandler-调用-playhandleronplayerjoinsession-为什么不用增加引用计数到底什么时候应该增加计数), [专题 02 (Q10)](./02_modern_cpp_memory.md#q10-深入现代-c-智能指针什么是-stdweak_ptr底层控制块原理是什么在工业级架构中为什么以及何时必须使用它)
@@ -125,6 +126,7 @@ flowchart TD
 - [Q14: 当前实现中 read_buffer_ 不也是每个连接 4KB 吗？中转写法有什么硬伤？如何改成零拷贝直读？](./01_network_asio.md#q14-当前实现中-read_buffer_-不也是每个连接-4kb-吗中转写法有什么硬伤如何改成零拷贝直读)
 - [Q15: 在海量高并发（C100K/C1000K）场景下，工业级“真正极度省内存”的 Socket 接收缓冲应该怎么设计？](./01_network_asio.md#q15-在海量高并发c100kc1000k场景下工业级真正极度省内存的-socket-接收缓冲应该怎么设计)
 - [Q16: TcpServer 连接建立时 session_factory_、callbacks_ 和 packet_handler_ 三个分支分别代表什么语义？架构上如何考量？](./01_network_asio.md#q16-tcpserver-连接建立时-session_factory_callbacks_-和-packet_handler_-三个分支分别代表什么语义架构上如何考量)
+- [Q17: 服务启动时报端口被占用（Address already in use / WSAEADDRINUSE 98/10048）怎么办？如何排查占用进程、修改集群端口，以及在 Linux/Windows、Docker 与高可用热更中如何设计端口与地址治理机制？](./01_network_asio.md#q17-服务启动时报端口被占用address-already-in-use--wsaeaddrinuse-9810048怎么办如何排查占用进程修改集群端口以及在-linuxwindowsdocker-与高可用热更中如何设计端口与地址治理机制)
 
 ### 专题 02：[现代 C++ 语言特性与内存架构 (Modern C++ & Memory Architecture)](./02_modern_cpp_memory.md)
 
